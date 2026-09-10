@@ -2,8 +2,13 @@ import { useCallback, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { PROJECT_TABS, TODAY_DATE, blockers } from "@valueflow/domain";
 import type { Dim, ProjectTab } from "@valueflow/domain";
+import { AgentsInputSchema, DevActivitySchema } from "@valueflow/shared";
+import { JsonDocEditor } from "./editors/JsonDocEditor.tsx";
+import { ProjectEditor } from "./editors/ProjectEditor.tsx";
+import { WorkspaceEditor } from "./editors/WorkspaceEditor.tsx";
 import { CmdK } from "./palette/CmdK.tsx";
 import { AgentsPage } from "./pages/AgentsPage.tsx";
+import { DEV_TEMPLATE, DataPage } from "./pages/DataPage.tsx";
 import { DevPage } from "./pages/DevPage.tsx";
 import { GlancePage } from "./pages/GlancePage.tsx";
 import { GovernancePage } from "./pages/GovernancePage.tsx";
@@ -16,8 +21,6 @@ import type { Page, View } from "./router.ts";
 import { useStore } from "./state/store.ts";
 import { Avatar, Kbd, Skeleton, TierBadge, Tip, reset } from "./ui/primitives.tsx";
 import { C, FONT, TIER_COLOR } from "./theme.ts";
-
-const USER = { ini: "AM", name: "Al McKay", first: "Al" };
 
 const TAB_LABEL: Record<ProjectTab, string> = { overview: "Overview", value: "Value", roadmap: "Roadmap", development: "Development", governance: "Governance" };
 
@@ -43,6 +46,12 @@ const ICONS = {
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
       <rect x="2" y="4" width="10" height="7.5" rx="2" />
       <path d="M7 1.8V4M5 7.5h.01M9 7.5h.01M5 10h4" />
+    </svg>
+  ),
+  data: (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <ellipse cx="7" cy="3.5" rx="4.6" ry="1.9" />
+      <path d="M2.4 3.5v7c0 1.05 2.06 1.9 4.6 1.9s4.6-.85 4.6-1.9v-7M2.4 7c0 1.05 2.06 1.9 4.6 1.9s4.6-.85 4.6-1.9" />
     </svg>
   ),
 } as const;
@@ -140,6 +149,7 @@ export function App() {
   const [palette, setPalette] = useState(false);
   const narrow = useNarrow();
   const [lastProject, setLastProject] = useState<string | null>(null);
+  const [editor, setEditor] = useState<{ kind: "project"; pid: string | null } | { kind: "dev"; pid: string } | { kind: "agents" } | { kind: "workspace" } | null>(null);
 
   const state = store.state;
   const projects = state?.projects ?? [];
@@ -164,7 +174,7 @@ export function App() {
     () => ({
       togglePalette: () => setPalette((v) => !v),
       closeAll: () => setPalette(false),
-      goPage: (page: "glance" | "portfolio" | "agents") => go(page, null),
+      goPage: (page: "glance" | "portfolio" | "agents" | "data") => go(page, null),
       goTab: (tab: ProjectTab) => {
         const pid = view.projectId ?? lastProject ?? projects[0]?.id;
         if (pid) openProject(pid, tab);
@@ -185,9 +195,66 @@ export function App() {
     return <LoadingShell />;
   }
 
+  const user = state.workspace.user;
+  const firstName = user.name.split(/\s+/)[0] ?? user.name;
+  const closeEditor = () => setEditor(null);
+
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: C.bg, color: C.text, fontFamily: FONT, fontSize: 14 }}>
       {palette && <CmdK projects={projects} go={go} onClose={() => setPalette(false)} />}
+      {editor?.kind === "project" && (
+        <ProjectEditor
+          project={editor.pid ? (projects.find((p) => p.id === editor.pid) ?? null) : null}
+          projects={projects}
+          onSave={(input, isNew) => {
+            void store.saveProject(input, isNew);
+            closeEditor();
+            if (isNew) openProject(input.id);
+          }}
+          onDelete={(pid) => {
+            void store.deleteProject(pid);
+            closeEditor();
+            go("portfolio", null);
+          }}
+          onClose={closeEditor}
+        />
+      )}
+      {editor?.kind === "dev" && (
+        <JsonDocEditor
+          title={`Development activity — ${projects.find((p) => p.id === editor.pid)?.name ?? editor.pid}`}
+          help="Stats, repositories, pull requests, builds, and contributors as mirrored from CI and source control. Percentages are 0–100."
+          value={state.dev[editor.pid] ?? DEV_TEMPLATE}
+          schema={DevActivitySchema}
+          onSave={(doc) => {
+            void store.saveDev(editor.pid, doc);
+            closeEditor();
+          }}
+          onClose={closeEditor}
+        />
+      )}
+      {editor?.kind === "agents" && (
+        <JsonDocEditor
+          title="Agents"
+          help={`One entry per workspace agent; sessions link to a project id (${projects.map((p) => p.id).join(", ")}) and a tab.`}
+          value={state.agents}
+          schema={AgentsInputSchema}
+          onSave={(agents) => {
+            void store.saveAgents(agents);
+            closeEditor();
+          }}
+          onClose={closeEditor}
+        />
+      )}
+      {editor?.kind === "workspace" && (
+        <WorkspaceEditor
+          workspace={state.workspace}
+          onSave={(w) => {
+            void store.saveWorkspace(w);
+            closeEditor();
+          }}
+          onClose={closeEditor}
+        />
+      )}
       {!narrow && (
         <aside style={{ width: 232, flexShrink: 0, borderRight: `1px solid ${C.line}`, padding: "14px 10px", display: "flex", flexDirection: "column" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px 12px" }}>
@@ -210,18 +277,24 @@ export function App() {
           <NavItem label="Glance" icon="glance" keys={["g", "g"]} active={view.page === "glance"} onClick={() => go("glance", null)} />
           <NavItem label="Portfolio" icon="portfolio" keys={["g", "p"]} active={view.page === "portfolio"} onClick={() => go("portfolio", null)} />
           <NavItem label="Agents" icon="agents" keys={["g", "a"]} active={view.page === "agents"} onClick={() => go("agents", null)} />
+          <NavItem label="Data" icon="data" active={view.page === "data"} onClick={() => go("data", null)} />
           <div style={{ padding: "16px 8px 6px", fontSize: 11, color: C.dim, letterSpacing: "0.06em", textTransform: "uppercase" }}>Projects</div>
           {projects.map((p) => (
             <NavItem key={p.id} label={p.name} dot={p.tier ? TIER_COLOR[p.tier] : C.dim} active={view.projectId === p.id} onClick={() => openProject(p.id)} />
           ))}
           <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 8px 2px", borderTop: `1px solid ${C.line}` }}>
-            <Avatar ini={USER.ini} size={22} />
-            <span style={{ fontSize: 12, color: C.mut, flex: 1 }}>{USER.name}</span>
-            <Tip label="Online">
+          <Tip label="Workspace settings" side="right" style={{ display: "flex", width: "100%" }}>
+            <button
+              type="button"
+              className="vf-nav"
+              onClick={() => setEditor({ kind: "workspace" })}
+              style={{ ...reset, display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "10px 8px 6px", borderTop: `1px solid ${C.line}`, borderRadius: 0 }}
+            >
+              <Avatar ini={user.ini} size={22} />
+              <span style={{ fontSize: 12, color: C.mut, flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.name}</span>
               <span style={{ width: 7, height: 7, borderRadius: "50%", background: C.green, display: "block" }} />
-            </Tip>
-          </div>
+            </button>
+          </Tip>
         </aside>
       )}
 
@@ -232,7 +305,7 @@ export function App() {
               <h1 style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em", margin: 0 }}>Glance</h1>
               <span style={{ fontSize: 12, color: C.dim }}>{todayLabel()}</span>
             </Header>
-            <GlancePage state={state} userName={USER.first} onOpen={openProject} />
+            <GlancePage state={state} userName={firstName} onOpen={openProject} />
           </>
         ) : view.page === "agents" ? (
           <>
@@ -240,14 +313,29 @@ export function App() {
               <h1 style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em", margin: 0 }}>Agents</h1>
               <span style={{ fontSize: 12, color: C.dim }}>{state.agents.length} workspace agents</span>
             </Header>
-            <AgentsPage agents={state.agents} projects={projects} onOpen={openProject} />
+            <AgentsPage agents={state.agents} projects={projects} onOpen={openProject} onEdit={() => setEditor({ kind: "agents" })} />
           </>
         ) : view.page === "portfolio" ? (
           <>
             <Header>
               <h1 style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em", margin: 0 }}>AI project portfolio</h1>
             </Header>
-            <PortfolioPage projects={projects} onOpen={(id) => openProject(id)} />
+            <PortfolioPage projects={projects} onOpen={(id) => openProject(id)} onNew={() => setEditor({ kind: "project", pid: null })} />
+          </>
+        ) : view.page === "data" ? (
+          <>
+            <Header>
+              <h1 style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em", margin: 0 }}>Data</h1>
+              <span style={{ fontSize: 12, color: C.dim }}>workspace settings and external-system documents</span>
+            </Header>
+            <DataPage
+              state={state}
+              onWorkspace={(w) => void store.saveWorkspace(w)}
+              onAgents={(a) => void store.saveAgents(a)}
+              onFeed={(f) => void store.saveFeed(f)}
+              onUpcoming={(u) => void store.saveUpcoming(u)}
+              onDev={(pid, d) => void store.saveDev(pid, d)}
+            />
           </>
         ) : proj ? (
           <>
@@ -276,7 +364,7 @@ export function App() {
                 ))}
               </div>
             </header>
-            {view.tab === "overview" && <OverviewPage p={proj} />}
+            {view.tab === "overview" && <OverviewPage p={proj} onEdit={() => setEditor({ kind: "project", pid: proj.id })} />}
             {view.tab === "value" && (
               <ValuePage
                 p={proj}
@@ -290,9 +378,23 @@ export function App() {
                 onSaveTargets={(pid, t) => void store.saveTargets(pid, t)}
               />
             )}
-            {view.tab === "roadmap" && <RoadmapPage p={proj} releases={state.releases[proj.id] ?? []} />}
-            {view.tab === "development" && <DevPage d={state.dev[proj.id]} />}
-            {view.tab === "governance" && <GovernancePage p={proj} onSaveGov={(pid, item) => void store.saveGovernance(pid, item)} />}
+            {view.tab === "roadmap" && (
+              <RoadmapPage
+                p={proj}
+                releases={state.releases[proj.id] ?? []}
+                onSaveRelease={(pid, rel, isNew) => void store.saveRelease(pid, rel, isNew)}
+                onDeleteRelease={(pid, rid) => void store.deleteRelease(pid, rid)}
+              />
+            )}
+            {view.tab === "development" && <DevPage d={state.dev[proj.id]} onEdit={() => setEditor({ kind: "dev", pid: proj.id })} />}
+            {view.tab === "governance" && (
+              <GovernancePage
+                p={proj}
+                defaultOwner={user.ini}
+                onSaveGov={(pid, item, isNew) => void store.saveGovernance(pid, item, isNew)}
+                onDeleteGov={(pid, gid) => void store.deleteGovernance(pid, gid)}
+              />
+            )}
           </>
         ) : (
           <div style={{ padding: "16px 20px", fontSize: 13, color: C.dim }}>Project not found.</div>

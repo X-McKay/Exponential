@@ -5,9 +5,19 @@ import { GovEditor } from "../editors/GovEditor.tsx";
 import { Avatar, Caret, Chip, Kpi, SectionCard, ghostBtn, reset } from "../ui/primitives.tsx";
 import { C, GSTATUS_COLOR, TIER_COLOR, govChipTone, readinessColor } from "../theme.ts";
 
-export function GovernancePage({ p, onSaveGov }: { p: Project; onSaveGov: (pid: string, item: GovernanceItem) => void }) {
+export function GovernancePage({
+  p,
+  defaultOwner,
+  onSaveGov,
+  onDeleteGov,
+}: {
+  p: Project;
+  defaultOwner: string;
+  onSaveGov: (pid: string, item: GovernanceItem, isNew: boolean) => void;
+  onDeleteGov: (pid: string, gid: string) => void;
+}) {
   const [open, setOpen] = useState<string | null>(null);
-  const [editG, setEditG] = useState<GovernanceItem | null>(null);
+  const [editG, setEditG] = useState<{ item: GovernanceItem | null; category?: string } | null>(null);
   const cats = [...new Set(p.governance.map((g) => g.cat))];
   const r = readiness(p);
   const counts = govCounts(p);
@@ -44,6 +54,16 @@ export function GovernancePage({ p, onSaveGov }: { p: Project; onSaveGov: (pid: 
         </div>
       )}
 
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+        <button type="button" className="vf-ghost" onClick={() => setEditG({ item: null })} style={{ ...ghostBtn, color: C.indigoHi }}>
+          + New item
+        </button>
+      </div>
+      {cats.length === 0 && (
+        <div style={{ fontSize: 12, color: C.dim, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "24px 14px", textAlign: "center" }}>
+          No governance items yet. Readiness stays at 0% until at least one required item exists.
+        </div>
+      )}
       {cats.map((cat) => {
         const items = p.governance.filter((g) => g.cat === cat);
         const done = items.filter((g) => g.status === "approved" || g.status === "na").length;
@@ -53,8 +73,13 @@ export function GovernancePage({ p, onSaveGov }: { p: Project; onSaveGov: (pid: 
             title={cat}
             pad="0"
             right={
-              <span style={{ fontSize: 12, color: C.dim, fontVariantNumeric: "tabular-nums" }}>
-                {done}/{items.length}
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 12, color: C.dim }}>
+                  {done}/{items.length}
+                </span>
+                <button type="button" className="vf-ghost" onClick={() => setEditG({ item: null, category: cat })} style={{ ...ghostBtn, height: 24 }}>
+                  + Add
+                </button>
               </span>
             }
           >
@@ -81,7 +106,7 @@ export function GovernancePage({ p, onSaveGov }: { p: Project; onSaveGov: (pid: 
                     <div style={{ padding: "0 14px 12px 32px" }}>
                       <div style={{ fontSize: 13, lineHeight: 1.6, color: C.mut }}>{g.detail}</div>
                       {g.link && <div style={{ fontSize: 12, color: C.indigoHi, marginTop: 6, cursor: "pointer" }}>{g.link} ↗</div>}
-                      <button type="button" onClick={() => setEditG(g)} className="vf-ghost" style={{ ...ghostBtn, marginTop: 8 }}>
+                      <button type="button" onClick={() => setEditG({ item: g })} className="vf-ghost" style={{ ...ghostBtn, marginTop: 8 }}>
                         Edit item
                       </button>
                     </div>
@@ -94,10 +119,18 @@ export function GovernancePage({ p, onSaveGov }: { p: Project; onSaveGov: (pid: 
       })}
       {editG && (
         <GovEditor
-          item={editG}
-          onSave={(item) => {
-            onSaveGov(p.id, item);
+          project={p}
+          item={editG.item}
+          category={editG.category}
+          defaultOwner={defaultOwner}
+          onSave={(item, isNew) => {
+            onSaveGov(p.id, item, isNew);
             setEditG(null);
+          }}
+          onDelete={(gid) => {
+            onDeleteGov(p.id, gid);
+            setEditG(null);
+            if (open?.endsWith(gid)) setOpen(null);
           }}
           onClose={() => setEditG(null)}
         />

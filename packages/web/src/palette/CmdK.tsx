@@ -4,7 +4,7 @@ import { CHORDS } from "../router.ts";
 import { Kbd, reset } from "../ui/primitives.tsx";
 import { C } from "../theme.ts";
 
-type Go = (page: "glance" | "portfolio" | "agents" | "project", projectId: string | null, tab?: ProjectTab) => void;
+type Go = (page: "glance" | "portfolio" | "agents" | "data" | "project", projectId: string | null, tab?: ProjectTab) => void;
 
 interface Item {
   id: string;
@@ -46,6 +46,7 @@ const buildItems = (projects: Project[], go: Go): Item[] => [
   { id: "glance", label: "Glance", hint: "g g", group: "Pages", act: () => go("glance", null) },
   { id: "portfolio", label: "Portfolio", hint: "g p", group: "Pages", act: () => go("portfolio", null) },
   { id: "agents", label: "Agents", hint: "g a", group: "Pages", act: () => go("agents", null) },
+  { id: "data", label: "Data & settings", hint: "", group: "Pages", act: () => go("data", null) },
   ...projects.map((p): Item => ({ id: `p:${p.id}`, label: p.name, hint: p.key, group: "Projects", act: () => go("project", p.id, "overview") })),
   ...projects.flatMap((p): Item[] =>
     TABS.map(([t, tab]): Item => ({ id: `p:${p.id}:${tab}`, label: `${p.name} › ${t}`, hint: p.key, group: "Project views", act: () => go("project", p.id, tab) })),
@@ -166,7 +167,7 @@ export function CmdK({ projects, go, onClose }: { projects: Project[]; go: Go; o
                   }}
                 >
                   <span style={{ fontSize: 13, color: i === sel ? C.text : "#C6CAD6", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.label}</span>
-                  {it.group === "Pages" || (it.group === "Recent" && it.hint.startsWith("g ")) ? (
+                  {it.hint === "" ? null : it.group === "Pages" || (it.group === "Recent" && it.hint.startsWith("g ")) ? (
                     <span style={{ display: "inline-flex", gap: 3 }}>
                       {it.hint.split(" ").map((k, ki) => (
                         <Kbd key={ki}>{k}</Kbd>

@@ -1,12 +1,28 @@
 import { blockers, readiness, realized, shippedCount } from "@valueflow/domain";
 import type { Project } from "@valueflow/domain";
-import { Avatar, Chip, Ring, TierBadge, reset } from "../ui/primitives.tsx";
+import { Avatar, Chip, Ring, TierBadge, ghostBtn, reset } from "../ui/primitives.tsx";
 import { C, readinessColor } from "../theme.ts";
 
-export function PortfolioPage({ projects, onOpen }: { projects: Project[]; onOpen: (id: string) => void }) {
+export function PortfolioPage({ projects, onOpen, onNew }: { projects: Project[]; onOpen: (id: string) => void; onNew: () => void }) {
   return (
     <div style={{ padding: "18px 20px 30px" }}>
-      <div style={{ fontSize: 13, color: C.mut, marginBottom: 14 }}>{projects.length} AI projects · value tied to performance gates · governance tracked per project</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+        <span style={{ fontSize: 13, color: C.mut, flex: 1 }}>
+          {projects.length} AI project{projects.length === 1 ? "" : "s"} · value tied to performance gates · governance tracked per project
+        </span>
+        <button type="button" className="vf-ghost" onClick={onNew} style={{ ...ghostBtn, color: C.indigoHi }}>
+          + New project
+        </button>
+      </div>
+      {projects.length === 0 && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "48px 14px", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12 }}>
+          <div style={{ fontSize: 13, color: C.text }}>No projects yet</div>
+          <div style={{ fontSize: 12, color: C.dim, textAlign: "center", maxWidth: 380 }}>Create a project, then add milestones with eval gates, governance items, and releases.</div>
+          <button type="button" className="vf-ghost" onClick={onNew} style={{ ...ghostBtn, color: C.indigoHi }}>
+            + New project
+          </button>
+        </div>
+      )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
         {projects.map((p) => {
           const r = readiness(p);

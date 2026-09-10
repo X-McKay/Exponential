@@ -2,10 +2,22 @@ import { useState } from "react";
 import { MONTHS, TODAY, nextRelease, releaseState } from "@valueflow/domain";
 import type { Project, Release } from "@valueflow/domain";
 import { RoadmapTimeline } from "../charts/RoadmapTimeline.tsx";
-import { Caret, Chip, Kpi, SectionCard, reset } from "../ui/primitives.tsx";
+import { ReleaseEditor } from "../editors/ReleaseEditor.tsx";
+import { Caret, Chip, Kpi, SectionCard, Tip, ghostBtn, reset } from "../ui/primitives.tsx";
 import { C, releaseToneColor } from "../theme.ts";
 
-export function RoadmapPage({ p, releases }: { p: Project; releases: Release[] }) {
+export function RoadmapPage({
+  p,
+  releases,
+  onSaveRelease,
+  onDeleteRelease,
+}: {
+  p: Project;
+  releases: Release[];
+  onSaveRelease: (pid: string, rel: Release, isNew: boolean) => void;
+  onDeleteRelease: (pid: string, rid: string) => void;
+}) {
+  const [editing, setEditing] = useState<"new" | string | null>(null);
   const states = releases.map((r) => releaseState(r, p));
   const [picked, setPicked] = useState<string | null>(() => releases.find((_, i) => states[i]?.label !== "Shipped")?.id ?? releases[0]?.id ?? null);
 
@@ -21,7 +33,18 @@ export function RoadmapPage({ p, releases }: { p: Project; releases: Release[] }
         <Kpi label="Open go-live criteria" value={openCriteria} sub="across all releases" color={openCriteria > 0 ? C.amber : C.green} />
       </div>
 
-      <SectionCard title="Delivery timeline" pad="10px 8px 4px" right={<span style={{ fontSize: 11, color: C.dim }}>◆ release · ● milestone gate · bars = delivery window</span>}>
+      <SectionCard
+        title="Delivery timeline"
+        pad="10px 8px 4px"
+        right={
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 11, color: C.dim }}>◆ release · ● milestone gate · bars = delivery window</span>
+            <button type="button" className="vf-ghost" onClick={() => setEditing("new")} style={{ ...ghostBtn, height: 24, color: C.indigoHi }}>
+              + New release
+            </button>
+          </span>
+        }
+      >
         <RoadmapTimeline p={p} releases={releases} states={states} onPick={setPicked} picked={picked} />
         <div style={{ display: "flex", gap: 16, padding: "6px 8px 8px", fontSize: 11, color: C.dim, flexWrap: "wrap" }}>
           <span>
@@ -65,6 +88,30 @@ export function RoadmapPage({ p, releases }: { p: Project; releases: Release[] }
                 {st.met}/{st.total} criteria
               </span>
               <Chip tone={st.label === "Ready" || st.label === "Shipped" ? "good" : st.label === "Blocked" ? "bad" : "warn"}>{st.label}</Chip>
+              <Tip label="Edit release">
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Edit release"
+                  className="vf-ghost"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEditing(r.id);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setEditing(r.id);
+                    }
+                  }}
+                  style={{ ...ghostBtn, width: 26, padding: 0, justifyContent: "center", color: C.dim }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M8.5 1.5l2 2L4 10H2V8z" />
+                  </svg>
+                </span>
+              </Tip>
               <Caret open={isOpen} />
             </button>
             {isOpen && (
@@ -89,7 +136,33 @@ export function RoadmapPage({ p, releases }: { p: Project; releases: Release[] }
           </div>
         );
       })}
-      {releases.length === 0 && <div style={{ fontSize: 13, color: C.dim }}>No releases defined for this project.</div>}
+      {releases.length === 0 && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "32px 14px", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8 }}>
+          <div style={{ fontSize: 13, color: C.text }}>No releases yet</div>
+          <div style={{ fontSize: 12, color: C.dim, textAlign: "center", maxWidth: 380 }}>A release ships milestones and goes live only when every criterion is met against live state.</div>
+          <button type="button" className="vf-ghost" onClick={() => setEditing("new")} style={{ ...ghostBtn, color: C.indigoHi }}>
+            + New release
+          </button>
+        </div>
+      )}
+      {editing && (
+        <ReleaseEditor
+          project={p}
+          releases={releases}
+          release={editing === "new" ? null : (releases.find((r) => r.id === editing) ?? null)}
+          onSave={(rel, isNew) => {
+            onSaveRelease(p.id, rel, isNew);
+            setEditing(null);
+            setPicked(rel.id);
+          }}
+          onDelete={(rid) => {
+            onDeleteRelease(p.id, rid);
+            setEditing(null);
+            if (picked === rid) setPicked(null);
+          }}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </div>
   );
 }

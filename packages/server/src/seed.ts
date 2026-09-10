@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { AGENTS, DEV, FEED, PROJECTS, RELEASES, UPCOMING, isMeasurable } from "@valueflow/domain";
+import { AGENTS, DEV, FEED, PROJECTS, RELEASES, UPCOMING, WORKSPACE, isMeasurable } from "@valueflow/domain";
 import type { AppState, Metric } from "@valueflow/domain";
 
 /** "Today" for seeded history — matches the calendar's Sep 2026. */
@@ -38,7 +38,7 @@ export const trajectory = (metric: Pick<Metric, "current">, seed: number, n = RE
 export const isSeeded = (db: Database): boolean =>
   (db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM projects").get()?.n ?? 0) > 0;
 
-export const fixtureState = (): AppState => ({ projects: PROJECTS, releases: RELEASES, dev: DEV, agents: AGENTS, feed: FEED, upcoming: UPCOMING });
+export const fixtureState = (): AppState => ({ workspace: WORKSPACE, projects: PROJECTS, releases: RELEASES, dev: DEV, agents: AGENTS, feed: FEED, upcoming: UPCOMING });
 
 export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_NOW): void => {
   const q = {
@@ -56,9 +56,11 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
     agent: db.query("INSERT INTO agents (id, sort, doc) VALUES (?,?,?)"),
     feed: db.query("INSERT INTO feed_days (sort, doc) VALUES (?,?)"),
     upcoming: db.query("INSERT INTO upcoming (sort, doc) VALUES (?,?)"),
+    workspace: db.query("INSERT OR REPLACE INTO workspace (id, user_name, user_ini) VALUES (1, ?, ?)"),
   };
 
   db.transaction(() => {
+    q.workspace.run(state.workspace.user.name, state.workspace.user.ini);
     state.projects.forEach((p, pi) => {
       q.project.run(p.id, p.key, p.name, p.stage, p.description, p.tier, p.committee?.date ?? null, p.committee?.ref ?? null, p.targets.fte, p.targets.time, pi);
       p.repos.forEach((r, i) => q.repo.run(p.id, r.name, r.url, i));

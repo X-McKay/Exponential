@@ -176,8 +176,48 @@ export const burnupSeries = (milestones: Milestone[], dim: Dim, today = TODAY): 
 
 // ---- ids ----------------------------------------------------------------
 
+const numberIn = (id: string): number => parseInt((id.match(/\d+/) ?? ["0"])[0] ?? "0", 10);
+
 /** Next milestone id in a project: MS-<max existing number + 1>. */
-export const nextMilestoneId = (p: Pick<Project, "milestones">): string => {
-  const nums = p.milestones.map((m) => parseInt((m.id.match(/\d+/) ?? ["0"])[0] ?? "0", 10));
-  return `MS-${Math.max(0, ...nums) + 1}`;
+export const nextMilestoneId = (p: Pick<Project, "milestones">): string => `MS-${Math.max(0, ...p.milestones.map((m) => numberIn(m.id))) + 1}`;
+
+/** Next release id in a project: R<max existing number + 1>. */
+export const nextReleaseId = (releases: Pick<Release, "id">[]): string => `R${Math.max(0, ...releases.map((r) => numberIn(r.id))) + 1}`;
+
+/** Next project key across the portfolio: PRJ-<max existing number + 1>. */
+export const nextProjectKey = (projects: Pick<Project, "key">[]): string => `PRJ-${Math.max(0, ...projects.map((p) => numberIn(p.key))) + 1}`;
+
+/**
+ * URL-safe id derived from a name ("Client onboarding" → "client-onboarding"),
+ * suffixed with -2, -3… until it is not in `taken`. Falls back to `fallback`
+ * when the name has no usable characters.
+ */
+export const slugId = (name: string, taken: Iterable<string>, fallback = "item"): string => {
+  const base =
+    name
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || fallback;
+  const used = new Set(taken);
+  if (!used.has(base)) return base;
+  let n = 2;
+  while (used.has(`${base}-${n}`)) n += 1;
+  return `${base}-${n}`;
+};
+
+/** Initials for a person's name: "Dan K." → "DK", "R. Singh" → "RS", one word → first two letters. */
+export const initialsOf = (name: string): string => {
+  const words = name
+    .split(/\s+/)
+    .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ""))
+    .filter(Boolean);
+  const first = words[0] ?? "";
+  if (words.length === 1) return first.slice(0, 2).toUpperCase();
+  return words
+    .slice(0, 3)
+    .map((w) => w[0] ?? "")
+    .join("")
+    .toUpperCase();
 };

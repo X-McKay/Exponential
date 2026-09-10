@@ -237,10 +237,22 @@ export interface Upcoming {
   release?: { pid: string; rid: string };
 }
 
+// ---- workspace ----------------------------------------------------------
+
+export interface WorkspaceUser {
+  name: string;
+  ini: string;
+}
+
+export interface Workspace {
+  user: WorkspaceUser;
+}
+
 // ---- aggregate ----------------------------------------------------------
 
 /** Everything the client needs to render every page. All facts, no derived values. */
 export interface AppState {
+  workspace: Workspace;
   projects: Project[];
   releases: Record<string, Release[]>;
   dev: Record<string, DevActivity>;

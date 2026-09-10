@@ -92,7 +92,7 @@ describe("rankBlocks / composeGlance", () => {
     expect(find(blocks, "ready_release")!.title).toBe("R1 Shadow mode — all go-live criteria met");
   });
   test("empty state still composes without throwing", () => {
-    const empty: AppState = { projects: [], releases: {}, dev: {}, agents: [], feed: [], upcoming: [] };
+    const empty: AppState = { workspace: { user: { name: "You", ini: "ME" } }, projects: [], releases: {}, dev: {}, agents: [], feed: [], upcoming: [] };
     expect(composeGlance(empty)).toEqual([]);
     expect(composeGlancePage(empty).narrative).toEqual(["No releases are currently blocked."]);
   });

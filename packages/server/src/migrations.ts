@@ -111,6 +111,11 @@ const MIGRATIONS: readonly string[] = [
   CREATE TABLE feed_days (sort INTEGER PRIMARY KEY, doc TEXT NOT NULL);
   CREATE TABLE upcoming (sort INTEGER PRIMARY KEY, doc TEXT NOT NULL);
   `,
+  // Workspace-level facts: the signed-in user shown in the sidebar and greeting.
+  `
+  CREATE TABLE workspace (id INTEGER PRIMARY KEY CHECK (id = 1), user_name TEXT NOT NULL, user_ini TEXT NOT NULL);
+  INSERT INTO workspace (id, user_name, user_ini) VALUES (1, 'Al McKay', 'AM');
+  `,
 ];
 
 export const migrate = (db: Database): void => {

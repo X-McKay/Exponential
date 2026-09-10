@@ -5,20 +5,46 @@
 
 import type { Database } from "bun:sqlite";
 import { composeGlancePage } from "@valueflow/domain";
-import { GovernanceInputSchema, MilestoneInputSchema, ReadingInputSchema, TargetsInputSchema, patterns } from "@valueflow/shared";
+import {
+  AgentsInputSchema,
+  DevActivitySchema,
+  FeedInputSchema,
+  GovernanceInputSchema,
+  GovernanceItemInputSchema,
+  MilestoneInputSchema,
+  ProjectInputSchema,
+  ReadingInputSchema,
+  ReleaseInputSchema,
+  TargetsInputSchema,
+  UpcomingInputSchema,
+  WorkspaceInputSchema,
+  patterns,
+} from "@valueflow/shared";
 import type { ZodTypeAny, z } from "zod";
 import {
   Conflict,
   NotFound,
+  createGovernanceItem,
+  deleteGovernanceItem,
   deleteMilestone,
+  deleteProject,
+  deleteRelease,
   findMilestone,
   findProject,
   listReadings,
   loadState,
+  loadWorkspace,
   recordReading,
+  setAgents,
+  setDevActivity,
+  setFeed,
   setTargets,
+  setUpcoming,
+  setWorkspace,
   updateGovernance,
   upsertMilestone,
+  upsertProject,
+  upsertRelease,
 } from "./repo.ts";
 
 type Params = Record<string, string>;
@@ -83,6 +109,27 @@ export const createApp = (db: Database): App => {
   on("GET", patterns.state, () => json(loadState(db)));
   on("GET", patterns.glance, () => json(composeGlancePage(loadState(db))));
 
+  on("PUT", patterns.workspace, async (req) => {
+    setWorkspace(db, await parseBody(req, WorkspaceInputSchema));
+    return json(loadWorkspace(db));
+  });
+
+  on("POST", patterns.projects, async (req) => {
+    const body = await parseBody(req, ProjectInputSchema);
+    upsertProject(db, body, "create");
+    return json(findProject(loadState(db), body.id), 201);
+  });
+  on("PUT", patterns.project, async (req, params) => {
+    const body = await parseBody(req, ProjectInputSchema);
+    if (body.id !== p(params, "pid")) throw new HttpError(400, "project id in body must match the URL");
+    upsertProject(db, body, "update");
+    return json(findProject(loadState(db), body.id));
+  });
+  on("DELETE", patterns.project, (_req, params) => {
+    deleteProject(db, p(params, "pid"));
+    return json({ ok: true });
+  });
+
   on("GET", patterns.readings, (_req, params) => json(listReadings(db, p(params, "pid"), p(params, "mid"), p(params, "xid"))));
   on("PUT", patterns.readings, async (req, params) => {
     const body = await parseBody(req, ReadingInputSchema);
@@ -118,6 +165,51 @@ export const createApp = (db: Database): App => {
     updateGovernance(db, p(params, "pid"), p(params, "gid"), body);
     const item = findProject(loadState(db), p(params, "pid")).governance.find((g) => g.id === p(params, "gid"));
     return json(item);
+  });
+  on("POST", patterns.governanceItems, async (req, params) => {
+    const body = await parseBody(req, GovernanceItemInputSchema);
+    createGovernanceItem(db, p(params, "pid"), body);
+    const item = findProject(loadState(db), p(params, "pid")).governance.find((g) => g.id === body.id);
+    return json(item, 201);
+  });
+  on("DELETE", patterns.governance, (_req, params) => {
+    deleteGovernanceItem(db, p(params, "pid"), p(params, "gid"));
+    return json({ ok: true });
+  });
+
+  const releaseOf = (pid: string, rid: string) => (loadState(db).releases[pid] ?? []).find((r) => r.id === rid);
+  on("POST", patterns.releases, async (req, params) => {
+    const body = await parseBody(req, ReleaseInputSchema);
+    upsertRelease(db, p(params, "pid"), body, "create");
+    return json(releaseOf(p(params, "pid"), body.id), 201);
+  });
+  on("PUT", patterns.release, async (req, params) => {
+    const body = await parseBody(req, ReleaseInputSchema);
+    if (body.id !== p(params, "rid")) throw new HttpError(400, "release id in body must match the URL");
+    upsertRelease(db, p(params, "pid"), body, "update");
+    return json(releaseOf(p(params, "pid"), body.id));
+  });
+  on("DELETE", patterns.release, (_req, params) => {
+    deleteRelease(db, p(params, "pid"), p(params, "rid"));
+    return json({ ok: true });
+  });
+
+  on("PUT", patterns.dev, async (req, params) => {
+    const body = await parseBody(req, DevActivitySchema);
+    setDevActivity(db, p(params, "pid"), body);
+    return json(loadState(db).dev[p(params, "pid")]);
+  });
+  on("PUT", patterns.agents, async (req) => {
+    setAgents(db, await parseBody(req, AgentsInputSchema));
+    return json(loadState(db).agents);
+  });
+  on("PUT", patterns.feed, async (req) => {
+    setFeed(db, await parseBody(req, FeedInputSchema));
+    return json(loadState(db).feed);
+  });
+  on("PUT", patterns.upcoming, async (req) => {
+    setUpcoming(db, await parseBody(req, UpcomingInputSchema));
+    return json(loadState(db).upcoming);
   });
 
   const handleApi = async (req: Request): Promise<Response | null> => {

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { PROJECT_TABS } from "@valueflow/domain";
 import type { ProjectTab } from "@valueflow/domain";
 
-export type Page = "glance" | "portfolio" | "agents" | "project";
+export type Page = "glance" | "portfolio" | "agents" | "data" | "project";
 
 export interface View {
   page: Page;
@@ -24,6 +24,8 @@ export const parseHash = (hash: string): View => {
       return { page: "portfolio", projectId: null, tab: "overview" };
     case "agents":
       return { page: "agents", projectId: null, tab: "overview" };
+    case "data":
+      return { page: "data", projectId: null, tab: "overview" };
     case "project":
       if (a) return { page: "project", projectId: decodeURIComponent(a), tab: b && isTab(b) ? b : "overview" };
       return HOME;
@@ -40,6 +42,8 @@ export const toHash = (v: View): string => {
       return "#/portfolio";
     case "agents":
       return "#/agents";
+    case "data":
+      return "#/data";
     case "project":
       return `#/project/${encodeURIComponent(v.projectId ?? "")}/${v.tab}`;
   }
@@ -124,6 +128,7 @@ export const useKeyboard = (h: KeyboardHandlers): boolean => {
           case "glance":
           case "portfolio":
           case "agents":
+          case "data":
             h.goPage(chord.target);
             break;
           case "overview":

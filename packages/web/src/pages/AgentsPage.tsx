@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AGENT_STATUS_LABEL, SESSION_ICON } from "@valueflow/domain";
 import type { Agent, Project, ProjectTab } from "@valueflow/domain";
-import { Avatar, Caret, Chip, Kpi, SectionCard, reset } from "../ui/primitives.tsx";
+import { Avatar, Caret, Chip, Kpi, SectionCard, ghostBtn, reset } from "../ui/primitives.tsx";
 import { AGENT_STATUS, C, SESSION_COLOR } from "../theme.ts";
 
 function AgentAvatar({ a, size = 26 }: { a: Agent; size?: number }) {
@@ -34,7 +34,7 @@ const shortProjectName = (p: Project | undefined): string => {
   return SHORT_NAMES[p.id] ?? p.name.split(" ").slice(0, 2).join(" ");
 };
 
-export function AgentsPage({ agents, projects, onOpen }: { agents: Agent[]; projects: Project[]; onOpen: (id: string, tab: ProjectTab) => void }) {
+export function AgentsPage({ agents, projects, onOpen, onEdit }: { agents: Agent[]; projects: Project[]; onOpen: (id: string, tab: ProjectTab) => void; onEdit: () => void }) {
   const [open, setOpen] = useState<string | null>(agents.find((a) => a.id === "audie")?.id ?? agents[0]?.id ?? null);
   const totalRuns = agents.reduce((a, x) => a + x.runs, 0);
   const avgSuccess = totalRuns ? Math.round(agents.reduce((a, x) => a + x.success * x.runs, 0) / totalRuns) : 0;
@@ -57,7 +57,15 @@ export function AgentsPage({ agents, projects, onOpen }: { agents: Agent[]; proj
         <Kpi label="Attention flags" value={attention} sub={auditors.length ? `from ${auditors.join(", ")}'s audit scans` : "none raised"} color={C.amber} />
       </div>
 
-      <SectionCard title="Workspace agents" pad="0" right={<span style={{ fontSize: 12, color: C.indigoHi, cursor: "pointer" }}>+ New agent</span>}>
+      <SectionCard
+        title="Workspace agents"
+        pad="0"
+        right={
+          <button type="button" className="vf-ghost" onClick={onEdit} style={{ ...ghostBtn, height: 24, color: C.indigoHi }}>
+            Edit agents
+          </button>
+        }
+      >
         <div style={{ display: "flex", gap: 11, padding: "8px 14px", fontSize: 11, color: C.dim, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.line}` }}>
           <span style={{ width: 26 }} />
           <span style={{ width: 110, flexShrink: 0 }}>Agent</span>

@@ -1,13 +1,29 @@
 import { CHECK_ICON } from "@valueflow/domain";
 import type { DevActivity } from "@valueflow/domain";
 import { CommitBars, PeopleBars } from "../charts/small.tsx";
-import { Avatar, Chip, Kpi, SectionCard } from "../ui/primitives.tsx";
+import { Avatar, Chip, Kpi, SectionCard, ghostBtn } from "../ui/primitives.tsx";
 import { C, CHECK_COLOR, gradeColor } from "../theme.ts";
 
-export function DevPage({ d }: { d: DevActivity | undefined }) {
-  if (!d) return <div style={{ padding: "16px 20px", fontSize: 13, color: C.dim }}>No development activity connected for this project.</div>;
+export function DevPage({ d, onEdit }: { d: DevActivity | undefined; onEdit: () => void }) {
+  if (!d)
+    return (
+      <div style={{ padding: "16px 20px 30px" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "48px 14px", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8 }}>
+          <div style={{ fontSize: 13, color: C.text }}>No development activity connected</div>
+          <div style={{ fontSize: 12, color: C.dim, textAlign: "center", maxWidth: 400 }}>This page mirrors CI and source control. Until an integration feeds it, you can add the data by hand.</div>
+          <button type="button" className="vf-ghost" onClick={onEdit} style={{ ...ghostBtn, color: C.indigoHi }}>
+            Add development data
+          </button>
+        </div>
+      </div>
+    );
   return (
     <div style={{ padding: "16px 20px 30px" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+        <button type="button" className="vf-ghost" onClick={onEdit} style={ghostBtn}>
+          Edit data
+        </button>
+      </div>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
         <Kpi label="Test coverage" value={`${d.stats.coverage}%`} sub="weighted across repos" color={d.stats.coverage >= 80 ? C.green : d.stats.coverage >= 65 ? C.amber : C.red} ring={d.stats.coverage / 100} />
         <Kpi label="Code quality" value={d.stats.quality} sub="static analysis grade" color={gradeColor(d.stats.quality)} />

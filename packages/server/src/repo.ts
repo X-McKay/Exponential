@@ -19,8 +19,21 @@ import type {
   Release,
   RiskTier,
   Upcoming,
+  Workspace,
 } from "@valueflow/domain";
-import type { GovernanceInput, MilestoneInput, TargetsInput } from "@valueflow/shared";
+import type {
+  AgentsInput,
+  DevActivityInput,
+  FeedInput,
+  GovernanceInput,
+  GovernanceItemInput,
+  MilestoneInput,
+  ProjectInput,
+  ReleaseInput,
+  TargetsInput,
+  UpcomingInput,
+  WorkspaceInput,
+} from "@valueflow/shared";
 
 export class NotFound extends Error {
   override name = "NotFound";
@@ -111,6 +124,10 @@ interface CritRow {
 interface DocRow {
   doc: string;
 }
+interface WorkspaceRow {
+  user_name: string;
+  user_ini: string;
+}
 interface DevRow {
   project_id: string;
   doc: string;
@@ -171,7 +188,7 @@ export const loadState = (db: Database): AppState => {
   const crits = groupBy(db.query<CritRow, []>("SELECT * FROM release_criteria ORDER BY sort").all(), (r) => `${r.project_id} ${r.release_id}`);
   const dev = new Map(db.query<DevRow, []>("SELECT * FROM dev_activity").all().map((r) => [r.project_id, JSON.parse(r.doc) as DevActivity]));
 
-  const out: AppState = { projects: [], releases: {}, dev: {}, agents: [], feed: [], upcoming: [] };
+  const out: AppState = { workspace: loadWorkspace(db), projects: [], releases: {}, dev: {}, agents: [], feed: [], upcoming: [] };
   for (const p of projects) {
     const ms: Milestone[] = (milestones.get(p.id) ?? []).map((m) => ({
       id: m.id,
@@ -225,6 +242,15 @@ export const loadState = (db: Database): AppState => {
   out.feed = db.query<DocRow, []>("SELECT doc FROM feed_days ORDER BY sort").all().map((r) => JSON.parse(r.doc) as FeedDay);
   out.upcoming = db.query<DocRow, []>("SELECT doc FROM upcoming ORDER BY sort").all().map((r) => JSON.parse(r.doc) as Upcoming);
   return out;
+};
+
+export const loadWorkspace = (db: Database): Workspace => {
+  const w = db.query<WorkspaceRow, []>("SELECT user_name, user_ini FROM workspace WHERE id = 1").get();
+  return { user: { name: w?.user_name ?? "You", ini: w?.user_ini ?? "ME" } };
+};
+
+export const setWorkspace = (db: Database, w: WorkspaceInput): void => {
+  db.query("INSERT OR REPLACE INTO workspace (id, user_name, user_ini) VALUES (1, ?, ?)").run(w.user.name, w.user.ini);
 };
 
 export const findProject = (state: AppState, pid: string): Project => {
@@ -347,6 +373,37 @@ export const deleteMilestone = (db: Database, pid: string, mid: string): void =>
   db.query("DELETE FROM milestones WHERE project_id = ? AND id = ?").run(pid, mid);
 };
 
+// ---- projects ------------------------------------------------------------
+
+/** Create or replace a project's own facts (details, team, repos, targets). Children are untouched. */
+export const upsertProject = (db: Database, input: ProjectInput, mode: "create" | "update"): void => {
+  const exists = projectExists(db, input.id);
+  if (mode === "create" && exists) throw new Conflict(`project ${input.id} already exists`);
+  if (mode === "update" && !exists) throw new NotFound(`project ${input.id} not found`);
+  db.transaction(() => {
+    if (exists) {
+      db.query(
+        "UPDATE projects SET key = ?, name = ?, stage = ?, description = ?, tier = ?, committee_date = ?, committee_ref = ?, target_fte = ?, target_time = ? WHERE id = ?",
+      ).run(input.key, input.name, input.stage, input.description, input.tier, input.committee?.date ?? null, input.committee?.ref ?? null, input.targets.fte, input.targets.time, input.id);
+    } else {
+      const sort = db.query<{ s: number }, []>("SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM projects").get()?.s ?? 0;
+      db.query(
+        "INSERT INTO projects (id, key, name, stage, description, tier, committee_date, committee_ref, target_fte, target_time, sort) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+      ).run(input.id, input.key, input.name, input.stage, input.description, input.tier, input.committee?.date ?? null, input.committee?.ref ?? null, input.targets.fte, input.targets.time, sort);
+    }
+    db.query("DELETE FROM project_repos WHERE project_id = ?").run(input.id);
+    input.repos.forEach((r, i) => db.query("INSERT INTO project_repos (project_id, name, url, sort) VALUES (?,?,?,?)").run(input.id, r.name, r.url, i));
+    db.query("DELETE FROM team_members WHERE project_id = ?").run(input.id);
+    input.team.forEach((t, i) => db.query("INSERT INTO team_members (project_id, ini, name, role, sort) VALUES (?,?,?,?,?)").run(input.id, t.ini, t.name, t.role, i));
+  })();
+};
+
+/** Deletes a project and everything under it (milestones, readings, governance, releases, dev activity). */
+export const deleteProject = (db: Database, pid: string): void => {
+  const res = db.query("DELETE FROM projects WHERE id = ?").run(pid);
+  if (res.changes === 0) throw new NotFound(`project ${pid} not found`);
+};
+
 // ---- targets & governance ----------------------------------------------
 
 export const setTargets = (db: Database, pid: string, t: TargetsInput): void => {
@@ -356,7 +413,107 @@ export const setTargets = (db: Database, pid: string, t: TargetsInput): void => 
 
 export const updateGovernance = (db: Database, pid: string, gid: string, g: GovernanceInput): void => {
   const res = db
-    .query("UPDATE governance_items SET status = ?, owner = ?, date = ?, detail = ?, link = ? WHERE project_id = ? AND id = ?")
-    .run(g.status, g.owner, g.date, g.detail, g.link ?? null, pid, gid);
+    .query(
+      "UPDATE governance_items SET cat = COALESCE(?, cat), name = COALESCE(?, name), status = ?, owner = ?, date = ?, detail = ?, link = ? WHERE project_id = ? AND id = ?",
+    )
+    .run(g.cat ?? null, g.name ?? null, g.status, g.owner, g.date, g.detail, g.link ?? null, pid, gid);
   if (res.changes === 0) throw new NotFound(`governance item ${pid}/${gid} not found`);
+};
+
+export const createGovernanceItem = (db: Database, pid: string, g: GovernanceItemInput): void => {
+  if (!projectExists(db, pid)) throw new NotFound(`project ${pid} not found`);
+  const dup = db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM governance_items WHERE project_id = ? AND id = ?").get(pid, g.id)?.n ?? 0;
+  if (dup > 0) throw new Conflict(`governance item ${pid}/${g.id} already exists`);
+  const sort = db.query<{ s: number }, [string]>("SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM governance_items WHERE project_id = ?").get(pid)?.s ?? 0;
+  db.query("INSERT INTO governance_items (project_id, id, cat, name, status, owner, date, detail, link, sort) VALUES (?,?,?,?,?,?,?,?,?,?)").run(
+    pid,
+    g.id,
+    g.cat,
+    g.name,
+    g.status,
+    g.owner,
+    g.date,
+    g.detail,
+    g.link ?? null,
+    sort,
+  );
+};
+
+/** Release criteria that reference the item stay in place and resolve to "not tracked". */
+export const deleteGovernanceItem = (db: Database, pid: string, gid: string): void => {
+  const res = db.query("DELETE FROM governance_items WHERE project_id = ? AND id = ?").run(pid, gid);
+  if (res.changes === 0) throw new NotFound(`governance item ${pid}/${gid} not found`);
+};
+
+// ---- releases ------------------------------------------------------------
+
+const releaseExists = (db: Database, pid: string, rid: string): boolean =>
+  (db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM releases WHERE project_id = ? AND id = ?").get(pid, rid)?.n ?? 0) > 0;
+
+/** Create or replace a release: its milestone list and criteria are replaced wholesale (they are references, not state). */
+export const upsertRelease = (db: Database, pid: string, input: ReleaseInput, mode: "create" | "update"): void => {
+  if (!projectExists(db, pid)) throw new NotFound(`project ${pid} not found`);
+  const exists = releaseExists(db, pid, input.id);
+  if (mode === "create" && exists) throw new Conflict(`release ${pid}/${input.id} already exists`);
+  if (mode === "update" && !exists) throw new NotFound(`release ${pid}/${input.id} not found`);
+  db.transaction(() => {
+    if (exists) {
+      db.query("UPDATE releases SET name = ?, month = ? WHERE project_id = ? AND id = ?").run(input.name, input.month, pid, input.id);
+    } else {
+      const sort = db.query<{ s: number }, [string]>("SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM releases WHERE project_id = ?").get(pid)?.s ?? 0;
+      db.query("INSERT INTO releases (project_id, id, name, month, sort) VALUES (?,?,?,?,?)").run(pid, input.id, input.name, input.month, sort);
+    }
+    db.query("DELETE FROM release_milestones WHERE project_id = ? AND release_id = ?").run(pid, input.id);
+    input.milestoneIds.forEach((mid, i) =>
+      db.query("INSERT INTO release_milestones (project_id, release_id, milestone_id, sort) VALUES (?,?,?,?)").run(pid, input.id, mid, i),
+    );
+    db.query("DELETE FROM release_criteria WHERE project_id = ? AND release_id = ?").run(pid, input.id);
+    const crit = db.query("INSERT INTO release_criteria (project_id, release_id, sort, type, milestone_id, governance_id, ok, label) VALUES (?,?,?,?,?,?,?,?)");
+    input.criteria.forEach((c, i) => {
+      switch (c.type) {
+        case "gate":
+          crit.run(pid, input.id, i, "gate", c.ms, null, null, c.label);
+          break;
+        case "gov":
+          crit.run(pid, input.id, i, "gov", null, c.gid, null, c.label);
+          break;
+        case "manual":
+          crit.run(pid, input.id, i, "manual", null, null, c.ok ? 1 : 0, c.label);
+          break;
+      }
+    });
+  })();
+};
+
+export const deleteRelease = (db: Database, pid: string, rid: string): void => {
+  const res = db.query("DELETE FROM releases WHERE project_id = ? AND id = ?").run(pid, rid);
+  if (res.changes === 0) throw new NotFound(`release ${pid}/${rid} not found`);
+};
+
+// ---- JSON documents ------------------------------------------------------
+
+export const setDevActivity = (db: Database, pid: string, doc: DevActivityInput): void => {
+  if (!projectExists(db, pid)) throw new NotFound(`project ${pid} not found`);
+  db.query("INSERT OR REPLACE INTO dev_activity (project_id, doc) VALUES (?, ?)").run(pid, JSON.stringify(doc));
+};
+
+export const setAgents = (db: Database, agents: AgentsInput): void => {
+  db.transaction(() => {
+    db.query("DELETE FROM agents").run();
+    agents.forEach((a, i) => db.query("INSERT INTO agents (id, sort, doc) VALUES (?,?,?)").run(a.id, i, JSON.stringify(a)));
+  })();
+};
+
+export const setFeed = (db: Database, feed: FeedInput): void => {
+  db.transaction(() => {
+    db.query("DELETE FROM feed_days").run();
+    feed.forEach((f, i) => db.query("INSERT INTO feed_days (sort, doc) VALUES (?,?)").run(i, JSON.stringify(f)));
+  })();
+};
+
+export const setUpcoming = (db: Database, items: UpcomingInput): void => {
+  db.transaction(() => {
+    db.query("DELETE FROM upcoming").run();
+    items.forEach((u, i) => db.query("INSERT INTO upcoming (sort, doc) VALUES (?,?)").run(i, JSON.stringify(u)));
+  })();
 };
