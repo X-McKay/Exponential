@@ -1,0 +1,183 @@
+// ================= derived state =================
+//
+// Invariant: value is never stored. It is always derived from milestone
+// status + metric readings against gates; release readiness is always derived
+// from live criteria references. Nothing in this module has side effects.
+
+import { MONTHS, TODAY } from "./calendar.ts";
+import { GSTATUS_LABEL } from "./labels.ts";
+import type {
+  Criterion,
+  Dim,
+  GateTier,
+  GovernanceItem,
+  Metric,
+  Milestone,
+  Project,
+  Release,
+} from "./types.ts";
+
+/** Milestones whose gate metrics are being measured. */
+export const isMeasurable = (m: Pick<Milestone, "status">): boolean => {
+  switch (m.status) {
+    case "eval":
+    case "shipped":
+      return true;
+    case "backlog":
+    case "progress":
+      return false;
+  }
+};
+
+/** Where a single metric sits relative to its gates. */
+export type MetricLevel = "below" | "base" | "stretch";
+export const metricLevel = (x: Pick<Metric, "current" | "base" | "stretch">): MetricLevel =>
+  x.current >= x.stretch ? "stretch" : x.current >= x.base ? "base" : "below";
+
+/**
+ * Gate tier a milestone has cleared. Unmeasured milestones (backlog / in
+ * progress) are always tier 0. A milestone with no metrics can never clear a
+ * gate: `[].every(...)` would be vacuously true, so guard it explicitly.
+ */
+export const tierOf = (m: Milestone): GateTier => {
+  if (!isMeasurable(m)) return 0;
+  if (m.metrics.length === 0) return 0;
+  if (m.metrics.every((x) => x.current >= x.stretch)) return 2;
+  if (m.metrics.every((x) => x.current >= x.base)) return 1;
+  return 0;
+};
+
+/** Impact a milestone contributes on a dimension given the tier it has cleared. */
+export const impactOf = (m: Milestone, d: Dim): number => {
+  const t = tierOf(m);
+  switch (t) {
+    case 2:
+      return m.impact.stretch[d];
+    case 1:
+      return m.impact.base[d];
+    case 0:
+      return 0;
+  }
+};
+
+/** Value realized = shipped milestones' gated impact, summed. */
+export const realized = (p: Pick<Project, "milestones">, d: Dim): number =>
+  p.milestones.reduce((a, m) => a + (m.status === "shipped" ? impactOf(m, d) : 0), 0);
+
+/** Fraction of a milestone's stretch gates attained, averaged (0 when it has no metrics). */
+export const attainment = (m: Pick<Milestone, "metrics">): number =>
+  m.metrics.length
+    ? m.metrics.reduce((a, x) => a + (x.stretch > 0 ? Math.min(x.current / x.stretch, 1) : 0), 0) / m.metrics.length
+    : 0;
+
+/** Governance readiness: approved / required items. N/A items are excluded; no items → 0. */
+export const readiness = (p: Pick<Project, "governance">): number => {
+  const items = p.governance.filter((g) => g.status !== "na");
+  if (items.length === 0) return 0;
+  return items.filter((g) => g.status === "approved").length / items.length;
+};
+
+export const blockers = (p: Pick<Project, "governance">): number =>
+  p.governance.filter((g) => g.status === "missing").length;
+
+export const govCounts = (p: Pick<Project, "governance">): Record<GovernanceItem["status"], number> => {
+  const c: Record<GovernanceItem["status"], number> = { approved: 0, in_review: 0, draft: 0, missing: 0, na: 0 };
+  for (const g of p.governance) c[g.status] += 1;
+  return c;
+};
+
+export const shippedCount = (p: Pick<Project, "milestones">): number =>
+  p.milestones.filter((m) => m.status === "shipped").length;
+
+// ---- releases -----------------------------------------------------------
+
+export interface CriterionEval {
+  ok: boolean;
+  pending: boolean;
+  sub: string;
+}
+
+/**
+ * Evaluate one go-live criterion against live project state. A criterion that
+ * references a deleted milestone or an untracked governance item resolves to
+ * not-met (never throws).
+ */
+export const evalCriterion = (c: Criterion, p: Pick<Project, "milestones" | "governance">): CriterionEval => {
+  switch (c.type) {
+    case "gate": {
+      const m = p.milestones.find((x) => x.id === c.ms);
+      if (!m) return { ok: false, pending: false, sub: "milestone not found" };
+      const measurable = isMeasurable(m);
+      return {
+        ok: tierOf(m) >= 1,
+        pending: !measurable,
+        sub: measurable ? m.metrics.map((x) => `${x.label} ${x.current}%`).join(" · ") : "no eval data yet",
+      };
+    }
+    case "gov": {
+      const g = p.governance.find((x) => x.id === c.gid);
+      if (!g) return { ok: false, pending: false, sub: "not tracked" };
+      const ok = g.status === "approved" || g.status === "na";
+      const pending = g.status === "in_review" || g.status === "draft";
+      return { ok, pending, sub: `${GSTATUS_LABEL[g.status]}${g.date ? " · " + g.date : ""}` };
+    }
+    case "manual":
+      return { ok: c.ok, pending: false, sub: c.ok ? "Confirmed" : "Not confirmed" };
+  }
+};
+
+export type ReleaseLabel = "Shipped" | "Ready" | "Blocked" | "At risk";
+export type ReleaseTone = "good" | "warn" | "bad";
+
+export interface ReleaseState {
+  evals: CriterionEval[];
+  met: number;
+  total: number;
+  tone: ReleaseTone;
+  label: ReleaseLabel;
+}
+
+export const releaseState = (rel: Release, p: Pick<Project, "milestones" | "governance">, today = TODAY): ReleaseState => {
+  const evals = rel.criteria.map((c) => evalCriterion(c, p));
+  const met = evals.filter((e) => e.ok).length;
+  const total = rel.criteria.length;
+  const allMet = met === total;
+  const tone: ReleaseTone = allMet ? "good" : met >= total / 2 ? "warn" : "bad";
+  const label: ReleaseLabel = allMet ? (rel.month <= today ? "Shipped" : "Ready") : rel.month <= today + 1 ? "Blocked" : "At risk";
+  return { evals, met, total, tone, label };
+};
+
+export const nextRelease = (releases: Release[], today = TODAY): Release | undefined =>
+  releases.find((r) => r.month > today);
+
+// ---- time series --------------------------------------------------------
+
+export interface BurnupSeries {
+  /** Realized value per month; flat after today. */
+  real: number[];
+  /** Committed (base gates) per month from today onward; null before today. */
+  com: (number | null)[];
+  /** Stretch ceiling per month. */
+  ceil: number[];
+}
+
+export const burnupSeries = (milestones: Milestone[], dim: Dim, today = TODAY): BurnupSeries => {
+  const real = MONTHS.map((_, t) =>
+    milestones.reduce((a, m) => a + (m.status === "shipped" && m.month <= Math.min(t, today) ? impactOf(m, dim) : 0), 0),
+  );
+  const realToday = real[today] ?? 0;
+  const com = MONTHS.map((_, t) => {
+    if (t < today) return null;
+    return realToday + milestones.reduce((a, m) => a + (m.status !== "shipped" && m.month <= t ? m.impact.base[dim] : 0), 0);
+  });
+  const ceil = MONTHS.map((_, t) => milestones.reduce((a, m) => a + (m.month <= t ? m.impact.stretch[dim] : 0), 0));
+  return { real, com, ceil };
+};
+
+// ---- ids ----------------------------------------------------------------
+
+/** Next milestone id in a project: MS-<max existing number + 1>. */
+export const nextMilestoneId = (p: Pick<Project, "milestones">): string => {
+  const nums = p.milestones.map((m) => parseInt((m.id.match(/\d+/) ?? ["0"])[0] ?? "0", 10));
+  return `MS-${Math.max(0, ...nums) + 1}`;
+};

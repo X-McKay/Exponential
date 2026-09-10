@@ -1,0 +1,53 @@
+import type { AgentStatus, CheckStatus, FeedType, GovStatus, MilestoneStatus, RiskTier, SessionState } from "./types.ts";
+
+export const STATUS_LABEL: Record<MilestoneStatus, string> = {
+  backlog: "Backlog",
+  progress: "In progress",
+  eval: "In eval",
+  shipped: "Shipped",
+};
+
+export const GSTATUS_LABEL: Record<GovStatus, string> = {
+  approved: "Approved",
+  in_review: "In review",
+  draft: "Draft",
+  missing: "Missing",
+  na: "N/A",
+};
+
+export const TIER_LABEL: Record<RiskTier, string> = {
+  1: "Tier 1 · High risk",
+  2: "Tier 2 · Medium risk",
+  3: "Tier 3 · Low risk",
+};
+
+export const FEED_LABEL: Record<FeedType, string> = {
+  build: "CI",
+  eval: "Eval",
+  merge: "Code",
+  deploy: "Deploy",
+  gov: "Governance",
+  ship: "Milestone",
+};
+
+export const AGENT_STATUS_LABEL: Record<AgentStatus, string> = {
+  working: "Working…",
+  idle: "Idle",
+  scheduled: "Scheduled · nightly",
+};
+
+export const CHECK_ICON: Record<CheckStatus, string> = { pass: "✓", fail: "✗", running: "◌" };
+export const SESSION_ICON: Record<SessionState, string> = { done: "✓", working: "◌", attention: "!" };
+
+/** Re-review cadence implied by a project's AI risk tier. */
+export const reReviewCadence = (tier: RiskTier | null): string => {
+  switch (tier) {
+    case 1:
+      return "Quarterly";
+    case 2:
+      return "Annual";
+    case 3:
+    case null:
+      return "At stage change";
+  }
+};

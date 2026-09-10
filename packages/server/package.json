@@ -1,0 +1,17 @@
+{
+  "name": "@valueflow/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "NODE_ENV=production bun src/index.ts",
+    "seed": "bun src/cli/seed.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@valueflow/domain": "workspace:*",
+    "@valueflow/shared": "workspace:*",
+    "zod": "^3.23.0"
+  }
+}
