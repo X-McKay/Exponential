@@ -24,9 +24,9 @@ Without Nix: install [Bun](https://bun.sh) 1.3+, then `bun install && bun run de
 
 Environment: `PORT` (default 3000), `VALUEFLOW_DB` (default `data/valueflow.sqlite`).
 
-### First `nix build`
+### Updating the dependency hash
 
-Dependencies are a fixed-output derivation. The flake ships with `lib.fakeHash`; the first `nix build .#nodeModules` fails with a hash mismatch that prints the real value — paste it into `flake.nix`. Repeat whenever `bun.lock` changes.
+Dependencies are a fixed-output derivation (`packages.nodeModules`) that captures Bun's whole install tree: the root `node_modules` plus each workspace's `packages/*/node_modules` that the isolated linker creates. Whenever `bun.lock` changes, set `outputHash` in `flake.nix` to `lib.fakeHash`, run `nix build .#nodeModules`, and paste the hash the mismatch error prints. The install uses `--os='*' --cpu='*'` so the hash is the same on every platform.
 
 ## Architecture
 

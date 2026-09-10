@@ -39,19 +39,26 @@
             export BUN_INSTALL_CACHE_DIR=$TMPDIR/bun-cache
             bun install --frozen-lockfile --ignore-scripts --no-progress --os='*' --cpu='*'
           '';
+          # Bun's isolated linker stores packages under node_modules/.bun and links
+          # each workspace's dependencies from packages/*/node_modules, so the
+          # whole install tree is captured, not just the root directory.
           installPhase = ''
             mkdir -p $out
             cp -R node_modules $out/node_modules
+            for d in packages/*/node_modules; do
+              mkdir -p "$out/$(dirname "$d")"
+              cp -R "$d" "$out/$d"
+            done
           '';
           outputHashMode = "recursive";
           outputHashAlgo = "sha256";
-          outputHash = lib.fakeHash;
+          outputHash = "sha256-0rqxdaeZKYyITBYY3eMs5AWGSaRH6f6zt+EMPTV3kVw=";
         };
 
         withDeps = ''
           export HOME=$TMPDIR
-          cp -R ${nodeModules}/node_modules node_modules
-          chmod -R u+w node_modules
+          tar -C ${nodeModules} -cf - . | tar -xf -
+          chmod -R u+w node_modules packages
         '';
 
         # Production bundle + server, runnable as `valueflow`.
