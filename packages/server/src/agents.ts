@@ -112,6 +112,14 @@ const ROLE: Record<AgentKind, { brief: string; task: string; tab: ProjectTab }> 
   },
 };
 
+/** One proposal shape: its type plus the fields that type needs, all required. */
+const shape = (type: string, fields: Record<string, unknown>) => ({
+  type: "object",
+  additionalProperties: false,
+  properties: { type: { type: "string", enum: [type] }, rationale: { type: "string", description: "One sentence citing the evidence." }, ...fields },
+  required: ["type", "rationale", ...Object.keys(fields)],
+});
+
 const RESULT_SCHEMA = {
   name: "agent_result",
   schema: {
@@ -126,26 +134,24 @@ const RESULT_SCHEMA = {
         maxItems: 6,
         description: "Concrete changes to the project's facts that a person could accept with one click. Empty when nothing should change.",
         items: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            type: { type: "string", enum: ["governance_status", "milestone_status", "governance_item", "calendar_event", "targets"] },
-            rationale: { type: "string", description: "One sentence citing the evidence." },
-            gid: { type: "string", description: "governance_status: the governance item id from the briefing." },
-            mid: { type: "string", description: "milestone_status: the milestone id (MS-n)." },
-            status: { type: "string", description: "governance_status: approved|in_review|draft|missing|na. milestone_status: backlog|progress|eval|shipped. governance_item: initial status." },
-            cat: { type: "string", description: "governance_item: category." },
-            name: { type: "string", description: "governance_item: item name." },
-            owner: { type: "string", description: "governance_item: owner initials from the team." },
-            detail: { type: "string", description: "governance_item: why it is needed." },
-            date: { type: "string", description: "calendar_event: YYYY-MM-DD." },
-            text: { type: "string", description: "calendar_event: what happens." },
-            sub: { type: "string", description: "calendar_event: optional context." },
-            tab: { type: "string", description: "calendar_event: overview|value|roadmap|development|governance." },
-            fte: { type: "number", description: "targets: FTE reduction target %." },
-            time: { type: "number", description: "targets: time reduction target %." },
-          },
-          required: ["type", "rationale"],
+          anyOf: [
+            shape("governance_status", { gid: { type: "string", description: "governance id from the briefing" }, status: { type: "string", enum: ["approved", "in_review", "draft", "missing", "na"] } }),
+            shape("milestone_status", { mid: { type: "string", description: "milestone id, MS-n" }, status: { type: "string", enum: ["backlog", "progress", "eval", "shipped"] } }),
+            shape("governance_item", {
+              cat: { type: "string" },
+              name: { type: "string" },
+              status: { type: "string", enum: ["approved", "in_review", "draft", "missing", "na"] },
+              owner: { type: "string", description: "team initials" },
+              detail: { type: "string" },
+            }),
+            shape("calendar_event", {
+              date: { type: "string", description: "YYYY-MM-DD" },
+              text: { type: "string" },
+              sub: { type: ["string", "null"] },
+              tab: { type: "string", enum: ["overview", "value", "roadmap", "development", "governance"] },
+            }),
+            shape("targets", { fte: { type: "number" }, time: { type: "number" } }),
+          ],
         },
       },
     },
@@ -204,7 +210,13 @@ export const buildMessages = (agent: Agent, state: AppState, p: Project, cal: Ca
         `Capabilities: ${agent.caps.join(", ")}.`,
         "Use only the facts in the briefing; never invent numbers, people, or dates. If something is missing, say so.",
         role.task,
-        "You may also propose concrete changes a person can accept with one click: move a governance item or milestone to another status, add a missing governance item, add a dated calendar event, or change the value targets. Use the ids given in the briefing. Propose only what the evidence supports; an empty list is fine.",
+        "You may also propose concrete changes a person can accept with one click. Each proposal must use exactly one of these shapes, with the values in the named fields (not in the rationale):",
+        '  {"type":"governance_status","gid":"<governance id from the briefing>","status":"approved|in_review|draft|missing|na","rationale":"…"}',
+        '  {"type":"milestone_status","mid":"MS-n","status":"backlog|progress|eval|shipped","rationale":"…"}',
+        '  {"type":"governance_item","cat":"<category>","name":"<item name>","status":"missing|draft|in_review|approved","owner":"<team initials>","detail":"<why it is needed>","rationale":"…"}',
+        '  {"type":"calendar_event","date":"YYYY-MM-DD","text":"<what happens>","sub":"<context or null>","tab":"governance|value|roadmap|development|overview","rationale":"…"}',
+        '  {"type":"targets","fte":<number>,"time":<number>,"rationale":"…"}',
+        "Propose a status change only when the briefing shows it has actually happened or been decided (for example a review that is described as complete but still marked In review). To ask for work or a decision, propose a calendar_event with the date it is needed by instead. Propose only what the evidence supports; an empty list is fine. Never propose a status the item already has.",
         'Reply with a JSON object: {"summary": string, "attention": boolean, "body": string, "proposals": [...]}.',
       ].join("\n"),
     },
@@ -236,8 +248,13 @@ export const runAgent = async (db: Database, llm: Llm, input: RunAgentInput, now
   };
   insertRun(db, run);
   try {
-    const res = await llm.chat(buildMessages(agent, state, project, cal, run.instruction), { jsonSchema: RESULT_SCHEMA, maxTokens: 2200 });
-    const result = parseResult(res.content, project);
+    const res = await llm.chat(buildMessages(agent, state, project, cal, run.instruction), { jsonSchema: RESULT_SCHEMA, maxTokens: 4000 });
+    let result: AgentResult;
+    try {
+      result = parseResult(res.content, project);
+    } catch (e) {
+      throw new Error(`${e instanceof Error ? e.message : String(e)} (reply began: ${JSON.stringify(res.content.slice(0, 200))})`);
+    }
     const finished: AgentRun = {
       ...run,
       state: result.attention ? "attention" : "done",
