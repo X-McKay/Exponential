@@ -304,6 +304,7 @@ export function App() {
             <AgentsPage
               agents={state.agents}
               runs={state.runs}
+              proposals={state.proposals}
               projects={projects}
               asOf={state.asOf}
               llm={state.llm}
@@ -311,6 +312,7 @@ export function App() {
               onOpen={openProject}
               onEdit={() => setEditor({ kind: "agents" })}
               onRun={(input) => void store.runAgent(input)}
+              onDecide={(id, d) => void store.decideProposal(id, d)}
             />
           </>
         ) : view.page === "portfolio" ? (

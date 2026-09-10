@@ -45,6 +45,7 @@ import {
   upsertRelease,
 } from "./repo.ts";
 import { runAgent } from "./agents.ts";
+import { ProposalRejected, acceptProposal, dismissProposal, findProposal } from "./proposals.ts";
 import type { RepoSource } from "./connectors/index.ts";
 import type { Llm } from "./llm.ts";
 import { syncProject } from "./sync.ts";
@@ -225,6 +226,8 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     setAgents(db, await parseBody(req, AgentsInputSchema));
     return json(state().agents);
   });
+  on("POST", patterns.proposalAccept, (_req, params) => json(acceptProposal(db, findProposal(db, p(params, "id"), now()), now())));
+  on("POST", patterns.proposalDismiss, (_req, params) => json(dismissProposal(db, findProposal(db, p(params, "id"), now()), now())));
   on("POST", patterns.agentRuns, async (req, params) => {
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
     const body = await parseBody(req, RunAgentInputSchema.omit({ agentId: true }));
@@ -263,6 +266,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
         if (err instanceof HttpError) return json({ error: err.message, issues: err.issues }, err.status);
         if (err instanceof NotFound) return json({ error: err.message }, 404);
         if (err instanceof Conflict) return json({ error: err.message }, 409);
+        if (err instanceof ProposalRejected) return json({ error: err.message }, 409);
         console.error(err);
         return json({ error: "internal error" }, 500);
       }

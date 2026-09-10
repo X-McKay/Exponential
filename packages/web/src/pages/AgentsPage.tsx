@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { AGENT_KIND_LABEL, AGENT_STATUS_LABEL, RUN_STATE_ICON, agentStats, relTime, runsOf } from "@valueflow/domain";
-import type { Agent, AgentRun, LlmInfo, Project, ProjectTab } from "@valueflow/domain";
+import { pendingProposals } from "@valueflow/domain";
+import type { Agent, AgentRun, LlmInfo, Project, ProjectTab, Proposal } from "@valueflow/domain";
 import type { RunAgentInput } from "@valueflow/shared";
 import { RunAgentEditor, RunViewer } from "../editors/RunAgent.tsx";
+import { ProposalList } from "../ui/Proposals.tsx";
 import { Avatar, Caret, Chip, Kpi, SectionCard, Tip, ghostBtn, reset } from "../ui/primitives.tsx";
 import { AGENT_STATUS, C, RUN_COLOR } from "../theme.ts";
 
@@ -34,6 +36,7 @@ const shortProjectName = (p: Project | undefined): string => (p ? p.name.split("
 export function AgentsPage({
   agents,
   runs,
+  proposals,
   projects,
   asOf,
   llm,
@@ -41,9 +44,11 @@ export function AgentsPage({
   onOpen,
   onEdit,
   onRun,
+  onDecide,
 }: {
   agents: Agent[];
   runs: AgentRun[];
+  proposals: Proposal[];
   projects: Project[];
   asOf: string;
   llm: LlmInfo | null;
@@ -51,7 +56,9 @@ export function AgentsPage({
   onOpen: (id: string, tab: ProjectTab) => void;
   onEdit: () => void;
   onRun: (input: RunAgentInput) => void;
+  onDecide: (id: string, decision: "accept" | "dismiss") => void;
 }) {
+  const inbox = pendingProposals({ proposals });
   const [open, setOpen] = useState<string | null>(agents.find((a) => a.id === "audie")?.id ?? agents[0]?.id ?? null);
   const [running, setRunning] = useState<Agent | null>(null);
   const [viewing, setViewing] = useState<AgentRun | null>(null);
@@ -77,7 +84,14 @@ export function AgentsPage({
           color={workingAgents.length ? C.indigoHi : C.dim}
         />
         <Kpi label="Attention flags · 30d" value={attention} sub={auditors.length ? `from ${auditors.join(", ")}` : "none raised"} color={attention ? C.amber : C.dim} />
+        <Kpi label="Proposals to review" value={inbox.length} sub={inbox.length ? "accept to apply, dismiss to discard" : "nothing pending"} color={inbox.length ? C.indigoHi : C.dim} />
       </div>
+
+      {inbox.length > 0 && (
+        <SectionCard title="Proposals awaiting a decision" pad="12px 14px">
+          <ProposalList proposals={inbox} state={{ projects, agents }} asOf={asOf} showProject onDecide={onDecide} />
+        </SectionCard>
+      )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
         <span style={{ fontSize: 12, color: C.dim, flex: 1 }}>
@@ -165,7 +179,14 @@ export function AgentsPage({
                         <span className={r.state === "working" || r.state === "queued" ? "vf-pulse" : undefined} style={{ fontSize: 11, color: RUN_COLOR[r.state], width: 12, flexShrink: 0 }}>
                           {RUN_STATE_ICON[r.state]}
                         </span>
-                        <span style={{ flex: 1, fontSize: 13, color: r.state === "attention" ? C.text : r.state === "failed" ? "#F08A84" : "#C6CAD6", lineHeight: 1.5, minWidth: 0 }}>{r.summary}</span>
+                        <span style={{ flex: 1, fontSize: 13, color: r.state === "attention" ? C.text : r.state === "failed" ? "#F08A84" : "#C6CAD6", lineHeight: 1.5, minWidth: 0 }}>
+                          {r.summary}
+                          {proposals.some((p) => p.runId === r.id && p.state === "pending") && (
+                            <span style={{ marginLeft: 8 }}>
+                              <Chip tone="accent">{proposals.filter((p) => p.runId === r.id && p.state === "pending").length} to review</Chip>
+                            </span>
+                          )}
+                        </span>
                         <span
                           role="link"
                           tabIndex={-1}
@@ -206,7 +227,18 @@ export function AgentsPage({
           onClose={() => setRunning(null)}
         />
       )}
-      {viewing && <RunViewer run={runs.find((r) => r.id === viewing.id) ?? viewing} agent={viewingAgent} project={byId.get(viewing.proj)} asOf={asOf} onClose={() => setViewing(null)} />}
+      {viewing && (
+        <RunViewer
+          run={runs.find((r) => r.id === viewing.id) ?? viewing}
+          agent={viewingAgent}
+          project={byId.get(viewing.proj)}
+          asOf={asOf}
+          proposals={proposals.filter((p) => p.runId === viewing.id)}
+          state={{ projects, agents }}
+          onDecide={onDecide}
+          onClose={() => setViewing(null)}
+        />
+      )}
     </div>
   );
 }

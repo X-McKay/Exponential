@@ -127,6 +127,19 @@ export const AgentSchema = z.object({
 export const AgentsInputSchema = z.array(AgentSchema).max(20);
 export type AgentsInput = z.infer<typeof AgentsInputSchema>;
 
+/**
+ * What a model may propose. The reply carries a flat object; the type decides
+ * which fields matter, so a model that omits or invents fields fails cleanly.
+ */
+export const ProposalActionSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("governance_status"), gid: id, status: enumOf(GOV_STATUSES) }),
+  z.object({ type: z.literal("milestone_status"), mid: id, status: enumOf(MILESTONE_STATUSES) }),
+  z.object({ type: z.literal("governance_item"), cat: short(80), name: short(160), status: enumOf(GOV_STATUSES), owner: short(3), detail: z.string().max(2000).default("") }),
+  z.object({ type: z.literal("calendar_event"), date: isoDate, tab: projectTab.default("overview"), text: short(200), sub: z.string().max(200).nullable().default(null) }),
+  z.object({ type: z.literal("targets"), fte: pct, time: pct }),
+]);
+export type ProposalActionInput = z.infer<typeof ProposalActionSchema>;
+
 export const RunAgentInputSchema = z.object({
   agentId: id,
   proj: id,

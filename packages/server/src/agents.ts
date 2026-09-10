@@ -15,17 +15,19 @@ import {
   isDue,
   metricLevel,
   monthLabel,
+  nextProposalId,
   nextRunId,
   realized,
   recentEvents,
   releaseState,
   tierOf,
 } from "@valueflow/domain";
-import type { Agent, AgentKind, AgentRun, AppState, Calendar, Project, ProjectTab } from "@valueflow/domain";
+import type { Agent, AgentKind, AgentRun, AppState, Calendar, Project, ProjectTab, Proposal } from "@valueflow/domain";
+import { ProposalActionSchema } from "@valueflow/shared";
 import type { RunAgentInput } from "@valueflow/shared";
 import { extractJson } from "./llm.ts";
 import type { ChatMessage, Llm } from "./llm.ts";
-import { NotFound, findProject, insertRun, loadState, updateRun } from "./repo.ts";
+import { NotFound, findProject, insertProposal, insertRun, loadState, updateRun } from "./repo.ts";
 
 // ---- context ---------------------------------------------------------------
 
@@ -48,7 +50,7 @@ export const projectContext = (state: AppState, p: Project, cal: Calendar): stri
   }
 
   lines.push("\n## Governance");
-  for (const g of p.governance) lines.push(`- [${g.cat}] ${g.name}: ${GSTATUS_LABEL[g.status]}, owner ${g.owner}${g.date ? `, ${g.date}` : ""}${g.detail ? ` — ${g.detail}` : ""}`);
+  for (const g of p.governance) lines.push(`- [${g.cat}] ${g.name} (id: ${g.id}): ${GSTATUS_LABEL[g.status]}, owner ${g.owner}${g.date ? `, ${g.date}` : ""}${g.detail ? ` — ${g.detail}` : ""}`);
 
   lines.push("\n## Releases (go live only when every criterion is met against live state)");
   for (const r of state.releases[p.id] ?? []) {
@@ -119,8 +121,35 @@ const RESULT_SCHEMA = {
       summary: { type: "string", description: "One line, at most 120 characters, naming what was produced or found." },
       attention: { type: "boolean", description: "True only if a human needs to act on this run this week." },
       body: { type: "string", description: "The full output in markdown." },
+      proposals: {
+        type: "array",
+        maxItems: 6,
+        description: "Concrete changes to the project's facts that a person could accept with one click. Empty when nothing should change.",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            type: { type: "string", enum: ["governance_status", "milestone_status", "governance_item", "calendar_event", "targets"] },
+            rationale: { type: "string", description: "One sentence citing the evidence." },
+            gid: { type: "string", description: "governance_status: the governance item id from the briefing." },
+            mid: { type: "string", description: "milestone_status: the milestone id (MS-n)." },
+            status: { type: "string", description: "governance_status: approved|in_review|draft|missing|na. milestone_status: backlog|progress|eval|shipped. governance_item: initial status." },
+            cat: { type: "string", description: "governance_item: category." },
+            name: { type: "string", description: "governance_item: item name." },
+            owner: { type: "string", description: "governance_item: owner initials from the team." },
+            detail: { type: "string", description: "governance_item: why it is needed." },
+            date: { type: "string", description: "calendar_event: YYYY-MM-DD." },
+            text: { type: "string", description: "calendar_event: what happens." },
+            sub: { type: "string", description: "calendar_event: optional context." },
+            tab: { type: "string", description: "calendar_event: overview|value|roadmap|development|governance." },
+            fte: { type: "number", description: "targets: FTE reduction target %." },
+            time: { type: "number", description: "targets: time reduction target %." },
+          },
+          required: ["type", "rationale"],
+        },
+      },
     },
-    required: ["summary", "attention", "body"],
+    required: ["summary", "attention", "body", "proposals"],
   },
 };
 
@@ -128,7 +157,26 @@ interface AgentResult {
   summary: string;
   attention: boolean;
   body: string;
+  proposals: { action: Proposal["action"]; rationale: string }[];
 }
+
+/** Keep only proposals the schema accepts and that point at things the project has. */
+const parseProposals = (raw: unknown, p: Project): AgentResult["proposals"] => {
+  if (!Array.isArray(raw)) return [];
+  const out: AgentResult["proposals"] = [];
+  for (const item of raw.slice(0, 6)) {
+    if (typeof item !== "object" || item === null) continue;
+    const { rationale, ...rest } = item as Record<string, unknown>;
+    const parsed = ProposalActionSchema.safeParse(rest);
+    if (!parsed.success) continue;
+    const a = parsed.data;
+    if (a.type === "governance_status" && !p.governance.some((g) => g.id === a.gid)) continue;
+    if (a.type === "milestone_status" && !p.milestones.some((m) => m.id === a.mid)) continue;
+    if (a.type === "governance_item" && p.governance.some((g) => g.name.toLowerCase() === a.name.toLowerCase())) continue;
+    out.push({ action: a, rationale: typeof rationale === "string" ? rationale.trim().slice(0, 400) : "" });
+  }
+  return out;
+};
 
 /** Cut at a word boundary with an ellipsis when the model overruns the one-line limit. */
 const clip = (s: string, max: number): string => {
@@ -138,12 +186,12 @@ const clip = (s: string, max: number): string => {
   return `${space > max * 0.6 ? cut.slice(0, space) : cut}…`;
 };
 
-const parseResult = (text: string): AgentResult => {
+const parseResult = (text: string, p: Project): AgentResult => {
   const raw = extractJson(text);
   if (typeof raw !== "object" || raw === null) throw new Error("reply is not an object");
   const o = raw as Record<string, unknown>;
   if (typeof o.summary !== "string" || typeof o.body !== "string") throw new Error("reply is missing summary or body");
-  return { summary: clip(o.summary.trim(), 140), attention: o.attention === true, body: o.body.trim() };
+  return { summary: clip(o.summary.trim(), 140), attention: o.attention === true, body: o.body.trim(), proposals: parseProposals(o.proposals, p) };
 };
 
 export const buildMessages = (agent: Agent, state: AppState, p: Project, cal: Calendar, instruction: string | null): ChatMessage[] => {
@@ -156,7 +204,8 @@ export const buildMessages = (agent: Agent, state: AppState, p: Project, cal: Ca
         `Capabilities: ${agent.caps.join(", ")}.`,
         "Use only the facts in the briefing; never invent numbers, people, or dates. If something is missing, say so.",
         role.task,
-        'Reply with a JSON object: {"summary": string, "attention": boolean, "body": string}.',
+        "You may also propose concrete changes a person can accept with one click: move a governance item or milestone to another status, add a missing governance item, add a dated calendar event, or change the value targets. Use the ids given in the briefing. Propose only what the evidence supports; an empty list is fine.",
+        'Reply with a JSON object: {"summary": string, "attention": boolean, "body": string, "proposals": [...]}.',
       ].join("\n"),
     },
     { role: "user", content: `${instruction ? `Instruction: ${instruction}\n\n` : ""}Briefing:\n\n${projectContext(state, p, cal)}` },
@@ -188,7 +237,7 @@ export const runAgent = async (db: Database, llm: Llm, input: RunAgentInput, now
   insertRun(db, run);
   try {
     const res = await llm.chat(buildMessages(agent, state, project, cal, run.instruction), { jsonSchema: RESULT_SCHEMA, maxTokens: 2200 });
-    const result = parseResult(res.content);
+    const result = parseResult(res.content, project);
     const finished: AgentRun = {
       ...run,
       state: result.attention ? "attention" : "done",
@@ -198,6 +247,12 @@ export const runAgent = async (db: Database, llm: Llm, input: RunAgentInput, now
       model: res.model,
     };
     updateRun(db, finished);
+    let existing = loadState(db, now).proposals;
+    for (const pr of result.proposals) {
+      const proposal: Proposal = { id: nextProposalId(existing), runId: run.id, agentId: agent.id, proj: project.id, action: pr.action, rationale: pr.rationale, state: "pending", createdAt: finished.finishedAt ?? now.toISOString(), decidedAt: null };
+      insertProposal(db, proposal);
+      existing = [...existing, proposal];
+    }
     return finished;
   } catch (e) {
     const failed: AgentRun = { ...run, state: "failed", finishedAt: new Date().toISOString(), summary: `${agent.name} run failed`, error: e instanceof Error ? e.message : String(e) };

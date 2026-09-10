@@ -9,6 +9,8 @@ import type {
   Agent,
   AgentRun,
   AppState,
+  Proposal,
+  ProposalAction,
   Build,
   CalendarEvent,
   Criterion,
@@ -134,6 +136,17 @@ interface AgentRow {
   owner: string;
   caps: string;
   schedule: Agent["schedule"];
+}
+interface ProposalRow {
+  id: string;
+  run_id: string;
+  agent_id: string;
+  project_id: string;
+  action: string;
+  rationale: string;
+  state: Proposal["state"];
+  created_at: string;
+  decided_at: string | null;
 }
 interface RunRow {
   id: string;
@@ -287,6 +300,7 @@ export const loadState = (db: Database, now: Date = new Date()): AppState => {
     agents: loadAgents(db),
     runs: loadRuns(db, now),
     llm: null,
+    proposals: loadProposals(db, now),
     events: loadEvents(db, now),
     calendar: loadCalendar(db),
   };
@@ -374,6 +388,44 @@ export const insertRun = (db: Database, r: AgentRun): void => {
   db.query(
     "INSERT INTO agent_runs (id, agent_id, project_id, tab, state, started_at, finished_at, instruction, summary, output, model, error) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
   ).run(r.id, r.agentId, r.proj, r.tab, r.state, r.startedAt, r.finishedAt, r.instruction, r.summary, r.output, r.model, r.error);
+};
+
+/** Pending proposals plus those decided in the trailing window, newest first. */
+export const loadProposals = (db: Database, now: Date, windowDays = RUN_WINDOW_DAYS): Proposal[] => {
+  const since = new Date(now.getTime() - windowDays * 86_400_000).toISOString();
+  return db
+    .query<ProposalRow, [string]>("SELECT * FROM proposals WHERE state = 'pending' OR created_at >= ? ORDER BY created_at DESC, id")
+    .all(since)
+    .map((r) => ({
+      id: r.id,
+      runId: r.run_id,
+      agentId: r.agent_id,
+      proj: r.project_id,
+      action: JSON.parse(r.action) as ProposalAction,
+      rationale: r.rationale,
+      state: r.state,
+      createdAt: r.created_at,
+      decidedAt: r.decided_at,
+    }));
+};
+
+export const insertProposal = (db: Database, p: Proposal): void => {
+  db.query("INSERT INTO proposals (id, run_id, agent_id, project_id, action, rationale, state, created_at, decided_at) VALUES (?,?,?,?,?,?,?,?,?)").run(
+    p.id,
+    p.runId,
+    p.agentId,
+    p.proj,
+    JSON.stringify(p.action),
+    p.rationale,
+    p.state,
+    p.createdAt,
+    p.decidedAt,
+  );
+};
+
+export const updateProposal = (db: Database, p: Proposal): void => {
+  const res = db.query("UPDATE proposals SET state = ?, decided_at = ? WHERE id = ?").run(p.state, p.decidedAt, p.id);
+  if (res.changes === 0) throw new NotFound(`proposal ${p.id} not found`);
 };
 
 export const updateRun = (db: Database, r: AgentRun): void => {

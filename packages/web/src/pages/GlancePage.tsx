@@ -6,7 +6,7 @@ import { Chip, reset } from "../ui/primitives.tsx";
 import { C, FEED_COLOR, toneBorder, toneToChip } from "../theme.ts";
 
 /** Exhaustive renderer for every Glance card variant. */
-function Body({ b, cal }: { b: Block; cal: Calendar }) {
+function Body({ b, cal, pending }: { b: Block; cal: Calendar; pending: number }) {
   switch (b.kind) {
     case "blocked_release":
       return (
@@ -67,6 +67,7 @@ function Body({ b, cal }: { b: Block; cal: Calendar }) {
         <div style={{ fontSize: 12, color: C.dim, lineHeight: 1.6 }}>
           {b.agentName} · {relTime(b.run.startedAt, cal.asOf)}
           {b.run.model ? ` · ${b.run.model}` : ""}
+          {pending > 0 ? ` · ${pending} proposal${pending === 1 ? "" : "s"} to review on Agents` : ""}
           <div style={{ color: "#C6CAD6" }}>
             {b.run.output
               .split("\n")
@@ -102,7 +103,7 @@ function Body({ b, cal }: { b: Block; cal: Calendar }) {
   }
 }
 
-function GlanceCard({ b, cal, onOpen }: { b: Block; cal: Calendar; onOpen: (id: string, tab: ProjectTab) => void }) {
+function GlanceCard({ b, cal, pending, onOpen }: { b: Block; cal: Calendar; pending: number; onOpen: (id: string, tab: ProjectTab) => void }) {
   return (
     <button
       type="button"
@@ -130,7 +131,7 @@ function GlanceCard({ b, cal, onOpen }: { b: Block; cal: Calendar; onOpen: (id: 
         <span style={{ color: C.dim, fontSize: 11 }}>›</span>
       </div>
       <div style={{ fontSize: 14, fontWeight: 500, color: C.text, lineHeight: 1.4, letterSpacing: "-0.01em" }}>{b.title}</div>
-      <Body b={b} cal={cal} />
+      <Body b={b} cal={cal} pending={pending} />
     </button>
   );
 }
@@ -149,7 +150,13 @@ export function GlancePage({ state, userName, onOpen }: { state: AppState; userN
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
         {glance.blocks.map((b) => (
-          <GlanceCard key={`${b.kind}:${b.proj}:${b.title}`} b={b} cal={cal} onOpen={onOpen} />
+          <GlanceCard
+            key={`${b.kind}:${b.proj}:${b.title}`}
+            b={b}
+            cal={cal}
+            pending={b.kind === "agent_flag" ? state.proposals.filter((p) => p.runId === b.run.id && p.state === "pending").length : 0}
+            onOpen={onOpen}
+          />
         ))}
       </div>
     </div>

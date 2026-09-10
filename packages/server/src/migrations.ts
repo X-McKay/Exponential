@@ -206,6 +206,21 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX agent_runs_by_start ON agent_runs(started_at);
   `,
+  // Proposals: changes an agent suggested, applied only when a person accepts.
+  `
+  CREATE TABLE proposals (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    action TEXT NOT NULL,
+    rationale TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('pending','accepted','dismissed')),
+    created_at TEXT NOT NULL,
+    decided_at TEXT
+  );
+  CREATE INDEX proposals_by_state ON proposals(state, created_at);
+  `,
 ];
 
 export const migrate = (db: Database): void => {

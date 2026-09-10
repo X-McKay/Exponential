@@ -18,4 +18,4 @@ export const SEED_ASOF = "2026-09-10T09:00:00.000Z";
 
 /** Deep-cloned seed state, safe to mutate in tests. */
 export const seedState = (): AppState =>
-  structuredClone({ asOf: SEED_ASOF, syncSource: "sample", workspace: WORKSPACE, projects: PROJECTS, releases: RELEASES, dev: DEV(SEED_ASOF), agents: AGENTS, runs: RUNS(SEED_ASOF), llm: null, events: seedEvents(SEED_ASOF), calendar: CALENDAR(SEED_ASOF) });
+  structuredClone({ asOf: SEED_ASOF, syncSource: "sample", workspace: WORKSPACE, projects: PROJECTS, releases: RELEASES, dev: DEV(SEED_ASOF), agents: AGENTS, runs: RUNS(SEED_ASOF), llm: null, proposals: [], events: seedEvents(SEED_ASOF), calendar: CALENDAR(SEED_ASOF) });

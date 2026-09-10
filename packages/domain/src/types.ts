@@ -244,6 +244,30 @@ export interface LlmInfo {
   model: string | null;
 }
 
+// ---- proposals ------------------------------------------------------------
+
+/** A concrete change an agent suggests; applied only when a person accepts it. */
+export type ProposalAction =
+  | { type: "governance_status"; gid: string; status: GovStatus }
+  | { type: "milestone_status"; mid: string; status: MilestoneStatus }
+  | { type: "governance_item"; cat: string; name: string; status: GovStatus; owner: string; detail: string }
+  | { type: "calendar_event"; date: string; tab: ProjectTab; text: string; sub: string | null }
+  | { type: "targets"; fte: number; time: number };
+
+export type ProposalState = "pending" | "accepted" | "dismissed";
+
+export interface Proposal {
+  id: string;
+  runId: string;
+  agentId: string;
+  proj: string;
+  action: ProposalAction;
+  rationale: string;
+  state: ProposalState;
+  createdAt: string;
+  decidedAt: string | null;
+}
+
 // ---- feed & calendar ----------------------------------------------------
 
 export type FeedType = "build" | "eval" | "merge" | "deploy" | "gov" | "ship";
@@ -302,6 +326,8 @@ export interface AppState {
   runs: AgentRun[];
   /** The configured model, or null when agents cannot run. */
   llm: LlmInfo | null;
+  /** Pending proposals plus recently decided ones, newest first. */
+  proposals: Proposal[];
   /** Newest first, trailing EVENT_WINDOW_DAYS. */
   events: Event[];
   calendar: CalendarEvent[];

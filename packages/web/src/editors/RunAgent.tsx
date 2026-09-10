@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { AGENT_KIND_LABEL, PROJECT_TABS, RUN_STATE_ICON, relTime } from "@valueflow/domain";
-import type { Agent, AgentRun, Project, ProjectTab } from "@valueflow/domain";
+import type { Agent, AgentRun, AppState, Project, ProjectTab, Proposal } from "@valueflow/domain";
 import type { RunAgentInput } from "@valueflow/shared";
+import { ProposalList } from "../ui/Proposals.tsx";
 import { Btn, Chip, Lbl, Modal, inpStyle } from "../ui/primitives.tsx";
 import { C, RUN_COLOR } from "../theme.ts";
 
@@ -153,7 +154,25 @@ function Markdown({ text }: { text: string }) {
   );
 }
 
-export function RunViewer({ run, agent, project, asOf, onClose }: { run: AgentRun; agent: Agent | undefined; project: Project | undefined; asOf: string; onClose: () => void }) {
+export function RunViewer({
+  run,
+  agent,
+  project,
+  asOf,
+  proposals,
+  state,
+  onDecide,
+  onClose,
+}: {
+  run: AgentRun;
+  agent: Agent | undefined;
+  project: Project | undefined;
+  asOf: string;
+  proposals: Proposal[];
+  state: Pick<AppState, "projects" | "agents">;
+  onDecide: (id: string, decision: "accept" | "dismiss") => void;
+  onClose: () => void;
+}) {
   const tone = run.state === "attention" ? "warn" : run.state === "failed" ? "bad" : run.state === "done" ? "good" : "accent";
   return (
     <Modal title={`${agent?.name ?? run.agentId} · ${project?.name ?? run.proj}`} onClose={onClose}>
@@ -174,6 +193,14 @@ export function RunViewer({ run, agent, project, asOf, onClose }: { run: AgentRu
         </div>
       )}
       <div style={{ fontSize: 13, fontWeight: 500, color: C.text, marginBottom: 10 }}>{run.summary}</div>
+      {proposals.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, color: C.mut, marginBottom: 6 }}>
+            {proposals.filter((p) => p.state === "pending").length} of {proposals.length} proposal{proposals.length === 1 ? "" : "s"} awaiting a decision
+          </div>
+          <ProposalList proposals={proposals} state={state} asOf={asOf} onDecide={onDecide} />
+        </div>
+      )}
       {run.state === "failed" ? (
         <div style={{ fontSize: 12.5, color: "#F08A84", lineHeight: 1.5 }}>{run.error ?? "The run failed without a message."}</div>
       ) : run.output ? (

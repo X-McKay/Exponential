@@ -1,6 +1,6 @@
 // ================= typed API client =================
 
-import type { Agent, AgentRun, CalendarEvent, DevFacts, GovernanceItem, ImpactPair, Metric, MetricReading, Milestone, Project, Release, SyncRun, Workspace } from "@valueflow/domain";
+import type { Agent, AgentRun, CalendarEvent, DevFacts, GovernanceItem, ImpactPair, Metric, MetricReading, Milestone, Project, Proposal, Release, SyncRun, Workspace } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import type {
   AgentsInput,
@@ -74,6 +74,8 @@ export const api = {
   syncProject: (pid: string) => request<{ run: SyncRun; facts: DevFacts | null }>("POST", routes.sync(pid)),
   syncStatus: () => request<{ source: string | null; projects: Record<string, SyncRun | null> }>("GET", routes.syncStatus()),
   setAgents: (body: AgentsInput) => request<Agent[]>("PUT", routes.agents(), body),
+  acceptProposal: (id: string) => request<Proposal>("POST", routes.proposalAccept(id)),
+  dismissProposal: (id: string) => request<Proposal>("POST", routes.proposalDismiss(id)),
   runAgent: (input: RunAgentInput) => {
     const { agentId, ...body } = input;
     return request<AgentRun>("POST", routes.agentRuns(agentId), body);

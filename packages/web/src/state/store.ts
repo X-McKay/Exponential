@@ -29,6 +29,8 @@ export interface Store {
   saveAgents: (agents: Agent[]) => Promise<void>;
   /** Start an agent run; a working placeholder shows until the model replies. */
   runAgent: (input: RunAgentInput) => Promise<void>;
+  /** Apply or discard an agent's proposal; accepting reloads state so every derivation follows. */
+  decideProposal: (id: string, decision: "accept" | "dismiss") => Promise<void>;
   saveCalendar: (ev: CalendarEvent, isNew: boolean) => Promise<void>;
   deleteCalendar: (id: string) => Promise<void>;
   saveWorkspace: (w: Workspace) => Promise<void>;
@@ -250,6 +252,24 @@ export const useStore = (): Store => {
     [fail],
   );
 
+  const decideProposal = useCallback(
+    async (id: string, decision: "accept" | "dismiss") => {
+      const next = decision === "accept" ? "accepted" : "dismissed";
+      setState((s) => (s ? { ...s, proposals: s.proposals.map((p) => (p.id === id ? { ...p, state: next } : p)) } : s));
+      try {
+        if (decision === "accept") {
+          await api.acceptProposal(id);
+          await reload();
+        } else {
+          await api.dismissProposal(id);
+        }
+      } catch (e) {
+        fail(e);
+      }
+    },
+    [fail, reload],
+  );
+
   const saveCalendar = useCallback(
     (ev: CalendarEvent, isNew: boolean) =>
       commit(
@@ -296,6 +316,7 @@ export const useStore = (): Store => {
       syncProject,
       saveAgents,
       runAgent,
+      decideProposal,
       saveCalendar,
       deleteCalendar,
       saveWorkspace,
@@ -318,6 +339,7 @@ export const useStore = (): Store => {
       syncProject,
       saveAgents,
       runAgent,
+      decideProposal,
       saveCalendar,
       deleteCalendar,
       saveWorkspace,
