@@ -117,67 +117,84 @@ export interface Release {
   criteria: Criterion[];
 }
 
-// ---- development activity ----------------------------------------------
+// ---- development activity (facts synced from source control and CI) ----
 
 export type CheckStatus = "pass" | "fail" | "running";
-export type PrStatus = "open" | "merged";
-export type BuildStatus = "pass" | "fail";
+export const CHECK_STATUSES: readonly CheckStatus[] = ["pass", "fail", "running"];
+export type PrStatus = "open" | "merged" | "closed";
+export const PR_STATUSES: readonly PrStatus[] = ["open", "merged", "closed"];
+export type BuildStatus = "pass" | "fail" | "running";
+export const BUILD_STATUSES: readonly BuildStatus[] = ["pass", "fail", "running"];
+export type BuildKind = "ci" | "deploy" | "eval";
+export const BUILD_KINDS: readonly BuildKind[] = ["ci", "deploy", "eval"];
 
-export interface DevStats {
-  coverage: number;
-  quality: string;
-  buildPass: number;
-  mergedPRs: number;
-  medianReview: string;
-  deploys: number;
-}
-
-export interface DevRepo {
-  name: string;
+/** Latest known state of one repository. */
+export interface RepoStat {
+  repo: string;
   branch: string;
-  coverage: number;
-  quality: string;
-  lang: string;
+  lang: string | null;
+  /** Test coverage %, when a source reports it. */
+  coverage: number | null;
+  /** Static-analysis grade, when a source reports it. */
+  quality: string | null;
+  /** ISO timestamp the numbers were taken. */
+  measuredAt: string;
 }
 
 export interface PullRequest {
-  id: string;
-  title: string;
   repo: string;
+  number: number;
+  title: string;
+  /** Author initials (matched to the team where possible). */
   author: string;
   status: PrStatus;
   checks: CheckStatus;
   add: number;
   del: number;
-  age: string;
+  openedAt: string;
+  mergedAt: string | null;
+  updatedAt: string;
   reviewers: string[];
+  url: string | null;
 }
 
 export interface Build {
-  id: string;
   repo: string;
+  /** Source-specific id ("#1148", a workflow run id). */
+  id: string;
   branch: string;
+  kind: BuildKind;
   status: BuildStatus;
   note: string;
-  when: string;
-  dur: string;
+  startedAt: string;
+  durationS: number;
+  url: string | null;
 }
 
-export interface Contributor {
-  ini: string;
-  name: string;
-  commits: number;
-  reviews: number;
+/** Commits by one author in one repo on one day. */
+export interface CommitDay {
+  repo: string;
+  /** YYYY-MM-DD */
+  day: string;
+  author: string;
+  count: number;
 }
 
-export interface DevActivity {
-  stats: DevStats;
-  repos: DevRepo[];
-  activitySeed: number;
-  activityLevel: number;
+export interface SyncRun {
+  source: string;
+  startedAt: string;
+  finishedAt: string;
+  ok: boolean;
+  message: string;
+}
+
+/** Everything synced for one project. Stats, charts, and rankings derive from these (see dev.ts). */
+export interface DevFacts {
+  repos: RepoStat[];
   prs: PullRequest[];
   builds: Build[];
-  people: Contributor[];
+  commits: CommitDay[];
+  lastSync: SyncRun | null;
 }
 
 // ---- agents -------------------------------------------------------------
@@ -255,10 +272,12 @@ export interface Workspace {
 export interface AppState {
   /** ISO timestamp of the server clock when the state was read; "today" for every derivation. */
   asOf: string;
+  /** Name of the configured development-facts source, or null when syncing is off. */
+  syncSource: string | null;
   workspace: Workspace;
   projects: Project[];
   releases: Record<string, Release[]>;
-  dev: Record<string, DevActivity>;
+  dev: Record<string, DevFacts>;
   agents: Agent[];
   feed: FeedDay[];
   upcoming: Upcoming[];

@@ -1,33 +1,36 @@
 import { useState } from "react";
-import type { Agent, AppState, DevActivity, FeedDay, Upcoming, Workspace } from "@valueflow/domain";
-import { AgentsInputSchema, DevActivitySchema, FeedInputSchema, UpcomingInputSchema } from "@valueflow/shared";
+import { relTime } from "@valueflow/domain";
+import type { Agent, AppState, FeedDay, Upcoming, Workspace } from "@valueflow/domain";
+import { AgentsInputSchema, FeedInputSchema, UpcomingInputSchema } from "@valueflow/shared";
 import { JsonDocEditor } from "../editors/JsonDocEditor.tsx";
 import { WorkspaceEditor } from "../editors/WorkspaceEditor.tsx";
 import { Avatar, SectionCard, ghostBtn } from "../ui/primitives.tsx";
 import { C } from "../theme.ts";
 
-/** Starting point for a project that has no development activity yet. */
-export const DEV_TEMPLATE: DevActivity = {
-  stats: { coverage: 0, quality: "B", buildPass: 100, mergedPRs: 0, medianReview: "0h", deploys: 0 },
-  repos: [],
-  activitySeed: 1,
-  activityLevel: 3,
-  prs: [],
-  builds: [],
-  people: [],
-};
+type Editing = { kind: "workspace" } | { kind: "agents" } | { kind: "feed" } | { kind: "upcoming" } | null;
 
-type Editing = { kind: "workspace" } | { kind: "agents" } | { kind: "feed" } | { kind: "upcoming" } | { kind: "dev"; pid: string } | null;
-
-function Row({ title, sub, action, onClick }: { title: string; sub: string; action: string; onClick: () => void }) {
+function Row({ title, sub, action, onClick, disabled }: { title: string; sub: string; action: string; onClick: () => void | Promise<void>; disabled?: boolean }) {
+  const [busy, setBusy] = useState(false);
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderTop: `1px solid ${C.line}` }}>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ fontSize: 13, color: C.text, display: "block" }}>{title}</span>
         <span style={{ fontSize: 12, color: C.dim }}>{sub}</span>
       </span>
-      <button type="button" className="vf-ghost" onClick={onClick} style={ghostBtn}>
-        {action}
+      <button
+        type="button"
+        className="vf-ghost"
+        disabled={busy || disabled}
+        onClick={() => {
+          const r = onClick();
+          if (r instanceof Promise) {
+            setBusy(true);
+            void r.finally(() => setBusy(false));
+          }
+        }}
+        style={{ ...ghostBtn, opacity: busy || disabled ? 0.5 : 1 }}
+      >
+        {busy ? "Working…" : action}
       </button>
     </div>
   );
@@ -47,14 +50,14 @@ export function DataPage({
   onAgents,
   onFeed,
   onUpcoming,
-  onDev,
+  onSync,
 }: {
   state: AppState;
   onWorkspace: (w: Workspace) => void;
   onAgents: (a: Agent[]) => void;
   onFeed: (f: FeedDay[]) => void;
   onUpcoming: (u: Upcoming[]) => void;
-  onDev: (pid: string, d: DevActivity) => void;
+  onSync: (pid: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<Editing>(null);
   const close = () => setEditing(null);
@@ -88,19 +91,18 @@ export function DataPage({
         <Row title="Calendar" sub={`${count(state.upcoming.length, "upcoming item")} · the "Coming up" card and the narrative's next date`} action="Edit JSON" onClick={() => setEditing({ kind: "upcoming" })} />
       </SectionCard>
 
-      <SectionCard title="Development activity" pad="0 14px 4px">
+      <SectionCard
+        title="Development activity"
+        pad="0 14px 4px"
+        right={<span style={{ fontSize: 12, color: C.dim }}>{state.syncSource ? `source: ${state.syncSource}` : "syncing is off (SYNC_SOURCE=none)"}</span>}
+      >
         {state.projects.length === 0 && <div style={{ fontSize: 12, color: C.dim, padding: "12px 0" }}>No projects yet.</div>}
         {state.projects.map((p) => {
           const d = state.dev[p.id];
-          return (
-            <Row
-              key={p.id}
-              title={p.name}
-              sub={d ? `${count(d.repos.length, "repo")}, ${count(d.prs.length, "PR")}, ${count(d.builds.length, "build")}, ${count(d.people.length, "contributor")}` : "No development data connected"}
-              action={d ? "Edit JSON" : "Add data"}
-              onClick={() => setEditing({ kind: "dev", pid: p.id })}
-            />
-          );
+          const run = d?.lastSync ?? null;
+          const summary = d ? `${count(d.repos.length, "repo")}, ${count(d.prs.length, "PR")}, ${count(d.builds.length, "build")}, ${count(d.commits.reduce((a, c) => a + c.count, 0), "commit")}` : "nothing synced yet";
+          const when = run ? `${run.ok ? "synced" : "sync failed"} ${relTime(run.finishedAt, state.asOf)} via ${run.source}${run.ok ? "" : " — " + run.message}` : "never synced";
+          return <Row key={p.id} title={p.name} sub={`${summary} · ${when}`} action="Sync now" disabled={!state.syncSource || p.repos.length === 0} onClick={() => onSync(p.id)} />;
         })}
       </SectionCard>
 
@@ -148,19 +150,6 @@ export function DataPage({
           schema={UpcomingInputSchema}
           onSave={(u) => {
             onUpcoming(u);
-            close();
-          }}
-          onClose={close}
-        />
-      )}
-      {editing?.kind === "dev" && (
-        <JsonDocEditor
-          title={`Development activity — ${state.projects.find((p) => p.id === editing.pid)?.name ?? editing.pid}`}
-          help="Stats, repositories, pull requests, builds, and contributors as mirrored from CI and source control. Percentages are 0–100."
-          value={state.dev[editing.pid] ?? DEV_TEMPLATE}
-          schema={DevActivitySchema}
-          onSave={(d) => {
-            onDev(editing.pid, d);
             close();
           }}
           onClose={close}

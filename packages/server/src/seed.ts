@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { AGENTS, DEV, FEED, PROJECTS, RELEASES, SEED_ASOF, UPCOMING, WORKSPACE, addMonths, isMeasurable, monthsBetween, ymOf } from "@valueflow/domain";
+import { replaceDevFacts } from "./repo.ts";
 import type { AppState, Metric } from "@valueflow/domain";
 
 /** The instant the fixtures describe. Seeding at another time shifts every planned month and timestamp by the same offset. */
@@ -38,7 +39,7 @@ export const trajectory = (metric: Pick<Metric, "current">, seed: number, n = RE
 export const isSeeded = (db: Database): boolean =>
   (db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM projects").get()?.n ?? 0) > 0;
 
-export const fixtureState = (): AppState => ({ asOf: SEED_ASOF, workspace: WORKSPACE, projects: PROJECTS, releases: RELEASES, dev: DEV, agents: AGENTS, feed: FEED, upcoming: UPCOMING });
+export const fixtureState = (asOf = SEED_ASOF): AppState => ({ asOf, syncSource: null, workspace: WORKSPACE, projects: PROJECTS, releases: RELEASES, dev: DEV(asOf), agents: AGENTS, feed: FEED, upcoming: UPCOMING });
 
 export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_NOW): void => {
   // Planned months are relative to the fixtures' own "today"; keep them the same distance from `now`.
@@ -55,7 +56,6 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
     release: db.query("INSERT INTO releases (project_id, id, name, month, sort) VALUES (?,?,?,?,?)"),
     relMs: db.query("INSERT INTO release_milestones (project_id, release_id, milestone_id, sort) VALUES (?,?,?,?)"),
     crit: db.query("INSERT INTO release_criteria (project_id, release_id, sort, type, milestone_id, governance_id, ok, label) VALUES (?,?,?,?,?,?,?,?)"),
-    dev: db.query("INSERT INTO dev_activity (project_id, doc) VALUES (?,?)"),
     agent: db.query("INSERT INTO agents (id, sort, doc) VALUES (?,?,?)"),
     feed: db.query("INSERT INTO feed_days (sort, doc) VALUES (?,?)"),
     upcoming: db.query("INSERT INTO upcoming (sort, doc) VALUES (?,?)"),
@@ -99,9 +99,12 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
           }
         });
       });
-      const d = state.dev[p.id];
-      if (d) q.dev.run(p.id, JSON.stringify(d));
     });
+    // Development facts, as the sample source would have synced them at `now`.
+    for (const p of state.projects) {
+      const d = state.dev[p.id];
+      if (d) replaceDevFacts(db, p.id, d, d.lastSync ?? { source: "sample", startedAt: now.toISOString(), finishedAt: now.toISOString(), ok: true, message: "seeded" });
+    }
     state.agents.forEach((a, i) => q.agent.run(a.id, i, JSON.stringify(a)));
     state.feed.forEach((f, i) => q.feed.run(i, JSON.stringify(f)));
     state.upcoming.forEach((u, i) => q.upcoming.run(i, JSON.stringify(u)));
@@ -111,6 +114,6 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
 /** Seed only when empty; returns whether seeding happened. */
 export const ensureSeeded = (db: Database, now = new Date()): boolean => {
   if (isSeeded(db)) return false;
-  seed(db, fixtureState(), now);
+  seed(db, fixtureState(now.toISOString()), now);
   return true;
 };

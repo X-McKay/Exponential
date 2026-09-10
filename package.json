@@ -10,6 +10,7 @@
     "dev": "bun run --cwd packages/server dev",
     "start": "bun run --cwd packages/server start",
     "seed": "bun run --cwd packages/server seed",
+    "sync": "bun run --cwd packages/server sync",
     "build": "bun run --cwd packages/web build",
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json",

@@ -5,7 +5,7 @@
 // reloads from the server and surfaces the error.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Agent, AppState, DevActivity, FeedDay, GovernanceItem, ImpactPair, Milestone, Project, Release, Upcoming, Workspace } from "@valueflow/domain";
+import type { Agent, AppState, FeedDay, GovernanceItem, ImpactPair, Milestone, Project, Release, Upcoming, Workspace } from "@valueflow/domain";
 import type { ProjectInput } from "@valueflow/shared";
 import { api } from "../api/client.ts";
 
@@ -24,7 +24,8 @@ export interface Store {
   deleteGovernance: (pid: string, gid: string) => Promise<void>;
   saveRelease: (pid: string, rel: Release, isNew: boolean) => Promise<void>;
   deleteRelease: (pid: string, rid: string) => Promise<void>;
-  saveDev: (pid: string, doc: DevActivity) => Promise<void>;
+  /** Pull fresh development facts for a project from the configured source. */
+  syncProject: (pid: string) => Promise<void>;
   saveAgents: (agents: Agent[]) => Promise<void>;
   saveFeed: (feed: FeedDay[]) => Promise<void>;
   saveUpcoming: (items: Upcoming[]) => Promise<void>;
@@ -199,13 +200,17 @@ export const useStore = (): Store => {
     [commit],
   );
 
-  const saveDev = useCallback(
-    (pid: string, doc: DevActivity) =>
-      commit(
-        (s) => ({ ...s, dev: { ...s.dev, [pid]: doc } }),
-        () => api.setDev(pid, doc),
-      ),
-    [commit],
+  const syncProject = useCallback(
+    async (pid: string) => {
+      try {
+        const { run, facts } = await api.syncProject(pid);
+        if (facts) setState((s) => (s ? { ...s, dev: { ...s.dev, [pid]: facts } } : s));
+        if (!run.ok) setError(`Sync failed — ${run.message}`);
+      } catch (e) {
+        fail(e);
+      }
+    },
+    [fail],
   );
   const saveAgents = useCallback(
     (agents: Agent[]) =>
@@ -258,7 +263,7 @@ export const useStore = (): Store => {
       deleteGovernance,
       saveRelease,
       deleteRelease,
-      saveDev,
+      syncProject,
       saveAgents,
       saveFeed,
       saveUpcoming,
@@ -279,7 +284,7 @@ export const useStore = (): Store => {
       deleteGovernance,
       saveRelease,
       deleteRelease,
-      saveDev,
+      syncProject,
       saveAgents,
       saveFeed,
       saveUpcoming,

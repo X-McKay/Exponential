@@ -14,8 +14,8 @@ describe("detectSignals", () => {
     expect(s.readyRel).toEqual([]);
     expect(s.shortfalls.map((x) => `${x.m.id}:${x.gap}`)).toEqual(["MS-31:6", "MS-13:4", "MS-21:2"]);
     expect(s.nearStretch).toEqual([]);
-    expect(s.failPRs.map((x) => x.pr.id)).toEqual(["#409"]);
-    expect(s.failBuilds.map((x) => x.b.id)).toEqual(["#1148", "#400", "#96"]);
+    expect(s.failPRs.map((x) => x.pr.number)).toEqual([409]);
+    expect(s.failBuilds.map((x) => x.b.id)).toEqual(["#1148", "#400", "#96", "#93"]);
     expect(s.t1gaps.map((p) => p.id)).toEqual(["ima"]);
     expect(s.bestValue?.id).toBe("onboarding");
   });
@@ -66,7 +66,7 @@ describe("rankBlocks / composeGlance", () => {
   });
   test("ci_failing card links the PR to its failing build", () => {
     const b = find(composeGlance(seedState()), "ci_failing")!;
-    expect(b.pr.id).toBe("#409");
+    expect(b.pr.number).toBe(409);
     expect(b.build?.note).toBe("test_ocr_fallback: 3 failures");
   });
   test("tier1_gaps card lists up to three missing items", () => {
@@ -92,7 +92,7 @@ describe("rankBlocks / composeGlance", () => {
     expect(find(blocks, "ready_release")!.title).toBe("R1 Shadow mode — all go-live criteria met");
   });
   test("empty state still composes without throwing", () => {
-    const empty: AppState = { asOf: "2026-09-10T09:00:00.000Z", workspace: { user: { name: "You", ini: "ME" } }, projects: [], releases: {}, dev: {}, agents: [], feed: [], upcoming: [] };
+    const empty: AppState = { asOf: "2026-09-10T09:00:00.000Z", syncSource: null, workspace: { user: { name: "You", ini: "ME" } }, projects: [], releases: {}, dev: {}, agents: [], feed: [], upcoming: [] };
     expect(composeGlance(empty)).toEqual([]);
     expect(composeGlancePage(empty).narrative).toEqual(["No releases are currently blocked."]);
   });
@@ -104,7 +104,7 @@ describe("writeNarrative", () => {
     expect(page.narrative).toEqual([
       "One release is blocked — R1 Shadow mode on IMA compliance rule extra… (3 criteria unmet).",
       "The closest fix: analyst quality rating on Draft generation pipeline sits 6pts under its base gate.",
-      "3 builds are red, most recently on doc-ingest-pipeline.",
+      "4 builds are red, most recently on doc-ingest-pipeline.",
       "Next on the calendar: Sep 14 — pen test window opens (IMA compliance rule extra…).",
     ]);
   });

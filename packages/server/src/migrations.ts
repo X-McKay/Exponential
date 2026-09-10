@@ -127,6 +127,44 @@ const MIGRATIONS: readonly string[] = [
   UPDATE releases SET month = printf('%04d-%02d', 2026 + month_idx / 12, month_idx % 12 + 1);
   ALTER TABLE releases DROP COLUMN month_idx;
   `,
+  // Development activity becomes facts synced from source control and CI;
+  // the KPI tiles, commit chart, and rankings derive from these rows.
+  `
+  CREATE TABLE repo_stats (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    repo TEXT NOT NULL, branch TEXT NOT NULL, lang TEXT, coverage REAL, quality TEXT, measured_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, repo)
+  );
+  CREATE TABLE pull_requests (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    repo TEXT NOT NULL, number INTEGER NOT NULL, title TEXT NOT NULL, author TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('open','merged','closed')),
+    checks TEXT NOT NULL CHECK (checks IN ('pass','fail','running')),
+    additions INTEGER NOT NULL, deletions INTEGER NOT NULL,
+    opened_at TEXT NOT NULL, merged_at TEXT, updated_at TEXT NOT NULL, reviewers TEXT NOT NULL, url TEXT,
+    PRIMARY KEY (project_id, repo, number)
+  );
+  CREATE TABLE builds (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    repo TEXT NOT NULL, id TEXT NOT NULL, branch TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('ci','deploy','eval')),
+    status TEXT NOT NULL CHECK (status IN ('pass','fail','running')),
+    note TEXT NOT NULL, started_at TEXT NOT NULL, duration_s INTEGER NOT NULL, url TEXT,
+    PRIMARY KEY (project_id, repo, id)
+  );
+  CREATE TABLE commit_days (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    repo TEXT NOT NULL, day TEXT NOT NULL, author TEXT NOT NULL, count INTEGER NOT NULL,
+    PRIMARY KEY (project_id, repo, day, author)
+  );
+  CREATE TABLE sync_runs (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    source TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT NOT NULL, ok INTEGER NOT NULL, message TEXT NOT NULL
+  );
+  CREATE INDEX sync_runs_by_project ON sync_runs(project_id, seq);
+  DROP TABLE dev_activity;
+  `,
 ];
 
 export const migrate = (db: Database): void => {

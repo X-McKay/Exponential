@@ -113,41 +113,6 @@ export type WorkspaceInput = z.infer<typeof WorkspaceInputSchema>;
 
 const projectTab = enumOf(PROJECT_TABS);
 
-export const DevActivitySchema = z.object({
-  stats: z.object({
-    coverage: pct,
-    quality: short(4),
-    buildPass: pct,
-    mergedPRs: z.number().int().min(0),
-    medianReview: short(20),
-    deploys: z.number().int().min(0),
-  }),
-  repos: z.array(z.object({ name: short(120), branch: short(80), coverage: pct, quality: short(4), lang: short(40) })).max(30),
-  activitySeed: z.number().finite(),
-  activityLevel: z.number().finite().min(0).max(100),
-  prs: z
-    .array(
-      z.object({
-        id: short(20),
-        title: short(200),
-        repo: short(120),
-        author: short(3),
-        status: z.enum(["open", "merged"]),
-        checks: z.enum(["pass", "fail", "running"]),
-        add: z.number().int().min(0),
-        del: z.number().int().min(0),
-        age: short(20),
-        reviewers: z.array(short(3)).max(8),
-      }),
-    )
-    .max(50),
-  builds: z
-    .array(z.object({ id: short(20), repo: short(120), branch: short(80), status: z.enum(["pass", "fail"]), note: short(200), when: short(20), dur: short(20) }))
-    .max(50),
-  people: z.array(z.object({ ini: short(3), name: short(80), commits: z.number().int().min(0), reviews: z.number().int().min(0) })).max(30),
-});
-export type DevActivityInput = z.infer<typeof DevActivitySchema>;
-
 export const AgentSchema = z.object({
   id,
   name: short(40),

@@ -7,8 +7,9 @@ import type { Database } from "bun:sqlite";
 import type {
   Agent,
   AppState,
+  Build,
   Criterion,
-  DevActivity,
+  DevFacts,
   FeedDay,
   GovernanceItem,
   Metric,
@@ -16,14 +17,15 @@ import type {
   Milestone,
   MilestoneStatus,
   Project,
+  PullRequest,
   Release,
   RiskTier,
+  SyncRun,
   Upcoming,
   Workspace,
 } from "@valueflow/domain";
 import type {
   AgentsInput,
-  DevActivityInput,
   FeedInput,
   GovernanceInput,
   GovernanceItemInput,
@@ -128,9 +130,57 @@ interface WorkspaceRow {
   user_name: string;
   user_ini: string;
 }
-interface DevRow {
+interface RepoStatRow {
   project_id: string;
-  doc: string;
+  repo: string;
+  branch: string;
+  lang: string | null;
+  coverage: number | null;
+  quality: string | null;
+  measured_at: string;
+}
+interface PrRow {
+  project_id: string;
+  repo: string;
+  number: number;
+  title: string;
+  author: string;
+  status: PullRequest["status"];
+  checks: PullRequest["checks"];
+  additions: number;
+  deletions: number;
+  opened_at: string;
+  merged_at: string | null;
+  updated_at: string;
+  reviewers: string;
+  url: string | null;
+}
+interface BuildRow {
+  project_id: string;
+  repo: string;
+  id: string;
+  branch: string;
+  kind: Build["kind"];
+  status: Build["status"];
+  note: string;
+  started_at: string;
+  duration_s: number;
+  url: string | null;
+}
+interface CommitRow {
+  project_id: string;
+  repo: string;
+  day: string;
+  author: string;
+  count: number;
+}
+interface SyncRow {
+  project_id: string;
+  source: string;
+  started_at: string;
+  finished_at: string;
+  ok: number;
+  message: string;
 }
 interface ReadingRow {
   project_id: string;
@@ -186,9 +236,9 @@ export const loadState = (db: Database, now: Date = new Date()): AppState => {
   const releases = groupBy(db.query<ReleaseRow, []>("SELECT * FROM releases ORDER BY sort").all(), (r) => r.project_id);
   const relMs = groupBy(db.query<RelMsRow, []>("SELECT * FROM release_milestones ORDER BY sort").all(), (r) => `${r.project_id} ${r.release_id}`);
   const crits = groupBy(db.query<CritRow, []>("SELECT * FROM release_criteria ORDER BY sort").all(), (r) => `${r.project_id} ${r.release_id}`);
-  const dev = new Map(db.query<DevRow, []>("SELECT * FROM dev_activity").all().map((r) => [r.project_id, JSON.parse(r.doc) as DevActivity]));
+  const dev = loadDevFacts(db);
 
-  const out: AppState = { asOf: now.toISOString(), workspace: loadWorkspace(db), projects: [], releases: {}, dev: {}, agents: [], feed: [], upcoming: [] };
+  const out: AppState = { asOf: now.toISOString(), syncSource: null, workspace: loadWorkspace(db), projects: [], releases: {}, dev: {}, agents: [], feed: [], upcoming: [] };
   for (const p of projects) {
     const ms: Milestone[] = (milestones.get(p.id) ?? []).map((m) => ({
       id: m.id,
@@ -242,6 +292,76 @@ export const loadState = (db: Database, now: Date = new Date()): AppState => {
   out.feed = db.query<DocRow, []>("SELECT doc FROM feed_days ORDER BY sort").all().map((r) => JSON.parse(r.doc) as FeedDay);
   out.upcoming = db.query<DocRow, []>("SELECT doc FROM upcoming ORDER BY sort").all().map((r) => JSON.parse(r.doc) as Upcoming);
   return out;
+};
+
+/** Development facts per project; only projects with at least one synced row or run appear. */
+export const loadDevFacts = (db: Database): Map<string, DevFacts> => {
+  const out = new Map<string, DevFacts>();
+  const get = (pid: string): DevFacts => {
+    let f = out.get(pid);
+    if (!f) {
+      f = { repos: [], prs: [], builds: [], commits: [], lastSync: null };
+      out.set(pid, f);
+    }
+    return f;
+  };
+  for (const r of db.query<RepoStatRow, []>("SELECT * FROM repo_stats ORDER BY project_id, repo").all())
+    get(r.project_id).repos.push({ repo: r.repo, branch: r.branch, lang: r.lang, coverage: r.coverage, quality: r.quality, measuredAt: r.measured_at });
+  for (const r of db.query<PrRow, []>("SELECT * FROM pull_requests ORDER BY project_id, updated_at DESC, repo, number").all())
+    get(r.project_id).prs.push({
+      repo: r.repo,
+      number: r.number,
+      title: r.title,
+      author: r.author,
+      status: r.status,
+      checks: r.checks,
+      add: r.additions,
+      del: r.deletions,
+      openedAt: r.opened_at,
+      mergedAt: r.merged_at,
+      updatedAt: r.updated_at,
+      reviewers: JSON.parse(r.reviewers) as string[],
+      url: r.url,
+    });
+  for (const r of db.query<BuildRow, []>("SELECT * FROM builds ORDER BY project_id, started_at DESC, repo, id").all())
+    get(r.project_id).builds.push({ repo: r.repo, id: r.id, branch: r.branch, kind: r.kind, status: r.status, note: r.note, startedAt: r.started_at, durationS: r.duration_s, url: r.url });
+  for (const r of db.query<CommitRow, []>("SELECT * FROM commit_days ORDER BY project_id, repo, day, author").all())
+    get(r.project_id).commits.push({ repo: r.repo, day: r.day, author: r.author, count: r.count });
+  for (const r of db
+    .query<SyncRow, []>("SELECT s.* FROM sync_runs s WHERE s.seq = (SELECT MAX(seq) FROM sync_runs WHERE project_id = s.project_id)")
+    .all())
+    get(r.project_id).lastSync = { source: r.source, startedAt: r.started_at, finishedAt: r.finished_at, ok: r.ok === 1, message: r.message };
+  return out;
+};
+
+export const recordSyncRun = (db: Database, pid: string, run: SyncRun): void => {
+  db.query("INSERT INTO sync_runs (project_id, source, started_at, finished_at, ok, message) VALUES (?,?,?,?,?,?)").run(
+    pid,
+    run.source,
+    run.startedAt,
+    run.finishedAt,
+    run.ok ? 1 : 0,
+    run.message,
+  );
+};
+
+/** Replace a project's synced facts wholesale and record the run that produced them. */
+export const replaceDevFacts = (db: Database, pid: string, facts: Omit<DevFacts, "lastSync">, run: SyncRun): void => {
+  if (!projectExists(db, pid)) throw new NotFound(`project ${pid} not found`);
+  db.transaction(() => {
+    for (const t of ["repo_stats", "pull_requests", "builds", "commit_days"]) db.query(`DELETE FROM ${t} WHERE project_id = ?`).run(pid);
+    const qs = db.query("INSERT INTO repo_stats (project_id, repo, branch, lang, coverage, quality, measured_at) VALUES (?,?,?,?,?,?,?)");
+    for (const r of facts.repos) qs.run(pid, r.repo, r.branch, r.lang, r.coverage, r.quality, r.measuredAt);
+    const qp = db.query(
+      "INSERT OR REPLACE INTO pull_requests (project_id, repo, number, title, author, status, checks, additions, deletions, opened_at, merged_at, updated_at, reviewers, url) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    );
+    for (const p of facts.prs) qp.run(pid, p.repo, p.number, p.title, p.author, p.status, p.checks, p.add, p.del, p.openedAt, p.mergedAt, p.updatedAt, JSON.stringify(p.reviewers), p.url);
+    const qb = db.query("INSERT OR REPLACE INTO builds (project_id, repo, id, branch, kind, status, note, started_at, duration_s, url) VALUES (?,?,?,?,?,?,?,?,?,?)");
+    for (const b of facts.builds) qb.run(pid, b.repo, b.id, b.branch, b.kind, b.status, b.note, b.startedAt, b.durationS, b.url);
+    const qc = db.query("INSERT OR REPLACE INTO commit_days (project_id, repo, day, author, count) VALUES (?,?,?,?,?)");
+    for (const c of facts.commits) qc.run(pid, c.repo, c.day, c.author, c.count);
+    recordSyncRun(db, pid, run);
+  })();
 };
 
 export const loadWorkspace = (db: Database): Workspace => {
@@ -491,11 +611,6 @@ export const deleteRelease = (db: Database, pid: string, rid: string): void => {
 };
 
 // ---- JSON documents ------------------------------------------------------
-
-export const setDevActivity = (db: Database, pid: string, doc: DevActivityInput): void => {
-  if (!projectExists(db, pid)) throw new NotFound(`project ${pid} not found`);
-  db.query("INSERT OR REPLACE INTO dev_activity (project_id, doc) VALUES (?, ?)").run(pid, JSON.stringify(doc));
-};
 
 export const setAgents = (db: Database, agents: AgentsInput): void => {
   db.transaction(() => {

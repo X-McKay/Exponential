@@ -7,7 +7,6 @@ import type { Database } from "bun:sqlite";
 import { composeGlancePage } from "@valueflow/domain";
 import {
   AgentsInputSchema,
-  DevActivitySchema,
   FeedInputSchema,
   GovernanceInputSchema,
   GovernanceItemInputSchema,
@@ -36,7 +35,6 @@ import {
   loadWorkspace,
   recordReading,
   setAgents,
-  setDevActivity,
   setFeed,
   setTargets,
   setUpcoming,
@@ -46,6 +44,8 @@ import {
   upsertProject,
   upsertRelease,
 } from "./repo.ts";
+import type { RepoSource } from "./connectors/index.ts";
+import { syncProject } from "./sync.ts";
 
 type Params = Record<string, string>;
 type Handler = (req: Request, params: Params) => Promise<Response> | Response;
@@ -104,11 +104,14 @@ export interface App {
 export interface AppOptions {
   /** Override the clock (tests, demos: `VALUEFLOW_NOW`). */
   now?: () => Date;
+  /** Where development facts come from; null disables syncing. */
+  source?: RepoSource | null;
 }
 
 export const createApp = (db: Database, options: AppOptions = {}): App => {
   const now = options.now ?? (() => new Date());
-  const state = () => loadState(db, now());
+  const source = options.source ?? null;
+  const state = () => ({ ...loadState(db, now()), syncSource: source?.name ?? null });
   const routes: Route[] = [];
   const on = (method: Method, pattern: string, handler: Handler): void => {
     routes.push({ method, segments: pattern.split("/").filter(Boolean), handler });
@@ -203,10 +206,15 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     return json({ ok: true });
   });
 
-  on("PUT", patterns.dev, async (req, params) => {
-    const body = await parseBody(req, DevActivitySchema);
-    setDevActivity(db, p(params, "pid"), body);
-    return json(state().dev[p(params, "pid")]);
+  on("GET", patterns.syncStatus, () => {
+    const s = state();
+    return json({ source: s.syncSource, projects: Object.fromEntries(s.projects.map((pr) => [pr.id, s.dev[pr.id]?.lastSync ?? null])) });
+  });
+  on("POST", patterns.sync, async (_req, params) => {
+    if (!source) throw new HttpError(409, "no sync source configured (set SYNC_SOURCE)");
+    const project = findProject(state(), p(params, "pid"));
+    const run = await syncProject(db, source, project, now());
+    return json({ run, facts: state().dev[project.id] ?? null }, run.ok ? 200 : 502);
   });
   on("PUT", patterns.agents, async (req) => {
     setAgents(db, await parseBody(req, AgentsInputSchema));

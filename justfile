@@ -23,9 +23,13 @@ deps:
     @command -v bun >/dev/null || { echo "bun not found: https://bun.sh (brew install oven-sh/bun/bun)"; exit 1; }
     bun install --frozen-lockfile
 
-# Wipe the database and re-seed it from the mockup fixtures.
+# Wipe the database and re-seed it from the sample fixtures.
 seed:
     bun run seed
+
+# Pull development facts for every project from SYNC_SOURCE (sample|github).
+sync:
+    bun run sync
 
 # ---- run -------------------------------------------------------------------
 

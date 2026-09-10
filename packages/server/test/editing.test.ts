@@ -3,7 +3,7 @@
 // user, and the JSON documents mirrored from external systems.
 
 import { describe, expect, test } from "bun:test";
-import { AGENTS, DEV, FEED, UPCOMING, calendarOf, releaseState } from "@valueflow/domain";
+import { AGENTS, FEED, UPCOMING, calendarOf, releaseState } from "@valueflow/domain";
 import type { AppState, GovernanceItem, Project, Release, Workspace } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import type { ProjectInput } from "@valueflow/shared";
@@ -156,32 +156,56 @@ describe("workspace", () => {
   });
 });
 
-describe("JSON documents", () => {
-  test("PUT replaces dev activity, agents, feed, and calendar after validating the whole document", async () => {
+describe("sync", () => {
+  test("POST sync replaces a project's development facts from the configured source", async () => {
     const app = testApp();
-    const dev = structuredClone(DEV.onboarding!);
-    dev.stats.coverage = 91;
-    dev.prs = dev.prs.slice(0, 1);
-    const putDev = await app.send<typeof dev>("PUT", routes.dev("onboarding"), dev);
-    expect(putDev.status).toBe(200);
-    expect(putDev.body).toEqual(dev);
-    expect((await app.send("PUT", routes.dev("onboarding"), { ...dev, stats: { ...dev.stats, coverage: 250 } })).status).toBe(400);
-    expect((await app.send("PUT", routes.dev("nope"), dev)).status).toBe(404);
-    // A project without activity can gain some.
-    expect((await app.send("PUT", routes.dev("sector"), dev)).status).toBe(200);
+    const before = (await stateOf(app)).dev.onboarding!;
+    expect(before.lastSync).toMatchObject({ source: "sample", ok: true });
+    expect(before.prs.length).toBe(8);
+    expect(before.commits.length).toBeGreaterThan(50);
 
+    const { status, body } = await app.send<{ run: { ok: boolean; source: string; message: string }; facts: typeof before }>("POST", routes.sync("onboarding"));
+    expect(status).toBe(200);
+    expect(body.run).toMatchObject({ ok: true, source: "sample" });
+    expect(body.run.message).toContain("3 repos");
+    expect(body.facts.prs.map((p) => p.number)).toEqual(before.prs.map((p) => p.number));
+    expect(body.facts.repos.map((r) => r.repo)).toEqual(["doc-ingest-pipeline", "onboarding-evals", "onboarding-mapping-svc"]);
+    expect((await app.send("POST", routes.sync("nope"))).status).toBe(404);
+
+    // A project with repos but no sample gets generated commit history only.
+    await app.send("POST", routes.projects(), { ...fresh, id: "kyc" });
+    const synced = await app.send<{ run: { ok: boolean }; facts: typeof before }>("POST", routes.sync("kyc"));
+    expect(synced.status).toBe(200);
+    expect(synced.body.facts.repos).toEqual([{ repo: "kyc-agent", branch: "main", lang: null, coverage: null, quality: null, measuredAt: "2026-09-10T09:00:00.000Z" }]);
+    expect(synced.body.facts.prs).toEqual([]);
+    expect(synced.body.facts.commits.length).toBeGreaterThan(0);
+
+    const status2 = await app.get<{ source: string; projects: Record<string, { source: string } | null> }>(routes.syncStatus());
+    expect(status2.body.source).toBe("sample");
+    expect(status2.body.projects.kyc?.source).toBe("sample");
+  });
+
+  test("a failing source keeps the previous facts and records the failure", async () => {
+    const app = testApp();
+    const { syncProject } = await import("../src/sync.ts");
+    const project = (await stateOf(app)).projects[0]!;
+    const run = await syncProject(app.db, { name: "broken", fetchRepo: () => Promise.reject(new Error("rate limited")) }, project, new Date("2026-09-10T10:00:00Z"));
+    expect(run).toMatchObject({ ok: false, source: "broken", message: "rate limited" });
+    const after = (await stateOf(app)).dev.onboarding!;
+    expect(after.prs.length).toBe(8);
+    expect(after.lastSync).toMatchObject({ ok: false, source: "broken" });
+  });
+
+  test("PUT replaces agents, feed, and calendar after validating the whole document", async () => {
+    const app = testApp();
     const agents = AGENTS.slice(0, 2).map((a) => ({ ...a, runs: a.runs + 1 }));
     expect((await app.send("PUT", routes.agents(), agents)).status).toBe(200);
     expect((await app.send("PUT", routes.agents(), [{ ...agents[0]!, status: "asleep" }])).status).toBe(400);
-
     const feed = [FEED[0]!];
     expect((await app.send("PUT", routes.feed(), feed)).status).toBe(200);
     const upcoming = UPCOMING.slice(0, 1);
     expect((await app.send("PUT", routes.upcoming(), upcoming)).status).toBe(200);
-
     const state = await stateOf(app);
-    expect(state.dev.onboarding).toEqual(dev);
-    expect(state.dev.sector).toEqual(dev);
     expect(state.agents).toEqual(agents);
     expect(state.feed).toEqual(feed);
     expect(state.upcoming).toEqual(upcoming);

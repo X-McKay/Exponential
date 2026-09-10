@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { calendarOf, composeGlancePage, monthLabel } from "@valueflow/domain";
+import { calendarOf, composeGlancePage, monthLabel, shortAge } from "@valueflow/domain";
 import type { AppState, Block, Calendar, ProjectTab } from "@valueflow/domain";
 import { Bullet, GovStack, Spark } from "../charts/small.tsx";
 import { Chip, reset } from "../ui/primitives.tsx";
@@ -31,7 +31,7 @@ function Body({ b, cal }: { b: Block; cal: Calendar }) {
     case "ci_failing":
       return (
         <div style={{ fontSize: 12, color: C.dim, lineHeight: 1.6 }}>
-          {b.pr.repo} · open {b.pr.age} · <span style={{ color: C.green }}>+{b.pr.add}</span> <span style={{ color: C.red }}>−{b.pr.del}</span>
+          {b.pr.repo} · open {shortAge(b.pr.openedAt, cal.asOf)} · <span style={{ color: C.green }}>+{b.pr.add}</span> <span style={{ color: C.red }}>−{b.pr.del}</span>
           {b.build && <div style={{ color: "#C6CAD6" }}>{b.build.note}</div>}
         </div>
       );

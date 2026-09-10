@@ -157,8 +157,8 @@ export const detectSignals = (state: AppState, cal: Calendar = calendarOf(state)
   const failPRs: FailingPr[] = [];
   const failBuilds: FailingBuild[] = [];
   for (const [pid, d] of Object.entries(state.dev)) {
-    for (const pr of d.prs) if (pr.checks === "fail") failPRs.push({ pid, pr });
-    for (const b of d.builds) if (b.status === "fail") failBuilds.push({ pid, b });
+    for (const pr of [...d.prs].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))) if (pr.status === "open" && pr.checks === "fail") failPRs.push({ pid, pr });
+    for (const b of [...d.builds].sort((x, y) => y.startedAt.localeCompare(x.startedAt))) if (b.status === "fail") failBuilds.push({ pid, b });
   }
 
   const t1gaps = state.projects.filter((p) => p.tier === 1 && blockers(p) > 0);
@@ -272,7 +272,7 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
   }
 
   for (const { pid, pr } of s.failPRs.slice(0, 1)) {
-    const fb = s.failBuilds.find((f) => f.b.branch.includes(pr.id.replace("#", "")));
+    const fb = s.failBuilds.find((f) => f.pid === pid && (f.b.branch.includes(String(pr.number)) || f.b.repo === pr.repo));
     blocks.push({
       kind: "ci_failing",
       priority: 80,
@@ -282,7 +282,7 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
       proj: pid,
       tab: "development",
       projName: short(pid),
-      title: `${pr.id} — ${pr.title}`,
+      title: `#${pr.number} — ${pr.title}`,
       pr,
       build: fb ? fb.b : null,
     });

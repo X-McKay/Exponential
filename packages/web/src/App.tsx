@@ -2,13 +2,13 @@ import { useCallback, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { PROJECT_TABS, blockers, calendarOf, dayLabel } from "@valueflow/domain";
 import type { Dim, ProjectTab } from "@valueflow/domain";
-import { AgentsInputSchema, DevActivitySchema } from "@valueflow/shared";
+import { AgentsInputSchema } from "@valueflow/shared";
 import { JsonDocEditor } from "./editors/JsonDocEditor.tsx";
 import { ProjectEditor } from "./editors/ProjectEditor.tsx";
 import { WorkspaceEditor } from "./editors/WorkspaceEditor.tsx";
 import { CmdK } from "./palette/CmdK.tsx";
 import { AgentsPage } from "./pages/AgentsPage.tsx";
-import { DEV_TEMPLATE, DataPage } from "./pages/DataPage.tsx";
+import { DataPage } from "./pages/DataPage.tsx";
 import { DevPage } from "./pages/DevPage.tsx";
 import { GlancePage } from "./pages/GlancePage.tsx";
 import { GovernancePage } from "./pages/GovernancePage.tsx";
@@ -147,7 +147,7 @@ export function App() {
   const [palette, setPalette] = useState(false);
   const narrow = useNarrow();
   const [lastProject, setLastProject] = useState<string | null>(null);
-  const [editor, setEditor] = useState<{ kind: "project"; pid: string | null } | { kind: "dev"; pid: string } | { kind: "agents" } | { kind: "workspace" } | null>(null);
+  const [editor, setEditor] = useState<{ kind: "project"; pid: string | null } | { kind: "agents" } | { kind: "workspace" } | null>(null);
 
   const state = store.state;
   const projects = state?.projects ?? [];
@@ -214,19 +214,6 @@ export function App() {
             void store.deleteProject(pid);
             closeEditor();
             go("portfolio", null);
-          }}
-          onClose={closeEditor}
-        />
-      )}
-      {editor?.kind === "dev" && (
-        <JsonDocEditor
-          title={`Development activity — ${projects.find((p) => p.id === editor.pid)?.name ?? editor.pid}`}
-          help="Stats, repositories, pull requests, builds, and contributors as mirrored from CI and source control. Percentages are 0–100."
-          value={state.dev[editor.pid] ?? DEV_TEMPLATE}
-          schema={DevActivitySchema}
-          onSave={(doc) => {
-            void store.saveDev(editor.pid, doc);
-            closeEditor();
           }}
           onClose={closeEditor}
         />
@@ -333,7 +320,7 @@ export function App() {
               onAgents={(a) => void store.saveAgents(a)}
               onFeed={(f) => void store.saveFeed(f)}
               onUpcoming={(u) => void store.saveUpcoming(u)}
-              onDev={(pid, d) => void store.saveDev(pid, d)}
+              onSync={store.syncProject}
             />
           </>
         ) : proj ? (
@@ -387,7 +374,7 @@ export function App() {
                 onDeleteRelease={(pid, rid) => void store.deleteRelease(pid, rid)}
               />
             )}
-            {view.tab === "development" && <DevPage d={state.dev[proj.id]} onEdit={() => setEditor({ kind: "dev", pid: proj.id })} />}
+            {view.tab === "development" && <DevPage facts={state.dev[proj.id]} project={proj} asOf={state.asOf} source={state.syncSource} onSync={() => store.syncProject(proj.id)} />}
             {view.tab === "governance" && (
               <GovernancePage
                 p={proj}

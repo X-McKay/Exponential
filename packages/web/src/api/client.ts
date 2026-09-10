@@ -1,11 +1,10 @@
 // ================= typed API client =================
 
-import type { Agent, DevActivity, FeedDay, GovernanceItem, ImpactPair, Metric, MetricReading, Milestone, Project, Release, Upcoming, Workspace } from "@valueflow/domain";
+import type { Agent, DevFacts, FeedDay, GovernanceItem, ImpactPair, Metric, MetricReading, Milestone, Project, Release, SyncRun, Upcoming, Workspace } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import type {
   AgentsInput,
   ApiError,
-  DevActivityInput,
   FeedInput,
   GovernanceInput,
   GovernanceItemInput,
@@ -72,7 +71,8 @@ export const api = {
   updateRelease: (pid: string, body: ReleaseInput) => request<Release>("PUT", routes.release(pid, body.id), body),
   deleteRelease: (pid: string, rid: string) => request<Ok>("DELETE", routes.release(pid, rid)),
 
-  setDev: (pid: string, body: DevActivityInput) => request<DevActivity>("PUT", routes.dev(pid), body),
+  syncProject: (pid: string) => request<{ run: SyncRun; facts: DevFacts | null }>("POST", routes.sync(pid)),
+  syncStatus: () => request<{ source: string | null; projects: Record<string, SyncRun | null> }>("GET", routes.syncStatus()),
   setAgents: (body: AgentsInput) => request<Agent[]>("PUT", routes.agents(), body),
   setFeed: (body: FeedInput) => request<FeedDay[]>("PUT", routes.feed(), body),
   setUpcoming: (body: UpcomingInput) => request<Upcoming[]>("PUT", routes.upcoming(), body),

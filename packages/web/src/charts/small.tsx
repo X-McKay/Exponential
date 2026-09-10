@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { GSTATUS_LABEL, burnupSeries, metricLevel } from "@valueflow/domain";
-import type { Calendar, Contributor, Dim, GovStatus, Metric, Milestone, Project } from "@valueflow/domain";
+import type { Calendar, Contributor, DayCount, Dim, GovStatus, Metric, Milestone, Project } from "@valueflow/domain";
 import { Avatar } from "../ui/primitives.tsx";
 import { C, GSTATUS_COLOR } from "../theme.ts";
 
@@ -94,12 +94,8 @@ export const govCountsOf = (p: Pick<Project, "governance">): Record<GovStatus, n
   return c;
 };
 
-const rnd = (seed: number): number => {
-  const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453;
-  return x - Math.floor(x);
-};
-
-export function CommitBars({ seed, level }: { seed: number; level: number }) {
+/** Daily commit counts (real, from commit_days), oldest first. */
+export function CommitBars({ days, repos }: { days: DayCount[]; repos: number }) {
   const W = 700;
   const H = 120;
   const PL = 8;
@@ -108,25 +104,18 @@ export function CommitBars({ seed, level }: { seed: number; level: number }) {
   const PB = 20;
   const iw = W - PL - PR;
   const ih = H - PT - PB;
-  const N = 56; // 8 weeks daily
-  const vals = useMemo(
-    () =>
-      Array.from({ length: N }, (_, i) => {
-        const wk = Math.sin(i / 3.2) * 0.3 + 0.7;
-        const weekend = i % 7 === 5 || i % 7 === 6 ? 0.25 : 1;
-        return Math.round(rnd(seed * 50 + i) * level * wk * weekend + (weekend === 1 ? 1 : 0));
-      }),
-    [seed, level],
-  );
+  const N = Math.max(days.length, 1);
+  const vals = useMemo(() => days.map((d) => d.count), [days]);
   const max = Math.max(...vals, 1);
   const bw = iw / N - 1.6;
   const total = vals.reduce((a, b) => a + b, 0);
+  const weeks = Math.round(N / 7);
   return (
     <div>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block" }}>
         {vals.map((v, i) => (
           <rect
-            key={i}
+            key={days[i]?.day ?? i}
             x={PL + (i * iw) / N}
             y={PT + ih - (v / max) * ih}
             width={bw}
@@ -134,16 +123,22 @@ export function CommitBars({ seed, level }: { seed: number; level: number }) {
             rx="1.5"
             fill={C.indigo}
             opacity={0.35 + 0.6 * (v / max)}
-          />
+          >
+            <title>
+              {days[i]?.day}: {v} commit{v === 1 ? "" : "s"}
+            </title>
+          </rect>
         ))}
         <text x={PL} y={H - 6} fontSize="9" fill={C.dim}>
-          8 weeks ago
+          {weeks} weeks ago
         </text>
         <text x={W - PR} y={H - 6} fontSize="9" fill={C.dim} textAnchor="end">
           today
         </text>
       </svg>
-      <div style={{ fontSize: 11, color: C.dim, padding: "2px 8px 0" }}>{total} commits · trailing 8 weeks · all repos</div>
+      <div style={{ fontSize: 11, color: C.dim, padding: "2px 8px 0" }}>
+        {total} commits · trailing {weeks} weeks · {repos} repo{repos === 1 ? "" : "s"}
+      </div>
     </div>
   );
 }
