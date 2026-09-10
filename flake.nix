@@ -28,9 +28,21 @@
         # optional platform binaries for every platform so the hash is the same
         # on every system. After changing bun.lock, run `nix build .#nodeModules`
         # once: the hash-mismatch error prints the value to paste below.
+        # Only the manifests feed the dependency derivation, so editing source
+        # files never triggers a reinstall.
+        manifests = lib.fileset.toSource {
+          root = ./.;
+          fileset = lib.fileset.unions [
+            ./package.json
+            ./bun.lock
+            (lib.fileset.fileFilter (f: f.name == "package.json") ./packages)
+          ];
+        };
+
         nodeModules = pkgs.stdenvNoCC.mkDerivation {
           pname = "valueflow-node-modules";
-          inherit version src;
+          inherit version;
+          src = manifests;
           nativeBuildInputs = [ bun ];
           dontConfigure = true;
           dontFixup = true;
@@ -119,6 +131,7 @@
         devShells.default = pkgs.mkShell {
           packages = [
             bun
+            pkgs.just
             pkgs.sqlite
             pkgs.typescript-language-server
             pkgs.typescript
@@ -129,9 +142,7 @@
               bun install --frozen-lockfile
             fi
             echo "ValueFlow dev shell — bun $(bun --version)"
-            echo "  bun run dev     start the server with HMR on http://localhost:3000"
-            echo "  bun run check   typecheck + lint + tests"
-            echo "  bun run build   production bundle → packages/web/dist"
+            echo "  just            list tasks (just dev, just check, just build, ...)"
           '';
         };
 

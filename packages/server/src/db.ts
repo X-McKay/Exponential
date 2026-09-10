@@ -1,9 +1,10 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { migrate } from "./migrations.ts";
 
-export const DEFAULT_DB_PATH = "data/valueflow.sqlite";
+/** Repo-root data/valueflow.sqlite regardless of the process cwd. */
+export const DEFAULT_DB_PATH = resolve(import.meta.dir, "../../../data/valueflow.sqlite");
 
 /** Open (and migrate) a database. Use ":memory:" for tests. */
 export const openDb = (path: string = process.env.VALUEFLOW_DB ?? DEFAULT_DB_PATH): Database => {

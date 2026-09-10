@@ -2,31 +2,85 @@
 
 ValueFlow is an AI-project delivery platform built on one idea: **claimed value is worthless until delivery proves it**. Every project states value targets (FTE reduction, time reduction). Every milestone carries an impact it *could* contribute and a set of eval metrics with base and stretch gates. A milestone only counts toward realized value once it has shipped **and** its eval metrics clear a gate; releases only go live when every criterion — performance gates, governance approvals, manual sign-offs — is met against live state. The Glance briefing is generated from the same facts, so what a sponsor reads in the morning is exactly what the eval suite and the governance register say.
 
-## Quickstart
+## Setup
+
+### Prerequisites
+
+| Tool | Required | Install |
+| --- | --- | --- |
+| [Bun](https://bun.sh) 1.3 or newer | yes | `brew install oven-sh/bun/bun` or `curl -fsSL https://bun.sh/install \| bash` |
+| [just](https://just.systems) | recommended | `brew install just` (or `cargo install just`, or any package manager) |
+| [Nix](https://nixos.org) with flakes | optional | `curl -fsSL https://install.determinate.systems/nix \| sh -s -- install` |
+
+Bun is the runtime, package manager, bundler, and test runner: there is no Node, npm, or Vite. `just` is a thin task runner over the `bun run` scripts so the commands below are memorable; every recipe prints the underlying command. Nix gives you a pinned toolchain (Bun, just, sqlite, TypeScript language server) and a sandboxed build, and is what CI uses for the `nix flake check` job.
+
+### First run
 
 ```sh
-nix develop      # pinned Bun + sqlite + typescript-language-server; runs bun install on first entry
-bun run dev      # http://localhost:3000 — seeds a SQLite db with the fixture portfolio on first start
+git clone https://github.com/X-McKay/Exponential.git
+cd Exponential
+just setup      # bun install --frozen-lockfile, then seed data/valueflow.sqlite
+just dev        # dev server with HMR on http://localhost:3000
 ```
 
-Without Nix: install [Bun](https://bun.sh) 1.3+, then `bun install && bun run dev`.
+With Nix, enter the dev shell first; it installs dependencies on first entry and puts `bun` and `just` on your PATH:
 
-| Command             | What it does                                                |
-| ------------------- | ----------------------------------------------------------- |
-| `bun run dev`       | Bun.serve with HMR for the React app, API on `/api/*`       |
-| `bun run check`     | `tsc --noEmit` + oxlint + `bun test`                        |
-| `bun test`          | domain unit tests, API tests, gate-crossing integration test |
-| `bun run build`     | production bundle → `packages/web/dist`                     |
-| `bun run start`     | production server serving the built bundle                  |
-| `bun run seed`      | wipe and re-seed the database from the mockup fixtures      |
-| `nix flake check`   | typecheck + lint + tests in the Nix sandbox (CI gate)       |
-| `nix build` / `nix run` | production bundle + server as a Nix package             |
+```sh
+nix develop
+just dev
+```
 
-Environment: `PORT` (default 3000), `VALUEFLOW_DB` (default `data/valueflow.sqlite`).
+Without `just`, the equivalent commands are `bun install`, `bun run seed`, and `bun run dev`.
 
-### Updating the dependency hash
+If port 3000 is taken, every recipe honours `PORT`:
 
-Dependencies are a fixed-output derivation (`packages.nodeModules`) that captures Bun's whole install tree: the root `node_modules` plus each workspace's `packages/*/node_modules` that the isolated linker creates. Whenever `bun.lock` changes, set `outputHash` in `flake.nix` to `lib.fakeHash`, run `nix build .#nodeModules`, and paste the hash the mismatch error prints. The install uses `--os='*' --cpu='*'` so the hash is the same on every platform.
+```sh
+PORT=3001 just dev
+```
+
+### Everyday commands
+
+Run `just` with no arguments to list every recipe.
+
+| Command | What it does |
+| --- | --- |
+| `just dev` | Dev server in the foreground with HMR. `Ctrl+C` stops it. |
+| `just start` / `just stop` | Run the dev server in the background (pid in `.valueflow.pid`, log in `data/valueflow.log`). `just status`, `just restart`, and `just logs` go with them. |
+| `just check` | Typecheck, lint, and tests: the gate every change must pass. |
+| `just test [filter]` | Run the test suite, optionally narrowed (`just test glance`). `just watch` re-runs on change. |
+| `just typecheck` / `just lint` | The two halves of `check` on their own. |
+| `just build` | Production bundle to `packages/web/dist`. |
+| `just serve` | Build, then run the production server (no HMR). |
+| `just seed` | Wipe the database and re-seed it from the mockup fixtures. |
+| `just reset` | Delete the database; the next start seeds a fresh one. |
+| `just clean` | Remove dependencies, build output, database, logs, and Nix result links. |
+| `just ci` | Exactly what the GitHub Actions Bun job runs (frozen install, typecheck, lint, tests, build). |
+| `just nix-check` | Typecheck, lint, and tests inside the Nix sandbox. |
+| `just nix-build` / `just nix-run` | Build the production package to `./result`, or build and run it. |
+| `just nix-hash` | After `bun.lock` changes, recompute the dependency hash and write it into `flake.nix`. |
+
+### Environment
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PORT` | `3000` | Port for the dev and production servers. |
+| `VALUEFLOW_DB` | `data/valueflow.sqlite` (repo root) | SQLite file. The Nix package defaults to `~/.local/share/valueflow/valueflow.sqlite`. |
+| `NODE_ENV` | unset | `production` serves the built bundle instead of bundling on the fly. `bun run start` sets it. |
+
+### Changing dependencies
+
+Add or update packages with `bun add` / `bun update` as usual, commit `bun.lock`, then run `just nix-hash` so the Nix build's fixed-output derivation matches the new lockfile. The hash is platform independent (the install pulls optional binaries for every platform), so one run on any machine is enough.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs two jobs on every push and pull request: the Bun job (`just ci`) and the Nix job (`nix flake check`). Both must be green before merging.
+
+### Troubleshooting
+
+- **`bun: command not found`** after installing: open a new shell, or add `~/.bun/bin` to your PATH.
+- **`nix: command not found`** in a shell that predates the install: run `. /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh` or open a new terminal.
+- **`Port 3000 is in use`**: set `PORT`, or `just stop` a background server you forgot about.
+- **Stale data after pulling fixture changes**: `just seed`.
 
 ## Architecture
 
@@ -72,9 +126,9 @@ Consequences you can see in the app:
 - **Bun** — runtime, package manager, bundler, test runner. No Node, npm, or Vite.
 - **TypeScript** `strict`, `noUncheckedIndexedAccess`, exhaustive `switch` over every union; no `any` in the domain layer.
 - **SQLite** via `bun:sqlite`, WAL mode, foreign keys on, versioned migrations.
-- **React 18** with inline styles and one global stylesheet, no component library or CSS framework.
+- **React 18** with inline styles and one global stylesheet, no component library or CSS framework. Inter Variable is self-hosted from `packages/web/src/fonts` (SIL OFL).
 - **zod** for request validation at the API boundary (the only runtime dependency besides React).
-- **Nix** flake: dev shell, `packages.default` (production bundle + server), `checks.default` (typecheck + lint + tests).
+- **Nix** flake: dev shell, `packages.default` (production bundle + server), `checks.default` (typecheck + lint + tests). Dependencies are a fixed-output derivation built from the manifests alone, so editing source never triggers a reinstall.
 
 ## API
 
@@ -94,14 +148,15 @@ Schemas live in `packages/shared/src/schemas.ts`.
 
 ## Keyboard
 
-- `⌘K` / `Ctrl+K` — command palette (↑↓ navigate, ↵ open, esc close)
-- `g` then `g` / `p` / `a` — Glance / Portfolio / Agents
+- `⌘K` / `Ctrl+K` — command palette (↑↓ navigate, ↵ open, esc close; recent destinations are listed first)
+- `g` then `g` / `p` / `a` — Glance / Portfolio / Agents (the sidebar tooltips show these)
 - `g` then `o` / `v` / `r` / `d` / `n` — Overview / Value / Roadmap / Development / Governance of the current (or last visited) project
+- `⌘↵` / `Ctrl+↵` — save in any editor dialog; `esc` closes it
 
 ## Deviations from the mockup
 
 - **Eval history is real.** The scatter renders `metric_readings` (30 seeded per measurable metric, shaped like the mockup's trajectories, plus any manual readings you add) instead of a deterministic fake.
 - **Editors persist.** Milestone, targets, and governance edits are optimistic and write through the API; on failure the client reloads server state and shows a toast.
-- **Row carets rotate when a row is expanded.** The mockup sets `transform: rotate(90deg)` on an inline `span`, which browsers ignore; the intent is clear so the caret here is `inline-block` and rotates.
+- **Row carets rotate when a row is expanded.** The mockup sets `transform: rotate(90deg)` on an inline `span`, which browsers ignore; the intent is clear so the caret here is an inline SVG that rotates.
 - **Development, agents, feed and calendar** are read-only mirrors of external systems and are stored as validated JSON documents rather than normalized tables.
 - **Deep links.** View state is mirrored to the URL hash (`#/project/ima/value`) so pages survive a reload.

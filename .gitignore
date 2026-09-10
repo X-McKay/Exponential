@@ -8,3 +8,5 @@ result
 result-*
 .direnv/
 .DS_Store
+data/
+.valueflow.pid
