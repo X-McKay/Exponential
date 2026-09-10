@@ -4,13 +4,15 @@
 // value is read or written here.
 
 import type { Database } from "bun:sqlite";
+import { EVENT_WINDOW_DAYS, GSTATUS_LABEL, deriveDevEvents } from "@valueflow/domain";
 import type {
   Agent,
   AppState,
   Build,
+  CalendarEvent,
   Criterion,
   DevFacts,
-  FeedDay,
+  Event,
   GovernanceItem,
   Metric,
   MetricReading,
@@ -21,19 +23,17 @@ import type {
   Release,
   RiskTier,
   SyncRun,
-  Upcoming,
   Workspace,
 } from "@valueflow/domain";
 import type {
   AgentsInput,
-  FeedInput,
+  CalendarEventInput,
   GovernanceInput,
   GovernanceItemInput,
   MilestoneInput,
   ProjectInput,
   ReleaseInput,
   TargetsInput,
-  UpcomingInput,
   WorkspaceInput,
 } from "@valueflow/shared";
 
@@ -129,6 +129,22 @@ interface DocRow {
 interface WorkspaceRow {
   user_name: string;
   user_ini: string;
+}
+interface EventRow {
+  ref: string;
+  at: string;
+  type: Event["type"];
+  project_id: string;
+  tab: Event["tab"];
+  text: string;
+}
+interface CalendarRow {
+  id: string;
+  date: string;
+  project_id: string;
+  tab: CalendarEvent["tab"];
+  text: string;
+  sub: string | null;
 }
 interface RepoStatRow {
   project_id: string;
@@ -238,7 +254,17 @@ export const loadState = (db: Database, now: Date = new Date()): AppState => {
   const crits = groupBy(db.query<CritRow, []>("SELECT * FROM release_criteria ORDER BY sort").all(), (r) => `${r.project_id} ${r.release_id}`);
   const dev = loadDevFacts(db);
 
-  const out: AppState = { asOf: now.toISOString(), syncSource: null, workspace: loadWorkspace(db), projects: [], releases: {}, dev: {}, agents: [], feed: [], upcoming: [] };
+  const out: AppState = {
+    asOf: now.toISOString(),
+    syncSource: null,
+    workspace: loadWorkspace(db),
+    projects: [],
+    releases: {},
+    dev: {},
+    agents: [],
+    events: loadEvents(db, now),
+    calendar: loadCalendar(db),
+  };
   for (const p of projects) {
     const ms: Milestone[] = (milestones.get(p.id) ?? []).map((m) => ({
       id: m.id,
@@ -289,9 +315,47 @@ export const loadState = (db: Database, now: Date = new Date()): AppState => {
     if (d) out.dev[p.id] = d;
   }
   out.agents = db.query<DocRow, []>("SELECT doc FROM agents ORDER BY sort").all().map((r) => JSON.parse(r.doc) as Agent);
-  out.feed = db.query<DocRow, []>("SELECT doc FROM feed_days ORDER BY sort").all().map((r) => JSON.parse(r.doc) as FeedDay);
-  out.upcoming = db.query<DocRow, []>("SELECT doc FROM upcoming ORDER BY sort").all().map((r) => JSON.parse(r.doc) as Upcoming);
   return out;
+};
+
+// ---- events & calendar ---------------------------------------------------
+
+export const loadEvents = (db: Database, now: Date, windowDays = EVENT_WINDOW_DAYS): Event[] => {
+  const since = new Date(now.getTime() - windowDays * 86_400_000).toISOString();
+  return db
+    .query<EventRow, [string]>("SELECT * FROM events WHERE at >= ? ORDER BY at DESC, ref")
+    .all(since)
+    .map((r) => ({ ref: r.ref, at: r.at, type: r.type, proj: r.project_id, tab: r.tab, text: r.text }));
+};
+
+/** Append an event; an existing ref is left untouched so re-syncs never duplicate. Returns whether it was new. */
+export const recordEvent = (db: Database, e: Event): boolean =>
+  db.query("INSERT OR IGNORE INTO events (ref, at, type, project_id, tab, text) VALUES (?,?,?,?,?,?)").run(e.ref, e.at, e.type, e.proj, e.tab, e.text).changes > 0;
+
+/** Record the feed entries a project's development facts imply (merges, failed builds, deploys, eval runs). */
+export const recordDevEvents = (db: Database, pid: string, facts: Pick<DevFacts, "prs" | "builds">, now: Date): number => {
+  let n = 0;
+  for (const e of deriveDevEvents(pid, facts, now.toISOString())) if (recordEvent(db, e)) n += 1;
+  return n;
+};
+
+export const loadCalendar = (db: Database): CalendarEvent[] =>
+  db
+    .query<CalendarRow, []>("SELECT * FROM calendar_events ORDER BY date, id")
+    .all()
+    .map((r) => ({ id: r.id, date: r.date, proj: r.project_id, tab: r.tab, text: r.text, sub: r.sub }));
+
+export const upsertCalendarEvent = (db: Database, input: CalendarEventInput, mode: "create" | "update"): void => {
+  if (!projectExists(db, input.proj)) throw new NotFound(`project ${input.proj} not found`);
+  const exists = (db.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM calendar_events WHERE id = ?").get(input.id)?.n ?? 0) > 0;
+  if (mode === "create" && exists) throw new Conflict(`calendar event ${input.id} already exists`);
+  if (mode === "update" && !exists) throw new NotFound(`calendar event ${input.id} not found`);
+  db.query("INSERT OR REPLACE INTO calendar_events (id, date, project_id, tab, text, sub) VALUES (?,?,?,?,?,?)").run(input.id, input.date, input.proj, input.tab, input.text, input.sub);
+};
+
+export const deleteCalendarEvent = (db: Database, id: string): void => {
+  const res = db.query("DELETE FROM calendar_events WHERE id = ?").run(id);
+  if (res.changes === 0) throw new NotFound(`calendar event ${id} not found`);
 };
 
 /** Development facts per project; only projects with at least one synced row or run appear. */
@@ -419,6 +483,19 @@ export const recordReading = (
     recordedAt,
     source,
   );
+  if (source === "eval") {
+    // An eval run is news; a manual reading is the user simulating, not an event.
+    const x = db
+      .query<{ label: string; base: number; ms: string }, [string, string, string]>(
+        "SELECT x.label, x.base, m.name AS ms FROM metrics x JOIN milestones m ON m.project_id = x.project_id AND m.id = x.milestone_id WHERE x.project_id = ? AND x.milestone_id = ? AND x.id = ?",
+      )
+      .get(pid, mid, xid);
+    if (x) {
+      const gap = Math.round((x.base - value) * 10) / 10;
+      const verdict = gap > 0 ? `${gap}pt${gap === 1 ? "" : "s"} below base gate (${x.base}%)` : `clears base gate (${x.base}%)`;
+      recordEvent(db, { ref: `eval:${pid}/${mid}/${xid}:${recordedAt}`, at: recordedAt, type: "eval", proj: pid, tab: "value", text: `Eval: ${x.ms} · ${x.label} at ${value}% — ${verdict}` });
+    }
+  }
   return { projectId: pid, milestoneId: mid, metricId: xid, value, recordedAt, source };
 };
 
@@ -442,11 +519,22 @@ export const upsertMilestone = (db: Database, pid: string, input: MilestoneInput
   if (mode === "create" && exists) throw new Conflict(`milestone ${pid}/${input.id} already exists`);
   if (mode === "update" && !exists) throw new NotFound(`milestone ${pid}/${input.id} not found`);
 
+  const before = exists ? db.query<{ status: MilestoneStatus }, [string, string]>("SELECT status FROM milestones WHERE project_id = ? AND id = ?").get(pid, input.id) : null;
   db.transaction(() => {
     if (exists) {
       db.query(
         "UPDATE milestones SET name = ?, status = ?, month = ?, base_fte = ?, base_time = ?, stretch_fte = ?, stretch_time = ? WHERE project_id = ? AND id = ?",
       ).run(input.name, input.status, input.month, input.impact.base.fte, input.impact.base.time, input.impact.stretch.fte, input.impact.stretch.time, pid, input.id);
+      if (before && before.status !== input.status) {
+        const at = now.toISOString();
+        const text =
+          input.status === "shipped"
+            ? `${input.name} shipped — gated impact now counts toward realized value`
+            : input.status === "eval"
+              ? `${input.name} entered In eval — gate metrics now tracking`
+              : `${input.name} moved to ${input.status === "progress" ? "In progress" : "Backlog"}`;
+        recordEvent(db, { ref: `ship:${pid}/${input.id}:${input.status}:${at}`, at, type: "ship", proj: pid, tab: "value", text });
+      }
     } else {
       const sort = db.query<{ s: number }, [string]>("SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM milestones WHERE project_id = ?").get(pid)?.s ?? 0;
       db.query(
@@ -531,13 +619,16 @@ export const setTargets = (db: Database, pid: string, t: TargetsInput): void => 
   db.query("UPDATE projects SET target_fte = ?, target_time = ? WHERE id = ?").run(t.fte, t.time, pid);
 };
 
-export const updateGovernance = (db: Database, pid: string, gid: string, g: GovernanceInput): void => {
-  const res = db
-    .query(
-      "UPDATE governance_items SET cat = COALESCE(?, cat), name = COALESCE(?, name), status = ?, owner = ?, date = ?, detail = ?, link = ? WHERE project_id = ? AND id = ?",
-    )
-    .run(g.cat ?? null, g.name ?? null, g.status, g.owner, g.date, g.detail, g.link ?? null, pid, gid);
-  if (res.changes === 0) throw new NotFound(`governance item ${pid}/${gid} not found`);
+export const updateGovernance = (db: Database, pid: string, gid: string, g: GovernanceInput, now = new Date()): void => {
+  const before = db.query<{ status: GovernanceItem["status"]; name: string }, [string, string]>("SELECT status, name FROM governance_items WHERE project_id = ? AND id = ?").get(pid, gid);
+  if (!before) throw new NotFound(`governance item ${pid}/${gid} not found`);
+  db.query(
+    "UPDATE governance_items SET cat = COALESCE(?, cat), name = COALESCE(?, name), status = ?, owner = ?, date = ?, detail = ?, link = ? WHERE project_id = ? AND id = ?",
+  ).run(g.cat ?? null, g.name ?? null, g.status, g.owner, g.date, g.detail, g.link ?? null, pid, gid);
+  if (before.status !== g.status) {
+    const at = now.toISOString();
+    recordEvent(db, { ref: `gov:${pid}/${gid}:${g.status}:${at}`, at, type: "gov", proj: pid, tab: "governance", text: `${g.name ?? before.name} moved to ${GSTATUS_LABEL[g.status]}` });
+  }
 };
 
 export const createGovernanceItem = (db: Database, pid: string, g: GovernanceItemInput): void => {
@@ -619,16 +710,4 @@ export const setAgents = (db: Database, agents: AgentsInput): void => {
   })();
 };
 
-export const setFeed = (db: Database, feed: FeedInput): void => {
-  db.transaction(() => {
-    db.query("DELETE FROM feed_days").run();
-    feed.forEach((f, i) => db.query("INSERT INTO feed_days (sort, doc) VALUES (?,?)").run(i, JSON.stringify(f)));
-  })();
-};
 
-export const setUpcoming = (db: Database, items: UpcomingInput): void => {
-  db.transaction(() => {
-    db.query("DELETE FROM upcoming").run();
-    items.forEach((u, i) => db.query("INSERT INTO upcoming (sort, doc) VALUES (?,?)").run(i, JSON.stringify(u)));
-  })();
-};

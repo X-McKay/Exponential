@@ -4,7 +4,7 @@
 // inferred types are used by the client so both sides share one contract.
 
 import { z } from "zod";
-import { FEED_TYPES, GOV_STATUSES, MILESTONE_STATUSES, PROJECT_TABS, YEAR_MONTH } from "@valueflow/domain";
+import { GOV_STATUSES, MILESTONE_STATUSES, PROJECT_TABS, YEAR_MONTH } from "@valueflow/domain";
 
 const pct = z.number().finite().min(0).max(100);
 const id = z.string().trim().min(1).max(64);
@@ -130,23 +130,15 @@ export const AgentSchema = z.object({
 export const AgentsInputSchema = z.array(AgentSchema).max(20);
 export type AgentsInput = z.infer<typeof AgentsInputSchema>;
 
-export const FeedDaySchema = z.object({
-  day: short(40),
-  items: z.array(z.object({ t: short(20), type: enumOf(FEED_TYPES), proj: id, tab: projectTab, text: short(300) })).max(30),
-});
-export const FeedInputSchema = z.array(FeedDaySchema).max(14);
-export type FeedInput = z.infer<typeof FeedInputSchema>;
-
-export const UpcomingSchema = z.object({
-  date: short(20),
+export const CalendarEventInputSchema = z.object({
+  id,
+  date: isoDate,
   proj: id,
   tab: projectTab,
   text: short(200),
-  sub: z.string().max(200).nullable(),
-  release: z.object({ pid: id, rid: id }).optional(),
+  sub: z.string().trim().max(200).nullable(),
 });
-export const UpcomingInputSchema = z.array(UpcomingSchema).max(30);
-export type UpcomingInput = z.infer<typeof UpcomingInputSchema>;
+export type CalendarEventInput = z.infer<typeof CalendarEventInputSchema>;
 
 export interface ApiError {
   error: string;

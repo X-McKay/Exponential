@@ -7,7 +7,7 @@ import type { Database } from "bun:sqlite";
 import { composeGlancePage } from "@valueflow/domain";
 import {
   AgentsInputSchema,
-  FeedInputSchema,
+  CalendarEventInputSchema,
   GovernanceInputSchema,
   GovernanceItemInputSchema,
   MilestoneInputSchema,
@@ -15,7 +15,6 @@ import {
   ReadingInputSchema,
   ReleaseInputSchema,
   TargetsInputSchema,
-  UpcomingInputSchema,
   WorkspaceInputSchema,
   patterns,
 } from "@valueflow/shared";
@@ -24,6 +23,7 @@ import {
   Conflict,
   NotFound,
   createGovernanceItem,
+  deleteCalendarEvent,
   deleteGovernanceItem,
   deleteMilestone,
   deleteProject,
@@ -35,11 +35,10 @@ import {
   loadWorkspace,
   recordReading,
   setAgents,
-  setFeed,
   setTargets,
-  setUpcoming,
   setWorkspace,
   updateGovernance,
+  upsertCalendarEvent,
   upsertMilestone,
   upsertProject,
   upsertRelease,
@@ -174,7 +173,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
 
   on("PUT", patterns.governance, async (req, params) => {
     const body = await parseBody(req, GovernanceInputSchema);
-    updateGovernance(db, p(params, "pid"), p(params, "gid"), body);
+    updateGovernance(db, p(params, "pid"), p(params, "gid"), body, now());
     const item = findProject(state(), p(params, "pid")).governance.find((g) => g.id === p(params, "gid"));
     return json(item);
   });
@@ -220,13 +219,20 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     setAgents(db, await parseBody(req, AgentsInputSchema));
     return json(state().agents);
   });
-  on("PUT", patterns.feed, async (req) => {
-    setFeed(db, await parseBody(req, FeedInputSchema));
-    return json(state().feed);
+  on("POST", patterns.calendar, async (req) => {
+    const body = await parseBody(req, CalendarEventInputSchema);
+    upsertCalendarEvent(db, body, "create");
+    return json(state().calendar.find((c) => c.id === body.id), 201);
   });
-  on("PUT", patterns.upcoming, async (req) => {
-    setUpcoming(db, await parseBody(req, UpcomingInputSchema));
-    return json(state().upcoming);
+  on("PUT", patterns.calendarEvent, async (req, params) => {
+    const body = await parseBody(req, CalendarEventInputSchema);
+    if (body.id !== p(params, "id")) throw new HttpError(400, "calendar event id in body must match the URL");
+    upsertCalendarEvent(db, body, "update");
+    return json(state().calendar.find((c) => c.id === body.id));
+  });
+  on("DELETE", patterns.calendarEvent, (_req, params) => {
+    deleteCalendarEvent(db, p(params, "id"));
+    return json({ ok: true });
   });
 
   const handleApi = async (req: Request): Promise<Response | null> => {

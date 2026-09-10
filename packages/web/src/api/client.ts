@@ -1,11 +1,11 @@
 // ================= typed API client =================
 
-import type { Agent, DevFacts, FeedDay, GovernanceItem, ImpactPair, Metric, MetricReading, Milestone, Project, Release, SyncRun, Upcoming, Workspace } from "@valueflow/domain";
+import type { Agent, CalendarEvent, DevFacts, GovernanceItem, ImpactPair, Metric, MetricReading, Milestone, Project, Release, SyncRun, Workspace } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import type {
   AgentsInput,
   ApiError,
-  FeedInput,
+  CalendarEventInput,
   GovernanceInput,
   GovernanceItemInput,
   MilestoneInput,
@@ -13,7 +13,6 @@ import type {
   ReadingInput,
   ReleaseInput,
   TargetsInput,
-  UpcomingInput,
   WorkspaceInput,
 } from "@valueflow/shared";
 
@@ -74,6 +73,7 @@ export const api = {
   syncProject: (pid: string) => request<{ run: SyncRun; facts: DevFacts | null }>("POST", routes.sync(pid)),
   syncStatus: () => request<{ source: string | null; projects: Record<string, SyncRun | null> }>("GET", routes.syncStatus()),
   setAgents: (body: AgentsInput) => request<Agent[]>("PUT", routes.agents(), body),
-  setFeed: (body: FeedInput) => request<FeedDay[]>("PUT", routes.feed(), body),
-  setUpcoming: (body: UpcomingInput) => request<Upcoming[]>("PUT", routes.upcoming(), body),
+  createCalendarEvent: (body: CalendarEventInput) => request<CalendarEvent>("POST", routes.calendar(), body),
+  updateCalendarEvent: (body: CalendarEventInput) => request<CalendarEvent>("PUT", routes.calendarEvent(body.id), body),
+  deleteCalendarEvent: (id: string) => request<Ok>("DELETE", routes.calendarEvent(id)),
 };

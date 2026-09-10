@@ -165,6 +165,29 @@ const MIGRATIONS: readonly string[] = [
   CREATE INDEX sync_runs_by_project ON sync_runs(project_id, seq);
   DROP TABLE dev_activity;
   `,
+  // The activity feed derives from an append-only event log written by syncs
+  // and mutations; the calendar is user-entered dated items.
+  `
+  CREATE TABLE events (
+    ref TEXT PRIMARY KEY,
+    at TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('build','eval','merge','deploy','gov','ship')),
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    tab TEXT NOT NULL,
+    text TEXT NOT NULL
+  );
+  CREATE INDEX events_by_at ON events(at);
+  CREATE TABLE calendar_events (
+    id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    tab TEXT NOT NULL,
+    text TEXT NOT NULL,
+    sub TEXT
+  );
+  DROP TABLE feed_days;
+  DROP TABLE upcoming;
+  `,
 ];
 
 export const migrate = (db: Database): void => {

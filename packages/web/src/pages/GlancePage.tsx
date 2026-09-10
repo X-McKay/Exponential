@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { calendarOf, composeGlancePage, monthLabel, shortAge } from "@valueflow/domain";
+import { calendarOf, composeGlancePage, monthLabel, relTime, shortAge } from "@valueflow/domain";
 import type { AppState, Block, Calendar, ProjectTab } from "@valueflow/domain";
 import { Bullet, GovStack, Spark } from "../charts/small.tsx";
 import { Chip, reset } from "../ui/primitives.tsx";
@@ -80,7 +80,7 @@ function Body({ b, cal }: { b: Block; cal: Calendar }) {
             <div key={i} style={{ display: "flex", gap: 8, padding: "4px 0", alignItems: "center" }}>
               <span style={{ width: 6, height: 6, borderRadius: "50%", background: FEED_COLOR[it.type], flexShrink: 0 }} />
               <span style={{ fontSize: 12, color: "#C6CAD6", flex: 1, lineHeight: 1.5 }}>{it.text}</span>
-              <span style={{ fontSize: 11, color: C.dim, flexShrink: 0 }}>{it.t}</span>
+              <span style={{ fontSize: 11, color: C.dim, flexShrink: 0 }}>{relTime(it.at, cal.asOf)}</span>
             </div>
           ))}
         </div>

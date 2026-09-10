@@ -233,26 +233,26 @@ export const FEED_TYPES: readonly FeedType[] = ["build", "eval", "merge", "deplo
 export type ProjectTab = "overview" | "value" | "roadmap" | "development" | "governance";
 export const PROJECT_TABS: readonly ProjectTab[] = ["overview", "value", "roadmap", "development", "governance"];
 
-export interface FeedItem {
-  t: string;
+/** Append-only activity log entry; the feed and Glance "Recent activity" derive from these. */
+export interface Event {
+  /** Stable identity so syncs never duplicate an entry ("pr:repo#409:merged"). */
+  ref: string;
+  at: string;
   type: FeedType;
   proj: string;
   tab: ProjectTab;
   text: string;
 }
 
-export interface FeedDay {
-  day: string;
-  items: FeedItem[];
-}
-
-export interface Upcoming {
+/** A dated, user-entered item; release targets join it at read time to form "Coming up". */
+export interface CalendarEvent {
+  id: string;
+  /** YYYY-MM-DD */
   date: string;
   proj: string;
   tab: ProjectTab;
   text: string;
   sub: string | null;
-  release?: { pid: string; rid: string };
 }
 
 // ---- workspace ----------------------------------------------------------
@@ -279,6 +279,7 @@ export interface AppState {
   releases: Record<string, Release[]>;
   dev: Record<string, DevFacts>;
   agents: Agent[];
-  feed: FeedDay[];
-  upcoming: Upcoming[];
+  /** Newest first, trailing EVENT_WINDOW_DAYS. */
+  events: Event[];
+  calendar: CalendarEvent[];
 }

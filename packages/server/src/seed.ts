@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
-import { AGENTS, DEV, FEED, PROJECTS, RELEASES, SEED_ASOF, UPCOMING, WORKSPACE, addMonths, isMeasurable, monthsBetween, ymOf } from "@valueflow/domain";
-import { replaceDevFacts } from "./repo.ts";
+import { AGENTS, CALENDAR, DEV, PROJECTS, RELEASES, SEED_ASOF, WORKSPACE, addMonths, isMeasurable, monthsBetween, seedEvents, ymOf } from "@valueflow/domain";
+import { recordEvent, replaceDevFacts } from "./repo.ts";
 import type { AppState, Metric } from "@valueflow/domain";
 
 /** The instant the fixtures describe. Seeding at another time shifts every planned month and timestamp by the same offset. */
@@ -39,7 +39,7 @@ export const trajectory = (metric: Pick<Metric, "current">, seed: number, n = RE
 export const isSeeded = (db: Database): boolean =>
   (db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM projects").get()?.n ?? 0) > 0;
 
-export const fixtureState = (asOf = SEED_ASOF): AppState => ({ asOf, syncSource: null, workspace: WORKSPACE, projects: PROJECTS, releases: RELEASES, dev: DEV(asOf), agents: AGENTS, feed: FEED, upcoming: UPCOMING });
+export const fixtureState = (asOf = SEED_ASOF): AppState => ({ asOf, syncSource: null, workspace: WORKSPACE, projects: PROJECTS, releases: RELEASES, dev: DEV(asOf), agents: AGENTS, events: seedEvents(asOf), calendar: CALENDAR(asOf) });
 
 export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_NOW): void => {
   // Planned months are relative to the fixtures' own "today"; keep them the same distance from `now`.
@@ -57,8 +57,7 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
     relMs: db.query("INSERT INTO release_milestones (project_id, release_id, milestone_id, sort) VALUES (?,?,?,?)"),
     crit: db.query("INSERT INTO release_criteria (project_id, release_id, sort, type, milestone_id, governance_id, ok, label) VALUES (?,?,?,?,?,?,?,?)"),
     agent: db.query("INSERT INTO agents (id, sort, doc) VALUES (?,?,?)"),
-    feed: db.query("INSERT INTO feed_days (sort, doc) VALUES (?,?)"),
-    upcoming: db.query("INSERT INTO upcoming (sort, doc) VALUES (?,?)"),
+    calendar: db.query("INSERT INTO calendar_events (id, date, project_id, tab, text, sub) VALUES (?,?,?,?,?,?)"),
     workspace: db.query("INSERT OR REPLACE INTO workspace (id, user_name, user_ini) VALUES (1, ?, ?)"),
   };
 
@@ -106,8 +105,8 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
       if (d) replaceDevFacts(db, p.id, d, d.lastSync ?? { source: "sample", startedAt: now.toISOString(), finishedAt: now.toISOString(), ok: true, message: "seeded" });
     }
     state.agents.forEach((a, i) => q.agent.run(a.id, i, JSON.stringify(a)));
-    state.feed.forEach((f, i) => q.feed.run(i, JSON.stringify(f)));
-    state.upcoming.forEach((u, i) => q.upcoming.run(i, JSON.stringify(u)));
+    for (const e of state.events) recordEvent(db, e);
+    for (const c of state.calendar) q.calendar.run(c.id, c.date, c.proj, c.tab, c.text, c.sub);
   })();
 };
 

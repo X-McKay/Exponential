@@ -22,8 +22,8 @@ export const routes = {
   sync: (pid: string) => `/api/projects/${enc(pid)}/sync`,
   syncStatus: () => "/api/sync",
   agents: () => "/api/agents",
-  feed: () => "/api/feed",
-  upcoming: () => "/api/upcoming",
+  calendar: () => "/api/calendar",
+  calendarEvent: (id: string) => `/api/calendar/${enc(id)}`,
 } as const;
 
 /** Route patterns (Bun.serve-style `:param` segments) in match order. */
@@ -44,6 +44,6 @@ export const patterns = {
   sync: "/api/projects/:pid/sync",
   syncStatus: "/api/sync",
   agents: "/api/agents",
-  feed: "/api/feed",
-  upcoming: "/api/upcoming",
+  calendar: "/api/calendar",
+  calendarEvent: "/api/calendar/:id",
 } as const;

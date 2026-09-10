@@ -14,20 +14,9 @@ import { addMonths, calendarOf, monthLabel } from "./calendar.ts";
 import type { Calendar } from "./calendar.ts";
 import { blockers, govCounts, isMeasurable, metricLevel, realized, releaseState, tierOf } from "./derive.ts";
 import type { CriterionEval, ReleaseState } from "./derive.ts";
-import type {
-  AppState,
-  Build,
-  Dim,
-  FeedItem,
-  GovStatus,
-  Metric,
-  Milestone,
-  Project,
-  ProjectTab,
-  PullRequest,
-  Release,
-  Upcoming,
-} from "./types.ts";
+import { deriveUpcoming, recentEvents } from "./feed.ts";
+import type { FeedItem, Upcoming } from "./feed.ts";
+import type { AppState, Build, Dim, GovStatus, Metric, Milestone, Project, ProjectTab, PullRequest, Release } from "./types.ts";
 
 export type Tone = "bad" | "warn" | "good" | "info";
 
@@ -165,7 +154,7 @@ export const detectSignals = (state: AppState, cal: Calendar = calendarOf(state)
   const ratio = (p: Project): number => (p.targets.fte > 0 ? realized(p, "fte") / p.targets.fte : 0);
   const bestValue = [...state.projects].sort((a, b) => ratio(b) - ratio(a))[0] ?? null;
 
-  const recent = [...(state.feed[0]?.items ?? []), ...(state.feed[1]?.items ?? [])];
+  const recent: FeedItem[] = recentEvents(state.events, cal.asOf).map((e) => ({ at: e.at, type: e.type, proj: e.proj, tab: e.tab, text: e.text }));
 
   return {
     blocked,
@@ -177,7 +166,7 @@ export const detectSignals = (state: AppState, cal: Calendar = calendarOf(state)
     failBuilds,
     t1gaps,
     bestValue,
-    upcoming: state.upcoming,
+    upcoming: deriveUpcoming(state, cal),
     recent,
     projectCount: state.projects.length,
     cal,

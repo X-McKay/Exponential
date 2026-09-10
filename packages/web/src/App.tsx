@@ -318,8 +318,8 @@ export function App() {
               state={state}
               onWorkspace={(w) => void store.saveWorkspace(w)}
               onAgents={(a) => void store.saveAgents(a)}
-              onFeed={(f) => void store.saveFeed(f)}
-              onUpcoming={(u) => void store.saveUpcoming(u)}
+              onCalendar={(ev, isNew) => void store.saveCalendar(ev, isNew)}
+              onDeleteCalendar={(id) => void store.deleteCalendar(id)}
               onSync={store.syncProject}
             />
           </>

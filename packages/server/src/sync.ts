@@ -8,7 +8,7 @@ import type { Database } from "bun:sqlite";
 import { ACTIVITY_DAYS } from "@valueflow/domain";
 import type { Project, SyncRun } from "@valueflow/domain";
 import type { RepoSnapshot, RepoSource } from "./connectors/index.ts";
-import { loadState, recordSyncRun, replaceDevFacts } from "./repo.ts";
+import { loadState, recordDevEvents, recordSyncRun, replaceDevFacts } from "./repo.ts";
 
 export const syncProject = async (db: Database, source: RepoSource, project: Project, now: Date, sinceDays = ACTIVITY_DAYS): Promise<SyncRun> => {
   const startedAt = now.toISOString();
@@ -22,17 +22,14 @@ export const syncProject = async (db: Database, source: RepoSource, project: Pro
       ok: true,
       message: `${snapshots.length} repo${snapshots.length === 1 ? "" : "s"}, ${snapshots.reduce((a, s) => a + s.prs.length, 0)} PRs, ${snapshots.reduce((a, s) => a + s.builds.length, 0)} builds`,
     };
-    replaceDevFacts(
-      db,
-      project.id,
-      {
-        repos: snapshots.map((s) => s.stat),
-        prs: snapshots.flatMap((s) => s.prs),
-        builds: snapshots.flatMap((s) => s.builds),
-        commits: snapshots.flatMap((s) => s.commits),
-      },
-      run,
-    );
+    const facts = {
+      repos: snapshots.map((s) => s.stat),
+      prs: snapshots.flatMap((s) => s.prs),
+      builds: snapshots.flatMap((s) => s.builds),
+      commits: snapshots.flatMap((s) => s.commits),
+    };
+    replaceDevFacts(db, project.id, facts, run);
+    recordDevEvents(db, project.id, facts, now);
     return run;
   } catch (e) {
     const run: SyncRun = { source: source.name, startedAt, finishedAt: new Date().toISOString(), ok: false, message: e instanceof Error ? e.message : String(e) };

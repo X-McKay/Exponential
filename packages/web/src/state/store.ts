@@ -5,7 +5,7 @@
 // reloads from the server and surfaces the error.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Agent, AppState, FeedDay, GovernanceItem, ImpactPair, Milestone, Project, Release, Upcoming, Workspace } from "@valueflow/domain";
+import type { Agent, AppState, CalendarEvent, GovernanceItem, ImpactPair, Milestone, Project, Release, Workspace } from "@valueflow/domain";
 import type { ProjectInput } from "@valueflow/shared";
 import { api } from "../api/client.ts";
 
@@ -27,8 +27,8 @@ export interface Store {
   /** Pull fresh development facts for a project from the configured source. */
   syncProject: (pid: string) => Promise<void>;
   saveAgents: (agents: Agent[]) => Promise<void>;
-  saveFeed: (feed: FeedDay[]) => Promise<void>;
-  saveUpcoming: (items: Upcoming[]) => Promise<void>;
+  saveCalendar: (ev: CalendarEvent, isNew: boolean) => Promise<void>;
+  deleteCalendar: (id: string) => Promise<void>;
   saveWorkspace: (w: Workspace) => Promise<void>;
 }
 
@@ -220,19 +220,19 @@ export const useStore = (): Store => {
       ),
     [commit],
   );
-  const saveFeed = useCallback(
-    (feed: FeedDay[]) =>
+  const saveCalendar = useCallback(
+    (ev: CalendarEvent, isNew: boolean) =>
       commit(
-        (s) => ({ ...s, feed }),
-        () => api.setFeed(feed),
+        (s) => ({ ...s, calendar: (isNew ? [...s.calendar, ev] : s.calendar.map((c) => (c.id === ev.id ? ev : c))).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)) }),
+        () => (isNew ? api.createCalendarEvent(ev) : api.updateCalendarEvent(ev)),
       ),
     [commit],
   );
-  const saveUpcoming = useCallback(
-    (upcoming: Upcoming[]) =>
+  const deleteCalendar = useCallback(
+    (id: string) =>
       commit(
-        (s) => ({ ...s, upcoming }),
-        () => api.setUpcoming(upcoming),
+        (s) => ({ ...s, calendar: s.calendar.filter((c) => c.id !== id) }),
+        () => api.deleteCalendarEvent(id),
       ),
     [commit],
   );
@@ -265,8 +265,8 @@ export const useStore = (): Store => {
       deleteRelease,
       syncProject,
       saveAgents,
-      saveFeed,
-      saveUpcoming,
+      saveCalendar,
+      deleteCalendar,
       saveWorkspace,
     }),
     [
@@ -286,8 +286,8 @@ export const useStore = (): Store => {
       deleteRelease,
       syncProject,
       saveAgents,
-      saveFeed,
-      saveUpcoming,
+      saveCalendar,
+      deleteCalendar,
       saveWorkspace,
     ],
   );

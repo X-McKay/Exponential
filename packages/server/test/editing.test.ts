@@ -3,7 +3,7 @@
 // user, and the JSON documents mirrored from external systems.
 
 import { describe, expect, test } from "bun:test";
-import { AGENTS, FEED, UPCOMING, calendarOf, releaseState } from "@valueflow/domain";
+import { AGENTS, calendarOf, releaseState } from "@valueflow/domain";
 import type { AppState, GovernanceItem, Project, Release, Workspace } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import type { ProjectInput } from "@valueflow/shared";
@@ -196,20 +196,72 @@ describe("sync", () => {
     expect(after.lastSync).toMatchObject({ ok: false, source: "broken" });
   });
 
-  test("PUT replaces agents, feed, and calendar after validating the whole document", async () => {
+  test("PUT replaces the agents document after validating it", async () => {
     const app = testApp();
     const agents = AGENTS.slice(0, 2).map((a) => ({ ...a, runs: a.runs + 1 }));
     expect((await app.send("PUT", routes.agents(), agents)).status).toBe(200);
     expect((await app.send("PUT", routes.agents(), [{ ...agents[0]!, status: "asleep" }])).status).toBe(400);
-    const feed = [FEED[0]!];
-    expect((await app.send("PUT", routes.feed(), feed)).status).toBe(200);
-    const upcoming = UPCOMING.slice(0, 1);
-    expect((await app.send("PUT", routes.upcoming(), upcoming)).status).toBe(200);
-    const state = await stateOf(app);
-    expect(state.agents).toEqual(agents);
-    expect(state.feed).toEqual(feed);
-    expect(state.upcoming).toEqual(upcoming);
-    expect((await app.get(routes.glance())).status).toBe(200);
+    expect((await stateOf(app)).agents).toEqual(agents);
+  });
+});
+
+describe("events", () => {
+  test("the seed carries the sample log plus what a sync of the sample facts implies, and re-syncing adds nothing", async () => {
+    const app = testApp();
+    const before = (await stateOf(app)).events;
+    expect(before.length).toBeGreaterThan(10);
+    expect(before.map((e) => e.ref)).toContain("build:doc-ingest-pipeline/#1148");
+    expect(before.map((e) => e.ref)).toContain("pr:onboarding-mapping-svc#408:merged");
+    for (let i = 1; i < before.length; i++) expect(before[i - 1]!.at >= before[i]!.at).toBe(true);
+    await app.send("POST", routes.sync("onboarding"));
+    expect((await stateOf(app)).events.length).toBe(before.length);
+  });
+
+  test("governance moves, eval readings, and milestone status changes append events; manual readings do not", async () => {
+    const app = testApp();
+    const n = (await stateOf(app)).events.length;
+    await app.send("PUT", routes.governance("ima", "sla"), { status: "draft", owner: "JL", date: null, detail: "" });
+    await app.send("PUT", routes.governance("ima", "sla"), { status: "draft", owner: "AM", date: null, detail: "owner only" });
+    await app.send("PUT", routes.readings("ima", "MS-21", "rec"), { value: 84, source: "eval" });
+    await app.send("PUT", routes.readings("ima", "MS-21", "rec"), { value: 90 });
+    const ms = (await stateOf(app)).projects.find((p) => p.id === "ima")!.milestones.find((m) => m.id === "MS-22")!;
+    await app.send("PUT", routes.milestone("ima", "MS-22"), { ...ms, status: "shipped" });
+    const events = (await stateOf(app)).events;
+    expect(events.length).toBe(n + 3);
+    const texts = events.slice(0, 3).map((e) => `${e.type}: ${e.text}`);
+    expect(texts).toContain("gov: Product SLA moved to Draft");
+    expect(texts).toContain("eval: Eval: Restriction clause extraction · Rule recall at 84% — 4pts below base gate (88%)");
+    expect(texts).toContain("ship: Universe definition parser shipped — gated impact now counts toward realized value");
+    const glance = (await app.get<{ blocks: { kind: string; items?: { text: string }[] }[] }>(routes.glance())).body;
+    const activity = glance.blocks.find((b) => b.kind === "activity");
+    expect(activity?.items?.[0]?.text).toContain("Product SLA moved to Draft");
+  });
+});
+
+describe("calendar", () => {
+  test("POST/PUT/DELETE manage dated events; upcoming merges them with release targets", async () => {
+    const app = testApp();
+    const ev = { id: "board-readout", date: "2026-09-12", proj: "onboarding", tab: "value", text: "Board readout", sub: "Q3 value review" };
+    const created = await app.send<typeof ev>("POST", routes.calendar(), ev);
+    expect(created.status).toBe(201);
+    expect(created.body).toEqual(ev);
+    expect((await app.send("POST", routes.calendar(), ev)).status).toBe(409);
+    expect((await app.send("POST", routes.calendar(), { ...ev, id: "x", proj: "nope" })).status).toBe(404);
+    expect((await app.send("POST", routes.calendar(), { ...ev, id: "y", date: "12/09/2026" })).status).toBe(400);
+
+    const glance = (await app.get<{ blocks: { kind: string; items?: { date: string; text: string; release?: unknown }[] }[]; narrative: string[] }>(routes.glance())).body;
+    const up = glance.blocks.find((b) => b.kind === "upcoming")!.items!;
+    expect(up[0]).toMatchObject({ date: "Sep 12", text: "Board readout" });
+    expect(up[1]).toMatchObject({ date: "Sep 14", text: "Pen test window opens" });
+    expect(up.some((u) => u.release !== undefined && u.text === "R1 · Shadow mode target")).toBe(true);
+    expect(glance.narrative.at(-1)).toBe("Next on the calendar: Sep 12 — board readout (Client onboarding efficie…).");
+
+    const moved = await app.send<typeof ev>("PUT", routes.calendarEvent("board-readout"), { ...ev, date: "2026-10-02" });
+    expect(moved.body.date).toBe("2026-10-02");
+    expect((await app.send("PUT", routes.calendarEvent("board-readout"), { ...ev, id: "other" })).status).toBe(400);
+    expect((await app.send("DELETE", routes.calendarEvent("board-readout"))).status).toBe(200);
+    expect((await app.send("DELETE", routes.calendarEvent("board-readout"))).status).toBe(404);
+    expect((await stateOf(app)).calendar.map((c) => c.id)).toEqual(["pen-test-window", "recall-gate-review", "airc-oct-submission", "quarterly-rereview"]);
   });
 });
 
