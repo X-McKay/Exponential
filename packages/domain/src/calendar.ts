@@ -7,3 +7,6 @@ export const MONTHS: readonly string[] = [
 export const TODAY = 8;
 
 export const monthLabel = (i: number): string => MONTHS[i] ?? `M${i}`;
+
+/** ISO date the calendar's "today" corresponds to (a Thursday). */
+export const TODAY_DATE = "2026-09-10";

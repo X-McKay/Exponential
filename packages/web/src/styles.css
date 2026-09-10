@@ -1,1 +1,193 @@
-body{margin:0}
+/* Global polish layer — ported verbatim from the mockup's VF_CSS. */
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100vh;
+  background: #08090a;
+  color: #eeeff1;
+}
+* {
+  -webkit-font-smoothing: antialiased;
+}
+::selection {
+  background: rgba(110, 123, 242, 0.35);
+}
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: #26272c;
+  border-radius: 5px;
+  border: 2px solid #08090a;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #34363d;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.vf-row:hover {
+  background: #131418 !important;
+}
+.vf-nav:hover {
+  background: #131418 !important;
+  color: #eeeff1 !important;
+}
+.vf-nav[data-active="1"] {
+  box-shadow: inset 2px 0 0 #6e7bf2;
+}
+.vf-search:hover {
+  border-color: #34363d !important;
+}
+.vf-tab:hover {
+  color: #eeeff1 !important;
+}
+.vf-card:hover {
+  border-color: #34363d !important;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgba(110, 123, 242, 0.6) !important;
+  outline-offset: 1px;
+  border-radius: 6px;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: #4a54b8 !important;
+}
+
+@keyframes vfPop {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.vf-pop {
+  animation: vfPop 0.28s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.vf-pop:nth-child(2) {
+  animation-delay: 0.04s;
+}
+.vf-pop:nth-child(3) {
+  animation-delay: 0.08s;
+}
+.vf-pop:nth-child(4) {
+  animation-delay: 0.12s;
+}
+.vf-pop:nth-child(5) {
+  animation-delay: 0.16s;
+}
+.vf-pop:nth-child(6) {
+  animation-delay: 0.2s;
+}
+.vf-pop:nth-child(7) {
+  animation-delay: 0.24s;
+}
+.vf-pop:nth-child(n + 8) {
+  animation-delay: 0.28s;
+}
+
+@keyframes vfDraw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.vf-draw {
+  stroke-dasharray: 1;
+  animation: vfDraw 0.9s cubic-bezier(0.3, 0.6, 0.3, 1) both;
+}
+
+@keyframes vfPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.vf-pulse {
+  animation: vfPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes vfFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.vf-overlay {
+  animation: vfFade 0.12s ease both;
+}
+@keyframes vfScale {
+  from {
+    opacity: 0;
+    transform: scale(0.985) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.vf-modal {
+  animation: vfScale 0.16s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+/* Additions beyond the mockup: error toast and the g-chord hint. */
+.vf-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 90;
+  background: #181b24;
+  border: 1px solid rgba(229, 83, 75, 0.4);
+  color: #f08a84;
+  font-size: 12.5px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  animation: vfPop 0.2s ease both;
+  cursor: pointer;
+}
+.vf-chord {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 90;
+  background: #101114;
+  border: 1px solid #26272c;
+  color: #9ca0ab;
+  font-size: 11.5px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  white-space: nowrap;
+  animation: vfFade 0.1s ease both;
+}
+.vf-chord kbd {
+  font-family: inherit;
+  font-size: 10.5px;
+  color: #eeeff1;
+  border: 1px solid #26272c;
+  border-radius: 4px;
+  padding: 0 4px;
+  margin: 0 2px;
+}
