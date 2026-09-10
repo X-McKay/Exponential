@@ -140,6 +140,17 @@ export const ProposalActionSchema = z.discriminatedUnion("type", [
 ]);
 export type ProposalActionInput = z.infer<typeof ProposalActionSchema>;
 
+/** Everything the wizard composes from an accepted draft, created in one transaction. */
+export const SetupCreateInputSchema = z.object({
+  project: ProjectInputSchema,
+  milestones: z.array(MilestoneInputSchema).max(20),
+  governance: z.array(GovernanceItemInputSchema).max(40),
+  releases: z.array(ReleaseInputSchema).max(10),
+});
+export type SetupCreateInput = z.infer<typeof SetupCreateInputSchema>;
+
+export const SetupRefineInputSchema = z.object({ feedback: short(2000) });
+
 export const RunAgentInputSchema = z.object({
   agentId: id,
   proj: id,

@@ -278,13 +278,15 @@ export function Modal({
   onSubmit,
   children,
   footer,
+  width = 580,
 }: {
   title: string;
   onClose: () => void;
   /** Invoked on ⌘↵ / Ctrl+↵ anywhere in the dialog; the footer shows the hint. */
-  onSubmit?: () => void;
+  onSubmit?: (() => void) | undefined;
   children: ReactNode;
   footer?: ReactNode;
+  width?: number;
 }) {
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -314,7 +316,7 @@ export function Modal({
         aria-label={title}
         style={{
           width: "100%",
-          maxWidth: 580,
+          maxWidth: width,
           maxHeight: "86vh",
           overflowY: "auto",
           background: "#13151C",

@@ -5,6 +5,7 @@ import type { Dim, ProjectTab } from "@valueflow/domain";
 import { AgentsInputSchema } from "@valueflow/shared";
 import { JsonDocEditor } from "./editors/JsonDocEditor.tsx";
 import { ProjectEditor } from "./editors/ProjectEditor.tsx";
+import { SetupWizard } from "./editors/SetupWizard.tsx";
 import { WorkspaceEditor } from "./editors/WorkspaceEditor.tsx";
 import { CmdK } from "./palette/CmdK.tsx";
 import { AgentsPage } from "./pages/AgentsPage.tsx";
@@ -147,7 +148,7 @@ export function App() {
   const [palette, setPalette] = useState(false);
   const narrow = useNarrow();
   const [lastProject, setLastProject] = useState<string | null>(null);
-  const [editor, setEditor] = useState<{ kind: "project"; pid: string | null } | { kind: "agents" } | { kind: "workspace" } | null>(null);
+  const [editor, setEditor] = useState<{ kind: "project"; pid: string | null } | { kind: "setup" } | { kind: "agents" } | { kind: "workspace" } | null>(null);
 
   const state = store.state;
   const projects = state?.projects ?? [];
@@ -214,6 +215,18 @@ export function App() {
             void store.deleteProject(pid);
             closeEditor();
             go("portfolio", null);
+          }}
+          onClose={closeEditor}
+        />
+      )}
+      {editor?.kind === "setup" && (
+        <SetupWizard
+          projects={projects}
+          cal={cal}
+          defaultOwner={user.ini}
+          onCreated={(pid) => {
+            closeEditor();
+            void store.reload().then(() => openProject(pid));
           }}
           onClose={closeEditor}
         />
@@ -320,7 +333,13 @@ export function App() {
             <Header>
               <h1 style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em", margin: 0 }}>AI project portfolio</h1>
             </Header>
-            <PortfolioPage projects={projects} onOpen={(id) => openProject(id)} onNew={() => setEditor({ kind: "project", pid: null })} />
+            <PortfolioPage
+              projects={projects}
+              onOpen={(id) => openProject(id)}
+              onNew={() => setEditor({ kind: "project", pid: null })}
+              onSetup={() => setEditor({ kind: "setup" })}
+              canSetup={state.llm !== null}
+            />
           </>
         ) : view.page === "data" ? (
           <>

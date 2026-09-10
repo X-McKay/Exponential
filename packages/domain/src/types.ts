@@ -244,6 +244,77 @@ export interface LlmInfo {
   model: string | null;
 }
 
+// ---- project setup drafts ---------------------------------------------------
+
+export type Confidence = "high" | "medium" | "low";
+
+/** A value the setup agent suggested, with where it came from and how sure it is. */
+export interface Suggested<T> {
+  value: T;
+  rationale: string;
+  source: string | null;
+  confidence: Confidence;
+}
+
+export interface DraftMilestone {
+  name: string;
+  status: MilestoneStatus;
+  month: string;
+  impact: Impact;
+  metrics: { label: string; base: number; stretch: number }[];
+}
+
+export interface DraftGovernance {
+  cat: string;
+  name: string;
+  status: GovStatus;
+  /** Person's name as written in the documents; mapped to initials on create. */
+  owner: string;
+  detail: string;
+}
+
+export interface DraftRelease {
+  name: string;
+  month: string;
+  /** Milestone names shipped in this release. */
+  milestones: string[];
+  criteria: { type: "gate" | "gov" | "manual"; ref: string; label: string }[];
+}
+
+/** The whole project record as suggested from documents. */
+export interface ProjectDraft {
+  description: Suggested<string>;
+  stage: Suggested<string>;
+  tier: Suggested<RiskTier | null>;
+  committee: Suggested<Committee | null>;
+  targets: Suggested<ImpactPair>;
+  team: Suggested<TeamMember>[];
+  repos: Suggested<Repo>[];
+  milestones: Suggested<DraftMilestone>[];
+  governance: Suggested<DraftGovernance>[];
+  releases: Suggested<DraftRelease>[];
+  notes: string[];
+}
+
+export interface SetupSource {
+  name: string;
+  kind: "docx" | "pptx" | "text" | "unsupported";
+  chars: number;
+  error: string | null;
+}
+
+export interface SetupDraft {
+  id: string;
+  createdAt: string;
+  name: string;
+  key: string;
+  brief: string;
+  sources: SetupSource[];
+  draft: ProjectDraft;
+  feedback: string[];
+  model: string | null;
+}
+
 // ---- proposals ------------------------------------------------------------
 
 /** A concrete change an agent suggests; applied only when a person accepts it. */

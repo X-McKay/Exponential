@@ -3,13 +3,16 @@ import type { Project } from "@valueflow/domain";
 import { Avatar, Chip, Ring, TierBadge, ghostBtn, reset } from "../ui/primitives.tsx";
 import { C, readinessColor } from "../theme.ts";
 
-export function PortfolioPage({ projects, onOpen, onNew }: { projects: Project[]; onOpen: (id: string) => void; onNew: () => void }) {
+export function PortfolioPage({ projects, onOpen, onNew, onSetup, canSetup }: { projects: Project[]; onOpen: (id: string) => void; onNew: () => void; onSetup: () => void; canSetup: boolean }) {
   return (
     <div style={{ padding: "18px 20px 30px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
         <span style={{ fontSize: 13, color: C.mut, flex: 1 }}>
           {projects.length} AI project{projects.length === 1 ? "" : "s"} · value tied to performance gates · governance tracked per project
         </span>
+        <button type="button" className="vf-ghost" disabled={!canSetup} title={canSetup ? undefined : "Set LLM_BASE_URL to enable the setup agent"} onClick={onSetup} style={{ ...ghostBtn, color: C.indigoHi, opacity: canSetup ? 1 : 0.5 }}>
+          Set up from documents…
+        </button>
         <button type="button" className="vf-ghost" onClick={onNew} style={{ ...ghostBtn, color: C.indigoHi }}>
           + New project
         </button>
@@ -17,10 +20,19 @@ export function PortfolioPage({ projects, onOpen, onNew }: { projects: Project[]
       {projects.length === 0 && (
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "48px 14px", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12 }}>
           <div style={{ fontSize: 13, color: C.text }}>No projects yet</div>
-          <div style={{ fontSize: 12, color: C.dim, textAlign: "center", maxWidth: 380 }}>Create a project, then add milestones with eval gates, governance items, and releases.</div>
-          <button type="button" className="vf-ghost" onClick={onNew} style={{ ...ghostBtn, color: C.indigoHi }}>
-            + New project
-          </button>
+          <div style={{ fontSize: 12, color: C.dim, textAlign: "center", maxWidth: 380 }}>
+            Create a project by hand, or hand the setup agent a charter or deck and review what it drafts.
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {canSetup && (
+              <button type="button" className="vf-ghost" onClick={onSetup} style={{ ...ghostBtn, color: C.indigoHi }}>
+                Set up from documents…
+              </button>
+            )}
+            <button type="button" className="vf-ghost" onClick={onNew} style={{ ...ghostBtn, color: C.indigoHi }}>
+              + New project
+            </button>
+          </div>
         </div>
       )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>

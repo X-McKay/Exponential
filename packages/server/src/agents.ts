@@ -253,7 +253,7 @@ export const runAgent = async (db: Database, llm: Llm, input: RunAgentInput, now
     try {
       result = parseResult(res.content, project);
     } catch (e) {
-      throw new Error(`${e instanceof Error ? e.message : String(e)} (reply began: ${JSON.stringify(res.content.slice(0, 200))})`);
+      throw new Error(`${e instanceof Error ? e.message : String(e)} (reply began: ${JSON.stringify(res.content.slice(0, 200))})`, { cause: e });
     }
     const finished: AgentRun = {
       ...run,

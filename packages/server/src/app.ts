@@ -15,6 +15,8 @@ import {
   ReadingInputSchema,
   ReleaseInputSchema,
   RunAgentInputSchema,
+  SetupCreateInputSchema,
+  SetupRefineInputSchema,
   TargetsInputSchema,
   WorkspaceInputSchema,
   patterns,
@@ -45,7 +47,11 @@ import {
   upsertRelease,
 } from "./repo.ts";
 import { runAgent } from "./agents.ts";
+import { extractSource } from "./extract.ts";
+import type { ExtractedSource } from "./extract.ts";
 import { ProposalRejected, acceptProposal, dismissProposal, findProposal } from "./proposals.ts";
+import { loadSetupDraft } from "./repo.ts";
+import { analyzeSetup, createFromSetup, refineSetup } from "./setup.ts";
 import type { RepoSource } from "./connectors/index.ts";
 import type { Llm } from "./llm.ts";
 import { syncProject } from "./sync.ts";
@@ -226,6 +232,48 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     setAgents(db, await parseBody(req, AgentsInputSchema));
     return json(state().agents);
   });
+  // Project setup from documents: multipart with name, brief, snippet[] and file[] parts.
+  on("POST", patterns.setup, async (req) => {
+    if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
+    let form: FormData;
+    try {
+      form = await req.formData();
+    } catch {
+      throw new HttpError(400, "expected multipart/form-data");
+    }
+    const name = String(form.get("name") ?? "").trim();
+    if (!name) throw new HttpError(400, "name is required");
+    const key = form.get("key");
+    const brief = String(form.get("brief") ?? "");
+    const sources: ExtractedSource[] = [];
+    for (const [i, snippet] of form.getAll("snippet").entries()) {
+      const text = String(snippet).trim();
+      if (text) sources.push({ name: `snippet ${i + 1}`, kind: "text", text: text.slice(0, 40_000), chars: text.length, error: null, truncated: text.length > 40_000 });
+    }
+    for (const f of form.getAll("file")) {
+      if (!(f instanceof File)) continue;
+      if (f.size > 25_000_000) {
+        sources.push({ name: f.name, kind: "unsupported", text: "", chars: 0, error: "file is larger than 25 MB", truncated: false });
+        continue;
+      }
+      sources.push(extractSource(f.name, f.type, Buffer.from(await f.arrayBuffer())));
+    }
+    if (sources.length > 20) throw new HttpError(400, "at most 20 sources per setup");
+    const draft = await analyzeSetup(db, llm, { name, key: typeof key === "string" ? key : undefined, brief, sources }, now());
+    return json(draft, 201);
+  });
+  on("GET", patterns.setupDraft, (_req, params) => json(loadSetupDraft(db, p(params, "id")).draft));
+  on("POST", patterns.setupRefine, async (req, params) => {
+    if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
+    const body = await parseBody(req, SetupRefineInputSchema);
+    return json(await refineSetup(db, llm, p(params, "id"), body.feedback, now()));
+  });
+  on("POST", patterns.setupCreate, async (req, params) => {
+    const body = await parseBody(req, SetupCreateInputSchema);
+    const pid = createFromSetup(db, p(params, "id"), body, now());
+    return json(findProject(state(), pid), 201);
+  });
+
   on("POST", patterns.proposalAccept, (_req, params) => json(acceptProposal(db, findProposal(db, p(params, "id"), now()), now())));
   on("POST", patterns.proposalDismiss, (_req, params) => json(dismissProposal(db, findProposal(db, p(params, "id"), now()), now())));
   on("POST", patterns.agentRuns, async (req, params) => {

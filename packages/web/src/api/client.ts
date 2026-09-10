@@ -1,6 +1,6 @@
 // ================= typed API client =================
 
-import type { Agent, AgentRun, CalendarEvent, DevFacts, GovernanceItem, ImpactPair, Metric, MetricReading, Milestone, Project, Proposal, Release, SyncRun, Workspace } from "@valueflow/domain";
+import type { Agent, AgentRun, CalendarEvent, DevFacts, GovernanceItem, ImpactPair, Metric, MetricReading, Milestone, Project, Proposal, Release, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import type {
   AgentsInput,
@@ -13,6 +13,7 @@ import type {
   ReadingInput,
   ReleaseInput,
   RunAgentInput,
+  SetupCreateInput,
   TargetsInput,
   WorkspaceInput,
 } from "@valueflow/shared";
@@ -28,10 +29,11 @@ export class ApiRequestError extends Error {
 }
 
 const request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+  const form = body instanceof FormData;
   const res = await fetch(path, {
     method,
-    headers: body === undefined ? undefined : { "content-type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    headers: body === undefined || form ? undefined : { "content-type": "application/json" },
+    body: body === undefined ? undefined : form ? body : JSON.stringify(body),
   });
   if (!res.ok) {
     let err: ApiError = { error: `${res.status} ${res.statusText}` };
@@ -74,6 +76,9 @@ export const api = {
   syncProject: (pid: string) => request<{ run: SyncRun; facts: DevFacts | null }>("POST", routes.sync(pid)),
   syncStatus: () => request<{ source: string | null; projects: Record<string, SyncRun | null> }>("GET", routes.syncStatus()),
   setAgents: (body: AgentsInput) => request<Agent[]>("PUT", routes.agents(), body),
+  setupAnalyze: (form: FormData) => request<SetupDraft>("POST", routes.setup(), form),
+  setupRefine: (id: string, feedback: string) => request<SetupDraft>("POST", routes.setupRefine(id), { feedback }),
+  setupCreate: (id: string, body: SetupCreateInput) => request<Project>("POST", routes.setupCreate(id), body),
   acceptProposal: (id: string) => request<Proposal>("POST", routes.proposalAccept(id)),
   dismissProposal: (id: string) => request<Proposal>("POST", routes.proposalDismiss(id)),
   runAgent: (input: RunAgentInput) => {

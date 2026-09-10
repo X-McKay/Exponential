@@ -221,6 +221,21 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX proposals_by_state ON proposals(state, created_at);
   `,
+  // Setup drafts: what the setup agent suggested from documents, kept until the project is created.
+  `
+  CREATE TABLE setup_drafts (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    name TEXT NOT NULL,
+    key TEXT NOT NULL,
+    brief TEXT NOT NULL,
+    sources TEXT NOT NULL,
+    source_text TEXT NOT NULL,
+    draft TEXT NOT NULL,
+    feedback TEXT NOT NULL,
+    model TEXT
+  );
+  `,
 ];
 
 export const migrate = (db: Database): void => {

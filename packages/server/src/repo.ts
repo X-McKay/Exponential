@@ -11,6 +11,7 @@ import type {
   AppState,
   Proposal,
   ProposalAction,
+  SetupDraft,
   Build,
   CalendarEvent,
   Criterion,
@@ -426,6 +427,64 @@ export const insertProposal = (db: Database, p: Proposal): void => {
 export const updateProposal = (db: Database, p: Proposal): void => {
   const res = db.query("UPDATE proposals SET state = ?, decided_at = ? WHERE id = ?").run(p.state, p.decidedAt, p.id);
   if (res.changes === 0) throw new NotFound(`proposal ${p.id} not found`);
+};
+
+// ---- setup drafts -----------------------------------------------------------
+
+interface DraftRow {
+  id: string;
+  created_at: string;
+  name: string;
+  key: string;
+  brief: string;
+  sources: string;
+  source_text: string;
+  draft: string;
+  feedback: string;
+  model: string | null;
+}
+
+/** Extracted text kept with the draft so refinement can re-read the documents. */
+export interface StoredSourceText {
+  name: string;
+  kind: SetupDraft["sources"][number]["kind"];
+  text: string;
+  chars: number;
+  error: string | null;
+  truncated: boolean;
+}
+
+export const insertSetupDraft = (db: Database, d: SetupDraft, texts: StoredSourceText[]): void => {
+  db.query("INSERT INTO setup_drafts (id, created_at, name, key, brief, sources, source_text, draft, feedback, model) VALUES (?,?,?,?,?,?,?,?,?,?)").run(
+    d.id,
+    d.createdAt,
+    d.name,
+    d.key,
+    d.brief,
+    JSON.stringify(d.sources),
+    JSON.stringify(texts),
+    JSON.stringify(d.draft),
+    JSON.stringify(d.feedback),
+    d.model,
+  );
+};
+
+export const updateSetupDraft = (db: Database, d: SetupDraft): void => {
+  const res = db.query("UPDATE setup_drafts SET draft = ?, feedback = ?, model = ? WHERE id = ?").run(JSON.stringify(d.draft), JSON.stringify(d.feedback), d.model, d.id);
+  if (res.changes === 0) throw new NotFound(`setup draft ${d.id} not found`);
+};
+
+export const loadSetupDraft = (db: Database, id: string): { draft: SetupDraft; sources: StoredSourceText[] } => {
+  const r = db.query<DraftRow, [string]>("SELECT * FROM setup_drafts WHERE id = ?").get(id);
+  if (!r) throw new NotFound(`setup draft ${id} not found`);
+  return {
+    draft: { id: r.id, createdAt: r.created_at, name: r.name, key: r.key, brief: r.brief, sources: JSON.parse(r.sources) as SetupDraft["sources"], draft: JSON.parse(r.draft) as SetupDraft["draft"], feedback: JSON.parse(r.feedback) as string[], model: r.model },
+    sources: JSON.parse(r.source_text) as StoredSourceText[],
+  };
+};
+
+export const deleteSetupDraft = (db: Database, id: string): void => {
+  db.query("DELETE FROM setup_drafts WHERE id = ?").run(id);
 };
 
 export const updateRun = (db: Database, r: AgentRun): void => {
