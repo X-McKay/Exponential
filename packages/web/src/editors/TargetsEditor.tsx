@@ -11,6 +11,7 @@ export function TargetsEditor({ targets, onSave, onClose }: { targets: ImpactPai
     <Modal
       title="Edit value targets"
       onClose={onClose}
+      onSubmit={() => onSave(t)}
       footer={
         <>
           <Btn onClick={onClose}>Cancel</Btn>
@@ -24,7 +25,7 @@ export function TargetsEditor({ targets, onSave, onClose }: { targets: ImpactPai
       <input type="number" style={inpStyle} value={t.fte} onChange={(e) => setT((x) => ({ ...x, fte: num(e.target.value) }))} />
       <Lbl>Time-to-onboard reduction target (%)</Lbl>
       <input type="number" style={inpStyle} value={t.time} onChange={(e) => setT((x) => ({ ...x, time: num(e.target.value) }))} />
-      <div style={{ fontSize: 11.5, color: C.dim, marginTop: 10 }}>Targets re-scale the burn-up chart, KPI rings, and portfolio cards immediately.</div>
+      <div style={{ fontSize: 12, color: C.dim, marginTop: 10 }}>Targets re-scale the burn-up chart, KPI rings, and portfolio cards immediately.</div>
     </Modal>
   );
 }

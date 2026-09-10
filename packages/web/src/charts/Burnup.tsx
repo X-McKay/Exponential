@@ -101,9 +101,9 @@ export function Burnup({ milestones, dim, target }: { milestones: Milestone[]; d
           }}
         >
           <div style={{ fontSize: 11, color: C.mut, marginBottom: 4 }}>{MONTHS[hover]}</div>
-          <div style={{ fontSize: 11.5, color: C.indigoHi }}>realized {S.real[Math.min(hover, TODAY)]}%</div>
-          {S.com[hover] !== null && <div style={{ fontSize: 11.5, color: C.mut }}>committed {S.com[hover]}%</div>}
-          <div style={{ fontSize: 11.5, color: C.dim }}>ceiling {S.ceil[hover]}%</div>
+          <div style={{ fontSize: 12, color: C.indigoHi }}>realized {S.real[Math.min(hover, TODAY)]}%</div>
+          {S.com[hover] !== null && <div style={{ fontSize: 12, color: C.mut }}>committed {S.com[hover]}%</div>}
+          <div style={{ fontSize: 12, color: C.dim }}>ceiling {S.ceil[hover]}%</div>
         </div>
       )}
     </div>

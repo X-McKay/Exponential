@@ -160,3 +160,18 @@ Schemas live in `packages/shared/src/schemas.ts`.
 - **Row carets rotate when a row is expanded.** The mockup sets `transform: rotate(90deg)` on an inline `span`, which browsers ignore; the intent is clear so the caret here is an inline SVG that rotates.
 - **Development, agents, feed and calendar** are read-only mirrors of external systems and are stored as validated JSON documents rather than normalized tables.
 - **Deep links.** View state is mirrored to the URL hash (`#/project/ima/value`) so pages survive a reload.
+
+### Visual polish pass
+
+After the pixel-faithful port, the app was reviewed against Linear's visual system and deliberately moved off the mockup in these ways:
+
+- **Inter actually loads.** The mockup named Inter but never loaded it, so it rendered in whatever the viewer had installed. Inter Variable is now self-hosted and applied on `body`, with `cv11`/`ss03` features and tabular numerals everywhere.
+- **One type scale.** Twelve font sizes collapsed to 11 / 12 / 13 / 14 / 15 / 24; weights 600–700 became 500–550 (variable-font medium reads like Linear's 510); titles carry negative tracking; radii are 4 / 6 / 8 / 12.
+- **Tonal hierarchy.** Secondary text is dimmer (`#8A8F98`) and tertiary text brighter (`#767B8A`, 4.7:1 on the background) so titles lead and small labels stay legible.
+- **Quieter chips.** Fills at 8 % and borders at 22 %; colour lives in the text and an optional dot. The risk tier is a neutral chip with a coloured dot rather than a filled red pill.
+- **Calmer motion.** Cards brighten in place instead of lifting with a shadow; the Glance stagger is 120 ms total; `prefers-reduced-motion` disables animations.
+- **Command palette** groups results (Recent, Pages, Projects, Project views), matches subsequences (`imagov`), and remembers the last four destinations in `localStorage`.
+- **Tooltips** are custom, with `kbd` hints for the `g` chords on the sidebar; native `title` tooltips are gone.
+- **Sidebar** rows are 28 px with monochrome inline-SVG icons; project rows show a tier-coloured dot.
+- **Editors** use 32 px inputs, a divider-free header, 20 px padding, and `⌘↵` to save with the hint in the footer.
+- **Loading and empty states.** A layout-shaped skeleton replaces the pulsing text, and an empty milestone list offers the "New milestone" action.

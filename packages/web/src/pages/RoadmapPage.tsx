@@ -46,7 +46,7 @@ export function RoadmapPage({ p, releases }: { p: Project; releases: Release[] }
         const isOpen = picked === r.id;
         const color = releaseToneColor(st.tone);
         return (
-          <div key={r.id} style={{ background: C.panel, border: `1px solid ${isOpen ? C.line2 : C.line}`, borderRadius: 10, marginBottom: 10, overflow: "hidden" }}>
+          <div key={r.id} style={{ background: C.panel, border: `1px solid ${isOpen ? C.line2 : C.line}`, borderRadius: 8, marginBottom: 10, overflow: "hidden" }}>
             <button
               type="button"
               onClick={() => setPicked(isOpen ? null : r.id)}
@@ -56,7 +56,7 @@ export function RoadmapPage({ p, releases }: { p: Project; releases: Release[] }
               <span style={{ width: 10, height: 10, background: color, transform: "rotate(45deg)", borderRadius: 2, flexShrink: 0 }} />
               <span style={{ fontSize: 12, color: C.dim, width: 22 }}>{r.id}</span>
               <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 13.5, color: C.text, display: "block" }}>{r.name}</span>
+                <span style={{ fontSize: 14, color: C.text, display: "block" }}>{r.name}</span>
                 <span style={{ fontSize: 11, color: C.dim }}>
                   {MONTHS[r.month]} · {r.milestoneIds.join(", ")}
                 </span>
@@ -69,7 +69,7 @@ export function RoadmapPage({ p, releases }: { p: Project; releases: Release[] }
             </button>
             {isOpen && (
               <div style={{ borderTop: `1px solid ${C.line}`, padding: "4px 14px 12px" }}>
-                <div style={{ fontSize: 11.5, color: C.dim, padding: "8px 0 2px" }}>Go-live criteria</div>
+                <div style={{ fontSize: 12, color: C.dim, padding: "8px 0 2px" }}>Go-live criteria</div>
                 {r.criteria.map((c, ci) => {
                   const e = st.evals[ci];
                   if (!e) return null;
@@ -77,7 +77,7 @@ export function RoadmapPage({ p, releases }: { p: Project; releases: Release[] }
                     <div key={ci} style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: ci === 0 ? "none" : `1px solid ${C.line}`, alignItems: "flex-start" }}>
                       <span style={{ fontSize: 12, color: e.ok ? C.green : e.pending ? C.amber : C.red, width: 14, flexShrink: 0, marginTop: 1 }}>{e.ok ? "✓" : e.pending ? "◐" : "✗"}</span>
                       <span style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ fontSize: 12.5, color: e.ok ? C.mut : C.text, display: "block" }}>{c.label}</span>
+                        <span style={{ fontSize: 13, color: e.ok ? C.mut : C.text, display: "block" }}>{c.label}</span>
                         <span style={{ fontSize: 11, color: C.dim }}>{e.sub}</span>
                       </span>
                       <Chip tone={e.ok ? "good" : e.pending ? "warn" : "bad"}>{e.ok ? "Met" : e.pending ? "Pending" : "Not met"}</Chip>
@@ -89,7 +89,7 @@ export function RoadmapPage({ p, releases }: { p: Project; releases: Release[] }
           </div>
         );
       })}
-      {releases.length === 0 && <div style={{ fontSize: 12.5, color: C.dim }}>No releases defined for this project.</div>}
+      {releases.length === 0 && <div style={{ fontSize: 13, color: C.dim }}>No releases defined for this project.</div>}
     </div>
   );
 }

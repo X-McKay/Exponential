@@ -1,4 +1,17 @@
-/* Global polish layer — ported verbatim from the mockup's VF_CSS. */
+/* Global layer: font, resets, hover/focus states, motion, tooltips, skeletons.
+   Everything else is inline styles driven by theme.ts. */
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./fonts/InterVariable.woff2") format("woff2");
+}
+
+html {
+  color-scheme: dark;
+}
 html,
 body,
 #root {
@@ -6,6 +19,14 @@ body,
   min-height: 100vh;
   background: #08090a;
   color: #eeeff1;
+}
+body {
+  font-family: "Inter", "SF Pro Text", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "cv11", "ss03";
+  text-rendering: optimizeLegibility;
 }
 * {
   -webkit-font-smoothing: antialiased;
@@ -29,6 +50,8 @@ body,
   background: transparent;
 }
 
+/* ---- hover / active states ------------------------------------------- */
+
 .vf-row:hover {
   background: #131418 !important;
 }
@@ -45,16 +68,24 @@ body,
 .vf-tab:hover {
   color: #eeeff1 !important;
 }
+/* Cards brighten in place; no lift or shadow. */
 .vf-card:hover {
   border-color: #34363d !important;
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  background: #121317 !important;
+}
+.vf-ghost:hover {
+  color: #eeeff1 !important;
+  border-color: #34363d !important;
+}
+.vf-link:hover {
+  text-decoration: underline;
 }
 
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
-textarea:focus-visible {
+textarea:focus-visible,
+[tabindex]:focus-visible {
   outline: 2px solid rgba(110, 123, 242, 0.6) !important;
   outline-offset: 1px;
   border-radius: 6px;
@@ -64,11 +95,26 @@ select:focus,
 textarea:focus {
   border-color: #4a54b8 !important;
 }
+input::placeholder,
+textarea::placeholder {
+  color: #5c606b;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* ---- motion ------------------------------------------------------------ */
 
 @keyframes vfPop {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(4px);
   }
   to {
     opacity: 1;
@@ -76,28 +122,19 @@ textarea:focus {
   }
 }
 .vf-pop {
-  animation: vfPop 0.28s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation: vfPop 0.18s cubic-bezier(0.2, 0.7, 0.3, 1) both;
 }
 .vf-pop:nth-child(2) {
-  animation-delay: 0.04s;
+  animation-delay: 0.03s;
 }
 .vf-pop:nth-child(3) {
-  animation-delay: 0.08s;
+  animation-delay: 0.06s;
 }
 .vf-pop:nth-child(4) {
+  animation-delay: 0.09s;
+}
+.vf-pop:nth-child(n + 5) {
   animation-delay: 0.12s;
-}
-.vf-pop:nth-child(5) {
-  animation-delay: 0.16s;
-}
-.vf-pop:nth-child(6) {
-  animation-delay: 0.2s;
-}
-.vf-pop:nth-child(7) {
-  animation-delay: 0.24s;
-}
-.vf-pop:nth-child(n + 8) {
-  animation-delay: 0.28s;
 }
 
 @keyframes vfDraw {
@@ -110,7 +147,7 @@ textarea:focus {
 }
 .vf-draw {
   stroke-dasharray: 1;
-  animation: vfDraw 0.9s cubic-bezier(0.3, 0.6, 0.3, 1) both;
+  animation: vfDraw 0.7s cubic-bezier(0.3, 0.6, 0.3, 1) both;
 }
 
 @keyframes vfPulse {
@@ -135,7 +172,7 @@ textarea:focus {
   }
 }
 .vf-overlay {
-  animation: vfFade 0.12s ease both;
+  animation: vfFade 0.1s ease both;
 }
 @keyframes vfScale {
   from {
@@ -148,10 +185,102 @@ textarea:focus {
   }
 }
 .vf-modal {
-  animation: vfScale 0.16s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation: vfScale 0.14s cubic-bezier(0.2, 0.7, 0.3, 1) both;
 }
 
-/* Additions beyond the mockup: error toast and the g-chord hint. */
+@keyframes vfShimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+.vf-skeleton {
+  background: linear-gradient(90deg, #131418 25%, #1b1c20 50%, #131418 75%);
+  background-size: 200% 100%;
+  animation: vfShimmer 1.4s linear infinite;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .vf-pulse {
+    opacity: 1;
+  }
+}
+
+/* ---- tooltips --------------------------------------------------------- */
+
+.vf-tipwrap {
+  position: relative;
+  display: inline-flex;
+}
+.vf-tipwrap > .vf-tip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%) translateY(2px);
+  z-index: 100;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s ease 0.25s, transform 0.1s ease 0.25s;
+  white-space: nowrap;
+  background: #1b1d23;
+  border: 1px solid #2c2e35;
+  color: #eeeff1;
+  font-size: 11.5px;
+  line-height: 1;
+  padding: 6px 8px;
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.vf-tipwrap[data-side="right"] > .vf-tip {
+  left: calc(100% + 8px);
+  bottom: auto;
+  top: 50%;
+  transform: translateY(-50%) translateX(-2px);
+}
+.vf-tipwrap:hover > .vf-tip,
+.vf-tipwrap:focus-within > .vf-tip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.vf-tipwrap[data-side="right"]:hover > .vf-tip,
+.vf-tipwrap[data-side="right"]:focus-within > .vf-tip {
+  transform: translateY(-50%) translateX(0);
+}
+
+kbd.vf-kbd {
+  font-family: inherit;
+  font-size: 10.5px;
+  line-height: 16px;
+  min-width: 16px;
+  text-align: center;
+  color: #9ca0ab;
+  background: #101114;
+  border: 1px solid #2c2e35;
+  border-bottom-color: #34363d;
+  border-radius: 4px;
+  padding: 0 4px;
+  display: inline-block;
+}
+.vf-tip kbd.vf-kbd {
+  color: #c6cad6;
+  background: #101114;
+}
+
+/* ---- toast and chord hint --------------------------------------------- */
+
 .vf-toast {
   position: fixed;
   right: 16px;
@@ -181,13 +310,7 @@ textarea:focus {
   border-radius: 7px;
   white-space: nowrap;
   animation: vfFade 0.1s ease both;
-}
-.vf-chord kbd {
-  font-family: inherit;
-  font-size: 10.5px;
-  color: #eeeff1;
-  border: 1px solid #26272c;
-  border-radius: 4px;
-  padding: 0 4px;
-  margin: 0 2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }

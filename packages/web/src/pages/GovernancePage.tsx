@@ -2,7 +2,7 @@ import { useState } from "react";
 import { GSTATUS_LABEL, govCounts, readiness } from "@valueflow/domain";
 import type { GovernanceItem, Project } from "@valueflow/domain";
 import { GovEditor } from "../editors/GovEditor.tsx";
-import { Avatar, Caret, Chip, Kpi, SectionCard, reset } from "../ui/primitives.tsx";
+import { Avatar, Caret, Chip, Kpi, SectionCard, ghostBtn, reset } from "../ui/primitives.tsx";
 import { C, GSTATUS_COLOR, TIER_COLOR, govChipTone, readinessColor } from "../theme.ts";
 
 export function GovernancePage({ p, onSaveGov }: { p: Project; onSaveGov: (pid: string, item: GovernanceItem) => void }) {
@@ -33,7 +33,7 @@ export function GovernancePage({ p, onSaveGov }: { p: Project; onSaveGov: (pid: 
             alignItems: "center",
             background: "rgba(229,83,75,.08)",
             border: "1px solid rgba(229,83,75,.3)",
-            borderRadius: 10,
+            borderRadius: 8,
             padding: "10px 14px",
             marginBottom: 14,
           }}
@@ -53,7 +53,7 @@ export function GovernancePage({ p, onSaveGov }: { p: Project; onSaveGov: (pid: 
             title={cat}
             pad="0"
             right={
-              <span style={{ fontSize: 11.5, color: C.dim, fontVariantNumeric: "tabular-nums" }}>
+              <span style={{ fontSize: 12, color: C.dim, fontVariantNumeric: "tabular-nums" }}>
                 {done}/{items.length}
               </span>
             }
@@ -79,14 +79,10 @@ export function GovernancePage({ p, onSaveGov }: { p: Project; onSaveGov: (pid: 
                   </button>
                   {isOpen && (
                     <div style={{ padding: "0 14px 12px 32px" }}>
-                      <div style={{ fontSize: 12.5, lineHeight: 1.6, color: C.mut }}>{g.detail}</div>
-                      {g.link && <div style={{ fontSize: 11.5, color: C.indigoHi, marginTop: 6, cursor: "pointer" }}>{g.link} ↗</div>}
-                      <button
-                        type="button"
-                        onClick={() => setEditG(g)}
-                        style={{ ...reset, fontSize: 11.5, color: C.dim, padding: "3px 9px", border: `1px solid ${C.line2}`, borderRadius: 6, marginTop: 8, display: "inline-block" }}
-                      >
-                        ✎ Edit item
+                      <div style={{ fontSize: 13, lineHeight: 1.6, color: C.mut }}>{g.detail}</div>
+                      {g.link && <div style={{ fontSize: 12, color: C.indigoHi, marginTop: 6, cursor: "pointer" }}>{g.link} ↗</div>}
+                      <button type="button" onClick={() => setEditG(g)} className="vf-ghost" style={{ ...ghostBtn, marginTop: 8 }}>
+                        Edit item
                       </button>
                     </div>
                   )}

@@ -54,7 +54,7 @@ export function Bullet({ metric }: { metric: Metric }) {
     <div style={{ margin: "7px 0" }}>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 4 }}>
         <span style={{ color: C.mut }}>{metric.label}</span>
-        <span style={{ color: col, fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>{cur}%</span>
+        <span style={{ color: col, fontVariantNumeric: "tabular-nums", fontWeight: 500 }}>{cur}%</span>
       </div>
       <div style={{ position: "relative", height: 7, borderRadius: 4, background: "#1B1E27" }}>
         <div style={{ position: "absolute", inset: 0, width: `${cur}%`, background: col, borderRadius: 4, opacity: 0.85, transition: "width .25s" }} />
@@ -73,7 +73,7 @@ export function GovStack({ counts }: { counts: Record<GovStatus, number> }) {
       <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", margin: "6px 0 8px" }}>
         {STACK_ORDER.map((s) => (counts[s] ? <div key={s} style={{ flex: counts[s], background: GSTATUS_COLOR[s], opacity: 0.85 }} /> : null))}
       </div>
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 10.5, color: C.dim }}>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11, color: C.dim }}>
         {STACK_ORDER.map((s) =>
           counts[s] ? (
             <span key={s}>
@@ -154,9 +154,9 @@ export function PeopleBars({ people, field, color }: { people: Contributor[]; fi
       {sorted.map((p) => (
         <div key={p.ini} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: `1px solid ${C.line}` }}>
           <Avatar ini={p.ini} size={22} />
-          <span style={{ fontSize: 12.5, color: C.text, width: 92, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-          <div style={{ flex: 1, height: 6, borderRadius: 3, background: "#1B1E27" }}>
-            <div style={{ height: "100%", width: `${(p[field] / max) * 100}%`, background: color, borderRadius: 3, opacity: 0.8, transition: "width .3s" }} />
+          <span style={{ fontSize: 13, color: C.text, width: 92, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+          <div style={{ flex: 1, height: 6, borderRadius: 4, background: "#1B1E27" }}>
+            <div style={{ height: "100%", width: `${(p[field] / max) * 100}%`, background: color, borderRadius: 4, opacity: 0.8, transition: "width .3s" }} />
           </div>
           <span style={{ fontSize: 12, color: C.mut, width: 28, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{p[field]}</span>
         </div>

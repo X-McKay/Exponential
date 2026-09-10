@@ -6,7 +6,7 @@ import { EvalScatter } from "../charts/EvalScatter.tsx";
 import { levelColor } from "../charts/small.tsx";
 import { MilestoneEditor } from "../editors/MilestoneEditor.tsx";
 import { TargetsEditor } from "../editors/TargetsEditor.tsx";
-import { Caret, Chip, Kpi, Ring, SectionCard, StatusIcon, reset } from "../ui/primitives.tsx";
+import { Btn, Caret, Chip, Kpi, Ring, SectionCard, StatusIcon, Tip, ghostBtn, reset } from "../ui/primitives.tsx";
 import { C, STATUS_COLOR } from "../theme.ts";
 
 type MetricSetter = (mid: string, xid: string, v: number) => void;
@@ -41,7 +41,7 @@ function MilestoneRow({
       >
         <Ring pct={attain} color={ringColor} />
         <span style={{ flex: 1, minWidth: 0 }}>
-          <span style={{ fontSize: 13.5, color: C.text, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
+          <span style={{ fontSize: 14, color: C.text, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
           <span style={{ fontSize: 11, color: STATUS_COLOR[m.status], display: "inline-flex", alignItems: "center", gap: 5 }}>
             <StatusIcon status={m.status} /> {STATUS_LABEL[m.status]} · {MONTHS[m.month]}
           </span>
@@ -60,27 +60,41 @@ function MilestoneRow({
             </Chip>
           )}
         </span>
-        <span
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit();
-          }}
-          title="Edit milestone"
-          style={{ color: C.dim, fontSize: 12, padding: "2px 5px", borderRadius: 4, border: `1px solid ${C.line2}` }}
-        >
-          ✎
-        </span>
+        <Tip label="Edit milestone">
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label="Edit milestone"
+            className="vf-ghost"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+                onEdit();
+              }
+            }}
+            style={{ ...ghostBtn, width: 26, padding: 0, justifyContent: "center", color: C.dim }}
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8.5 1.5l2 2L4 10H2V8z" />
+            </svg>
+          </span>
+        </Tip>
         <Caret open={open} />
       </button>
       {open && (
         <div style={{ padding: "2px 14px 16px 47px" }}>
-          <div style={{ display: "flex", gap: 2, margin: "8px 0 10px", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 7, padding: 2, width: "fit-content" }}>
+          <div style={{ display: "flex", gap: 2, margin: "8px 0 10px", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 6, padding: 2, width: "fit-content" }}>
             {(["gates", "evals"] as const).map((tb) => (
               <button
                 key={tb}
                 type="button"
                 onClick={() => setTab(tb)}
-                style={{ ...reset, fontSize: 12, padding: "4px 12px", borderRadius: 5, color: tab === tb ? C.text : C.dim, background: tab === tb ? "#1E222D" : "transparent" }}
+                style={{ ...reset, fontSize: 12, padding: "4px 12px", borderRadius: 6, color: tab === tb ? C.text : C.dim, background: tab === tb ? "#1E222D" : "transparent" }}
               >
                 {tb === "gates" ? "Performance gates" : "Eval history"}
               </button>
@@ -88,17 +102,17 @@ function MilestoneRow({
           </div>
           {tab === "gates" ? (
             <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "2px 14px 8px" }}>
-              {m.metrics.length === 0 && <div style={{ fontSize: 12.5, color: C.dim, padding: "12px 0 8px" }}>No success criteria defined — this milestone can never clear a gate.</div>}
+              {m.metrics.length === 0 && <div style={{ fontSize: 13, color: C.dim, padding: "12px 0 8px" }}>No success criteria defined — this milestone can never clear a gate.</div>}
               {m.metrics.map((x) => {
                 const st = levelColor(x, C.dim);
                 return (
                   <div key={x.id} style={{ padding: "10px 0", borderTop: `1px solid ${C.line}` }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <span style={{ fontSize: 12.5, color: "#C6CAD6" }}>{x.label}</span>
-                      <span style={{ fontSize: 12.5, color: st, fontWeight: 600 }}>{x.current}%</span>
+                      <span style={{ fontSize: 13, color: "#C6CAD6" }}>{x.label}</span>
+                      <span style={{ fontSize: 13, color: st, fontWeight: 500 }}>{x.current}%</span>
                     </div>
-                    <div style={{ position: "relative", height: 6, borderRadius: 3, background: "#1B1E27" }}>
-                      <div style={{ position: "absolute", inset: 0, width: `${x.current}%`, background: st, borderRadius: 3, transition: "width .2s, background .2s" }} />
+                    <div style={{ position: "relative", height: 6, borderRadius: 4, background: "#1B1E27" }}>
+                      <div style={{ position: "absolute", inset: 0, width: `${x.current}%`, background: st, borderRadius: 4, transition: "width .2s, background .2s" }} />
                       <div style={{ position: "absolute", top: -3, bottom: -3, left: `${x.base}%`, width: 1.5, background: C.indigo }} />
                       <div style={{ position: "absolute", top: -3, bottom: -3, left: `${x.stretch}%`, width: 1.5, background: C.green }} />
                     </div>
@@ -113,7 +127,7 @@ function MilestoneRow({
                         aria-label={`Simulate ${x.label}`}
                       />
                     )}
-                    <div style={{ display: "flex", gap: 14, marginTop: 4, fontSize: 10.5, fontVariantNumeric: "tabular-nums" }}>
+                    <div style={{ display: "flex", gap: 14, marginTop: 4, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
                       <span style={{ color: C.indigo }}>base ≥ {x.base}%</span>
                       <span style={{ color: C.green }}>stretch ≥ {x.stretch}%</span>
                     </div>
@@ -131,7 +145,7 @@ function MilestoneRow({
                   </div>
                 ))
               ) : (
-                <div style={{ fontSize: 12.5, color: C.dim, padding: "14px 10px 18px" }}>No eval runs yet. Connect an eval suite when this milestone reaches In eval.</div>
+                <div style={{ fontSize: 13, color: C.dim, padding: "14px 10px 18px" }}>No eval runs yet. Connect an eval suite when this milestone reaches In eval.</div>
               )}
             </div>
           )}
@@ -185,16 +199,16 @@ export function ValuePage({
           pad="8px 14px 6px"
           right={
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button type="button" onClick={() => setEditTargets(true)} style={{ ...reset, fontSize: 11.5, color: C.dim, padding: "3px 9px", border: `1px solid ${C.line2}`, borderRadius: 6 }}>
+              <button type="button" onClick={() => setEditTargets(true)} className="vf-ghost" style={ghostBtn}>
                 Edit targets
               </button>
-              <div style={{ display: "flex", gap: 2, background: C.bg, border: `1px solid ${C.line}`, borderRadius: 7, padding: 2 }}>
+              <div style={{ display: "flex", gap: 2, background: C.bg, border: `1px solid ${C.line}`, borderRadius: 6, padding: 2 }}>
                 {dims.map(([k, l]) => (
                   <button
                     key={k}
                     type="button"
                     onClick={() => setDim(k)}
-                    style={{ ...reset, fontSize: 12, padding: "3px 12px", borderRadius: 5, color: dim === k ? C.text : C.dim, background: dim === k ? "#1E222D" : "transparent" }}
+                    style={{ ...reset, fontSize: 12, padding: "3px 12px", borderRadius: 6, color: dim === k ? C.text : C.dim, background: dim === k ? "#1E222D" : "transparent" }}
                   >
                     {l}
                   </button>
@@ -222,12 +236,12 @@ export function ValuePage({
       </section>
       <section>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 20px 8px" }}>
-          <span style={{ fontSize: 12.5, color: C.mut }}>Milestones — drag gate sliders to simulate eval results</span>
-          <button type="button" onClick={() => setEditing("new")} style={{ ...reset, fontSize: 12.5, color: C.indigoHi }}>
+          <span style={{ fontSize: 13, color: C.mut }}>Milestones — drag gate sliders to simulate eval results</span>
+          <button type="button" onClick={() => setEditing("new")} style={{ ...reset, fontSize: 13, color: C.indigoHi }}>
             + New milestone
           </button>
         </div>
-        <div style={{ margin: "0 20px", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, overflow: "hidden" }}>
+        <div style={{ margin: "0 20px", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, overflow: "hidden" }}>
           {p.milestones.map((m) => (
             <MilestoneRow
               key={m.id}
@@ -239,7 +253,13 @@ export function ValuePage({
               onEdit={() => setEditing(m.id)}
             />
           ))}
-          {p.milestones.length === 0 && <div style={{ fontSize: 12.5, color: C.dim, padding: "16px 14px" }}>No milestones yet.</div>}
+          {p.milestones.length === 0 && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "36px 14px" }}>
+              <div style={{ fontSize: 13, color: C.text }}>No milestones yet</div>
+              <div style={{ fontSize: 12, color: C.dim, textAlign: "center", maxWidth: 360 }}>Milestones carry the impact this project can realize once their eval metrics clear a gate.</div>
+              <Btn onClick={() => setEditing("new")}>+ New milestone</Btn>
+            </div>
+          )}
         </div>
       </section>
       {editing && (

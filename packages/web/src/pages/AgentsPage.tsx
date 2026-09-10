@@ -16,7 +16,7 @@ function AgentAvatar({ a, size = 26 }: { a: Agent; size?: number }) {
         alignItems: "center",
         justifyContent: "center",
         fontSize: size * 0.42,
-        fontWeight: 700,
+        fontWeight: 600,
         color: "#08090A",
         flexShrink: 0,
         boxShadow: "0 0 10px rgba(255,255,255,.06)",
@@ -57,8 +57,8 @@ export function AgentsPage({ agents, projects, onOpen }: { agents: Agent[]; proj
         <Kpi label="Attention flags" value={attention} sub={auditors.length ? `from ${auditors.join(", ")}'s audit scans` : "none raised"} color={C.amber} />
       </div>
 
-      <SectionCard title="Workspace agents" pad="0" right={<span style={{ fontSize: 11.5, color: C.indigoHi, cursor: "pointer" }}>+ New agent</span>}>
-        <div style={{ display: "flex", gap: 11, padding: "8px 14px", fontSize: 10.5, color: C.dim, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.line}` }}>
+      <SectionCard title="Workspace agents" pad="0" right={<span style={{ fontSize: 12, color: C.indigoHi, cursor: "pointer" }}>+ New agent</span>}>
+        <div style={{ display: "flex", gap: 11, padding: "8px 14px", fontSize: 11, color: C.dim, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.line}` }}>
           <span style={{ width: 26 }} />
           <span style={{ width: 110, flexShrink: 0 }}>Agent</span>
           <span style={{ flex: 1 }}>Purpose</span>
@@ -81,17 +81,17 @@ export function AgentsPage({ agents, projects, onOpen }: { agents: Agent[]; proj
               >
                 <AgentAvatar a={a} />
                 <span style={{ width: 110, flexShrink: 0 }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 600, color: C.text, display: "block" }}>{a.name}</span>
-                  <span style={{ fontSize: 10.5, color: C.dim }}>{a.model}</span>
+                  <span style={{ fontSize: 14, fontWeight: 500, color: C.text, display: "block" }}>{a.name}</span>
+                  <span style={{ fontSize: 11, color: C.dim }}>{a.model}</span>
                 </span>
-                <span style={{ flex: 1, fontSize: 12.5, color: C.mut, lineHeight: 1.45, minWidth: 0 }}>{a.purpose}</span>
+                <span style={{ flex: 1, fontSize: 13, color: C.mut, lineHeight: 1.45, minWidth: 0 }}>{a.purpose}</span>
                 <span style={{ width: 104, flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}>
                   <span className={st.pulse ? "vf-pulse" : undefined} style={{ width: 7, height: 7, borderRadius: "50%", background: st.color }} />
-                  <span style={{ fontSize: 11.5, color: st.color }}>{AGENT_STATUS_LABEL[a.status]}</span>
+                  <span style={{ fontSize: 12, color: st.color }}>{AGENT_STATUS_LABEL[a.status]}</span>
                 </span>
-                <span style={{ width: 56, textAlign: "right", fontSize: 12.5, color: C.mut, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{a.runs}</span>
-                <span style={{ width: 62, textAlign: "right", fontSize: 12.5, color: a.success >= 95 ? C.green : C.mut, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{a.success}%</span>
-                <span style={{ width: 58, textAlign: "right", fontSize: 11.5, color: C.dim, flexShrink: 0 }}>{a.last}</span>
+                <span style={{ width: 56, textAlign: "right", fontSize: 13, color: C.mut, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{a.runs}</span>
+                <span style={{ width: 62, textAlign: "right", fontSize: 13, color: a.success >= 95 ? C.green : C.mut, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{a.success}%</span>
+                <span style={{ width: 58, textAlign: "right", fontSize: 12, color: C.dim, flexShrink: 0 }}>{a.last}</span>
                 <span style={{ width: 14, textAlign: "center" }}>
                   <Caret open={isOpen} />
                 </span>
@@ -118,9 +118,9 @@ export function AgentsPage({ agents, projects, onOpen }: { agents: Agent[]; proj
                         <span className={s2.state === "working" ? "vf-pulse" : undefined} style={{ fontSize: 11, color: SESSION_COLOR[s2.state], width: 12, flexShrink: 0 }}>
                           {SESSION_ICON[s2.state]}
                         </span>
-                        <span style={{ flex: 1, fontSize: 12.5, color: s2.state === "attention" ? C.text : "#C6CAD6", lineHeight: 1.5, minWidth: 0 }}>{s2.text}</span>
-                        <span style={{ fontSize: 10.5, color: C.dim, flexShrink: 0 }}>{shortProjectName(byId.get(s2.proj))}</span>
-                        <span style={{ fontSize: 10.5, color: C.dim, width: 44, textAlign: "right", flexShrink: 0 }}>{s2.when}</span>
+                        <span style={{ flex: 1, fontSize: 13, color: s2.state === "attention" ? C.text : "#C6CAD6", lineHeight: 1.5, minWidth: 0 }}>{s2.text}</span>
+                        <span style={{ fontSize: 11, color: C.dim, flexShrink: 0 }}>{shortProjectName(byId.get(s2.proj))}</span>
+                        <span style={{ fontSize: 11, color: C.dim, width: 44, textAlign: "right", flexShrink: 0 }}>{s2.when}</span>
                       </button>
                     ))}
                   </div>
@@ -131,7 +131,7 @@ export function AgentsPage({ agents, projects, onOpen }: { agents: Agent[]; proj
         })}
       </SectionCard>
 
-      <div style={{ fontSize: 11.5, color: C.dim, lineHeight: 1.6, maxWidth: 680 }}>
+      <div style={{ fontSize: 12, color: C.dim, lineHeight: 1.6, maxWidth: 680 }}>
         Agents run against the same live project state as every other page — Audie's attention flags surface on Glance, and Slider's decks pull current burn-up and gate data at
         generation time.
       </div>

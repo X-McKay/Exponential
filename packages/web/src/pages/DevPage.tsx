@@ -5,7 +5,7 @@ import { Avatar, Chip, Kpi, SectionCard } from "../ui/primitives.tsx";
 import { C, CHECK_COLOR, gradeColor } from "../theme.ts";
 
 export function DevPage({ d }: { d: DevActivity | undefined }) {
-  if (!d) return <div style={{ padding: "16px 20px", fontSize: 12.5, color: C.dim }}>No development activity connected for this project.</div>;
+  if (!d) return <div style={{ padding: "16px 20px", fontSize: 13, color: C.dim }}>No development activity connected for this project.</div>;
   return (
     <div style={{ padding: "16px 20px 30px" }}>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
@@ -52,7 +52,7 @@ export function DevPage({ d }: { d: DevActivity | undefined }) {
               <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderTop: `1px solid ${C.line}` }}>
                 <span style={{ width: 8, height: 8, borderRadius: "50%", background: b.status === "pass" ? C.green : C.red, flexShrink: 0 }} />
                 <span style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ fontSize: 12.5, color: b.status === "fail" ? C.text : C.mut, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.note}</span>
+                  <span style={{ fontSize: 13, color: b.status === "fail" ? C.text : C.mut, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.note}</span>
                   <span style={{ fontSize: 11, color: C.dim }}>
                     {b.id} · {b.repo} · {b.branch}
                   </span>
@@ -69,7 +69,7 @@ export function DevPage({ d }: { d: DevActivity | undefined }) {
             {d.repos.map((r) => (
               <div key={r.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderTop: `1px solid ${C.line}` }}>
                 <span style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ fontSize: 12.5, color: C.text, display: "block" }}>{r.name}</span>
+                  <span style={{ fontSize: 13, color: C.text, display: "block" }}>{r.name}</span>
                   <span style={{ fontSize: 11, color: C.dim }}>
                     default: {r.branch} · {r.lang}
                   </span>

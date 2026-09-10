@@ -13,7 +13,7 @@ export function OverviewPage({ p }: { p: Project }) {
   return (
     <div style={{ padding: "16px 20px 30px" }}>
       <SectionCard title="About">
-        <div style={{ fontSize: 13.5, lineHeight: 1.65, color: "#C6CAD6" }}>{p.description}</div>
+        <div style={{ fontSize: 14, lineHeight: 1.65, color: "#C6CAD6" }}>{p.description}</div>
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
           <Chip>{p.stage}</Chip>
           <TierBadge tier={p.tier} />
@@ -45,15 +45,15 @@ export function OverviewPage({ p }: { p: Project }) {
               <div key={r.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: `1px solid ${C.line}` }}>
                 <span style={{ fontSize: 12, color: C.dim }}>⌥</span>
                 <span style={{ fontSize: 13, color: C.text, flex: 1 }}>{r.name}</span>
-                <span style={{ fontSize: 11.5, color: C.indigoHi, cursor: "pointer" }}>{r.url} ↗</span>
+                <span style={{ fontSize: 12, color: C.indigoHi, cursor: "pointer" }}>{r.url} ↗</span>
               </div>
             ))}
           </SectionCard>
           <SectionCard title="Key facts" pad="8px 14px">
             {facts.map(([k, v]) => (
               <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "8px 0", borderTop: `1px solid ${C.line}` }}>
-                <span style={{ fontSize: 12.5, color: C.dim }}>{k}</span>
-                <span style={{ fontSize: 12.5, color: "#C6CAD6", textAlign: "right" }}>{v}</span>
+                <span style={{ fontSize: 13, color: C.dim }}>{k}</span>
+                <span style={{ fontSize: 13, color: "#C6CAD6", textAlign: "right" }}>{v}</span>
               </div>
             ))}
           </SectionCard>

@@ -10,14 +10,19 @@ export function GovEditor({ item, onSave, onClose }: { item: GovernanceItem; onS
   const [d, setD] = useState<GovernanceItem>({ ...item });
   const set = (patch: Partial<GovernanceItem>) => setD((x) => ({ ...x, ...patch }));
   const dateOk = d.date === null || d.date === "" || /^\d{4}-\d{2}-\d{2}$/.test(d.date);
+  const valid = dateOk && d.owner.trim().length > 0;
+  const submit = () => {
+    if (valid) onSave({ ...d, owner: d.owner.trim(), date: d.date || null, ...(d.link ? { link: d.link } : {}) });
+  };
   return (
     <Modal
       title={`Edit — ${item.name}`}
       onClose={onClose}
+      onSubmit={submit}
       footer={
         <>
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn tone="primary" disabled={!dateOk || d.owner.trim().length === 0} onClick={() => onSave({ ...d, owner: d.owner.trim(), date: d.date || null, ...(d.link ? { link: d.link } : {}) })}>
+          <Btn tone="primary" disabled={!valid} onClick={submit}>
             Save changes
           </Btn>
         </>
@@ -50,7 +55,7 @@ export function GovEditor({ item, onSave, onClose }: { item: GovernanceItem; onS
         </div>
       </div>
       <Lbl>Detail / notes</Lbl>
-      <textarea style={{ ...inpStyle, minHeight: 84, resize: "vertical", lineHeight: 1.5 }} value={d.detail} onChange={(e) => set({ detail: e.target.value })} />
+      <textarea style={{ ...inpStyle, height: "auto", minHeight: 84, padding: "8px 10px", resize: "vertical", lineHeight: 1.5 }} value={d.detail} onChange={(e) => set({ detail: e.target.value })} />
       <Lbl>Link</Lbl>
       <input
         style={inpStyle}
@@ -62,7 +67,7 @@ export function GovEditor({ item, onSave, onClose }: { item: GovernanceItem; onS
           setD(e.target.value ? { ...rest, link: e.target.value } : rest);
         }}
       />
-      <div style={{ fontSize: 11.5, color: C.dim, marginTop: 10 }}>Status changes flow through readiness scores, release go-live criteria, and the Glance attention list.</div>
+      <div style={{ fontSize: 12, color: C.dim, marginTop: 10 }}>Status changes flow through readiness scores, release go-live criteria, and the Glance attention list.</div>
     </Modal>
   );
 }

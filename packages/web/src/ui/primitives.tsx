@@ -1,7 +1,8 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { TIER_LABEL } from "@valueflow/domain";
 import type { MilestoneStatus, RiskTier } from "@valueflow/domain";
-import { C, STATUS_COLOR } from "../theme.ts";
+import { C, STATUS_COLOR, TIER_COLOR } from "../theme.ts";
 import type { ChipTone } from "../theme.ts";
 
 export function Ring({ pct, size = 22, stroke = 2.5, color = C.indigo }: { pct: number; size?: number; stroke?: number; color?: string }) {
@@ -27,15 +28,16 @@ export function Ring({ pct, size = 22, stroke = 2.5, color = C.indigo }: { pct: 
   );
 }
 
-const CHIP: Record<ChipTone, { bg: string; fg: string; bd: string }> = {
-  default: { bg: "#1B1E27", fg: C.mut, bd: C.line2 },
-  accent: { bg: "rgba(110,123,242,.12)", fg: "#A5AEF7", bd: "rgba(110,123,242,.35)" },
-  good: { bg: "rgba(76,195,138,.12)", fg: "#6FD6A4", bd: "rgba(76,195,138,.35)" },
-  warn: { bg: "rgba(227,179,65,.12)", fg: C.amber, bd: "rgba(227,179,65,.35)" },
-  bad: { bg: "rgba(229,83,75,.12)", fg: "#F08A84", bd: "rgba(229,83,75,.35)" },
+// Chips carry colour in the text (and optional dot); fills and borders stay faint.
+const CHIP: Record<ChipTone, { bg: string; fg: string; bd: string; dot: string }> = {
+  default: { bg: "rgba(255,255,255,.03)", fg: C.mut, bd: C.line2, dot: C.dim },
+  accent: { bg: "rgba(110,123,242,.08)", fg: "#A5AEF7", bd: "rgba(110,123,242,.22)", dot: C.indigoHi },
+  good: { bg: "rgba(76,195,138,.08)", fg: "#6FD6A4", bd: "rgba(76,195,138,.22)", dot: C.green },
+  warn: { bg: "rgba(227,179,65,.08)", fg: C.amber, bd: "rgba(227,179,65,.22)", dot: C.amber },
+  bad: { bg: "rgba(229,83,75,.08)", fg: "#F08A84", bd: "rgba(229,83,75,.22)", dot: C.red },
 };
 
-export function Chip({ children, tone = "default" }: { children: ReactNode; tone?: ChipTone }) {
+export function Chip({ children, tone = "default", dot }: { children: ReactNode; tone?: ChipTone; dot?: boolean | string }) {
   const t = CHIP[tone];
   return (
     <span
@@ -48,17 +50,21 @@ export function Chip({ children, tone = "default" }: { children: ReactNode; tone
         color: t.fg,
         border: `1px solid ${t.bd}`,
         whiteSpace: "nowrap",
-        fontVariantNumeric: "tabular-nums",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
       }}
     >
+      {dot && <span style={{ width: 6, height: 6, borderRadius: "50%", background: typeof dot === "string" ? dot : t.dot, flexShrink: 0 }} />}
       {children}
     </span>
   );
 }
 
+/** Risk tier as a neutral chip with a coloured dot: readable without shouting. */
 export function TierBadge({ tier }: { tier: RiskTier | null }) {
-  if (!tier) return <Chip>Untiered</Chip>;
-  return <Chip tone={tier === 1 ? "bad" : tier === 2 ? "warn" : "good"}>{TIER_LABEL[tier]}</Chip>;
+  if (!tier) return <Chip dot>Untiered</Chip>;
+  return <Chip dot={TIER_COLOR[tier]}>{TIER_LABEL[tier]}</Chip>;
 }
 
 export function Avatar({ ini, size = 24 }: { ini: string; size?: number }) {
@@ -70,6 +76,7 @@ export function Avatar({ ini, size = 24 }: { ini: string; size?: number }) {
         borderRadius: "50%",
         background: "#2A2E3A",
         fontSize: size * 0.42,
+        fontWeight: 500,
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
@@ -85,23 +92,23 @@ export function Avatar({ ini, size = 24 }: { ini: string; size?: number }) {
 
 export function Kpi({ label, value, sub, color = C.text, ring }: { label: string; value: ReactNode; sub: ReactNode; color?: string; ring?: number }) {
   return (
-    <div style={{ flex: "1 1 150px", minWidth: 150, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, padding: "14px 16px" }}>
+    <div style={{ flex: "1 1 150px", minWidth: 150, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "14px 16px" }}>
       <div style={{ fontSize: 12, color: C.mut, marginBottom: 8 }}>{label}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         {ring !== undefined && <Ring pct={ring} size={30} stroke={3} color={color} />}
-        <span style={{ fontSize: 24, fontWeight: 650, color, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>{value}</span>
+        <span style={{ fontSize: 24, fontWeight: 550, color, letterSpacing: "-0.02em", lineHeight: 1.1 }}>{value}</span>
       </div>
-      <div style={{ fontSize: 11.5, color: C.dim, marginTop: 6 }}>{sub}</div>
+      <div style={{ fontSize: 12, color: C.dim, marginTop: 6 }}>{sub}</div>
     </div>
   );
 }
 
 export function SectionCard({ title, right, children, pad = "14px" }: { title?: string; right?: ReactNode; children: ReactNode; pad?: string }) {
   return (
-    <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, marginBottom: 14 }}>
+    <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, marginBottom: 14 }}>
       {(title || right) && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", borderBottom: `1px solid ${C.line}` }}>
-          <span style={{ fontSize: 13, fontWeight: 550 }}>{title}</span>
+          <span style={{ fontSize: 13, fontWeight: 550, letterSpacing: "-0.01em" }}>{title}</span>
           {right}
         </div>
       )}
@@ -156,23 +163,58 @@ export function StatusIcon({ status, size = 11 }: { status: MilestoneStatus; siz
   );
 }
 
+// ---- keyboard hints and tooltips -----------------------------------------
+
+export function Kbd({ children }: { children: ReactNode }) {
+  return <kbd className="vf-kbd">{children}</kbd>;
+}
+
+/**
+ * Hover tooltip with an optional shortcut. Pure CSS (see .vf-tipwrap), so it
+ * also shows on keyboard focus. `side` places it above (default) or to the right.
+ */
+export function Tip({ label, keys, side, children, style }: { label: string; keys?: string[]; side?: "top" | "right"; children: ReactNode; style?: CSSProperties }) {
+  return (
+    <span className="vf-tipwrap" data-side={side ?? "top"} style={style}>
+      {children}
+      <span className="vf-tip" role="tooltip">
+        {label}
+        {keys && keys.length > 0 && (
+          <span style={{ display: "inline-flex", gap: 3 }}>
+            {keys.map((k, i) => (
+              <Kbd key={i}>{k}</Kbd>
+            ))}
+          </span>
+        )}
+      </span>
+    </span>
+  );
+}
+
+/** Loading placeholder block. */
+export function Skeleton({ w = "100%", h = 14, style }: { w?: number | string; h?: number; style?: CSSProperties }) {
+  return <span className="vf-skeleton" aria-hidden style={{ display: "block", width: w, height: h, ...style }} />;
+}
+
 // ---- forms --------------------------------------------------------------
 
 export const inpStyle: CSSProperties = {
   boxSizing: "border-box",
   width: "100%",
+  height: 32,
   background: "#0E1015",
   border: `1px solid ${C.line2}`,
   borderRadius: 6,
   color: C.text,
-  fontSize: 12.5,
-  padding: "7px 9px",
+  fontSize: 13,
+  padding: "0 10px",
   outline: "none",
   fontFamily: "inherit",
+  transition: "border-color .12s",
 };
 
 export function Lbl({ children }: { children: ReactNode }) {
-  return <div style={{ fontSize: 11.5, color: C.mut, margin: "10px 0 4px" }}>{children}</div>;
+  return <div style={{ fontSize: 12, color: C.mut, margin: "12px 0 5px" }}>{children}</div>;
 }
 
 const BTN = {
@@ -187,17 +229,24 @@ export function Btn({ children, onClick, tone = "default", disabled }: { childre
     <button
       type="button"
       onClick={disabled ? undefined : onClick}
+      aria-disabled={disabled}
       style={{
         all: "unset",
         boxSizing: "border-box",
         cursor: disabled ? "default" : "pointer",
-        fontSize: 12.5,
-        padding: "7px 14px",
-        borderRadius: 7,
+        fontSize: 13,
+        fontWeight: 500,
+        height: 32,
+        padding: "0 14px",
+        borderRadius: 6,
         background: s.bg,
         color: s.fg,
         border: `1px solid ${s.bd}`,
         opacity: disabled ? 0.45 : 1,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        transition: "opacity .12s",
       }}
     >
       {children}
@@ -208,7 +257,48 @@ export function Btn({ children, onClick, tone = "default", disabled }: { childre
 /** Unstyled clickable element used throughout (the mockup's `all: unset` buttons). */
 export const reset: CSSProperties = { all: "unset", boxSizing: "border-box", cursor: "pointer" };
 
-export function Modal({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
+/** Small outlined text button (Edit targets, Edit item…). */
+export const ghostBtn: CSSProperties = {
+  ...reset,
+  fontSize: 12,
+  color: C.mut,
+  padding: "0 9px",
+  height: 26,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 5,
+  border: `1px solid ${C.line2}`,
+  borderRadius: 6,
+  transition: "color .12s, border-color .12s",
+};
+
+export function Modal({
+  title,
+  onClose,
+  onSubmit,
+  children,
+  footer,
+}: {
+  title: string;
+  onClose: () => void;
+  /** Invoked on ⌘↵ / Ctrl+↵ anywhere in the dialog; the footer shows the hint. */
+  onSubmit?: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+}) {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+  const onKeyDown = (e: ReactKeyboardEvent) => {
+    if (onSubmit && (e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      onSubmit();
+    }
+  };
   return (
     <div
       onClick={onClose}
@@ -217,8 +307,10 @@ export function Modal({ title, onClose, children, footer }: { title: string; onC
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={onKeyDown}
         className="vf-modal"
         role="dialog"
+        aria-modal
         aria-label={title}
         style={{
           width: "100%",
@@ -231,32 +323,25 @@ export function Modal({ title, onClose, children, footer }: { title: string; onC
           boxShadow: "0 24px 64px rgba(0,0,0,.6)",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "13px 16px",
-            borderBottom: `1px solid ${C.line}`,
-            position: "sticky",
-            top: 0,
-            background: "#13151C",
-            zIndex: 2,
-          }}
-        >
-          <span style={{ fontSize: 13.5, fontWeight: 600 }}>{title}</span>
-          <button type="button" onClick={onClose} aria-label="Close" style={{ ...reset, color: C.dim, fontSize: 15, padding: "0 4px" }}>
-            ✕
-          </button>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 20px 0", position: "sticky", top: 0, background: "#13151C", zIndex: 2 }}>
+          <span style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em" }}>{title}</span>
+          <Tip label="Close" keys={["esc"]}>
+            <button type="button" onClick={onClose} aria-label="Close" className="vf-ghost" style={{ ...ghostBtn, width: 26, padding: 0, justifyContent: "center", border: "1px solid transparent" }}>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                <path d="M2 2l8 8M10 2l-8 8" />
+              </svg>
+            </button>
+          </Tip>
         </div>
-        <div style={{ padding: 16 }}>{children}</div>
+        <div style={{ padding: "4px 20px 20px" }}>{children}</div>
         {footer && (
           <div
             style={{
               display: "flex",
               gap: 8,
+              alignItems: "center",
               justifyContent: "flex-end",
-              padding: "12px 16px",
+              padding: "12px 20px",
               borderTop: `1px solid ${C.line}`,
               position: "sticky",
               bottom: 0,
@@ -264,6 +349,12 @@ export function Modal({ title, onClose, children, footer }: { title: string; onC
             }}
           >
             {footer}
+            {onSubmit && (
+              <span style={{ display: "inline-flex", gap: 3, marginLeft: 2 }} aria-hidden>
+                <Kbd>⌘</Kbd>
+                <Kbd>↵</Kbd>
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -272,5 +363,19 @@ export function Modal({ title, onClose, children, footer }: { title: string; onC
 }
 
 export function Caret({ open }: { open: boolean }) {
-  return <span style={{ color: C.dim, fontSize: 11, transform: open ? "rotate(90deg)" : "none", transition: "transform .15s", display: "inline-block" }}>▸</span>;
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      fill="none"
+      stroke={C.dim}
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform .15s", flexShrink: 0 }}
+    >
+      <path d="M3.5 2l3 3-3 3" />
+    </svg>
+  );
 }
