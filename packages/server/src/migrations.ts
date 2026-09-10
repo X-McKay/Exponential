@@ -116,6 +116,17 @@ const MIGRATIONS: readonly string[] = [
   CREATE TABLE workspace (id INTEGER PRIMARY KEY CHECK (id = 1), user_name TEXT NOT NULL, user_ini TEXT NOT NULL);
   INSERT INTO workspace (id, user_name, user_ini) VALUES (1, 'Al McKay', 'AM');
   `,
+  // Months become real: the mockup's axis index (0 = Jan 2026) turns into YYYY-MM text.
+  `
+  ALTER TABLE milestones RENAME COLUMN month TO month_idx;
+  ALTER TABLE milestones ADD COLUMN month TEXT NOT NULL DEFAULT '';
+  UPDATE milestones SET month = printf('%04d-%02d', 2026 + month_idx / 12, month_idx % 12 + 1);
+  ALTER TABLE milestones DROP COLUMN month_idx;
+  ALTER TABLE releases RENAME COLUMN month TO month_idx;
+  ALTER TABLE releases ADD COLUMN month TEXT NOT NULL DEFAULT '';
+  UPDATE releases SET month = printf('%04d-%02d', 2026 + month_idx / 12, month_idx % 12 + 1);
+  ALTER TABLE releases DROP COLUMN month_idx;
+  `,
 ];
 
 export const migrate = (db: Database): void => {

@@ -10,7 +10,8 @@
 // `composeGlance` wires them together. Blocks carry only data — no markup —
 // so the client renders each `kind` with an exhaustive switch.
 
-import { TODAY, monthLabel } from "./calendar.ts";
+import { addMonths, calendarOf, monthLabel } from "./calendar.ts";
+import type { Calendar } from "./calendar.ts";
 import { blockers, govCounts, isMeasurable, metricLevel, realized, releaseState, tierOf } from "./derive.ts";
 import type { CriterionEval, ReleaseState } from "./derive.ts";
 import type {
@@ -101,12 +102,12 @@ export interface Signals {
   upcoming: Upcoming[];
   recent: FeedItem[];
   projectCount: number;
-  today: number;
+  cal: Calendar;
 }
 
 export const shortName = (p: Pick<Project, "name">): string => (p.name.length > 26 ? p.name.slice(0, 25) + "…" : p.name);
 
-export const detectSignals = (state: AppState, today = TODAY): Signals => {
+export const detectSignals = (state: AppState, cal: Calendar = calendarOf(state)): Signals => {
   const blocked: ReleaseSignal[] = [];
   const atRisk: ReleaseSignal[] = [];
   const readyRel: ReleaseSignal[] = [];
@@ -115,13 +116,13 @@ export const detectSignals = (state: AppState, today = TODAY): Signals => {
 
   for (const p of state.projects) {
     for (const r of state.releases[p.id] ?? []) {
-      const st = releaseState(r, p, today);
+      const st = releaseState(r, p, cal);
       switch (st.label) {
         case "Blocked":
           blocked.push({ p, r, st });
           break;
         case "At risk":
-          if (r.month <= today + 2) atRisk.push({ p, r, st });
+          if (r.month <= addMonths(cal.todayYm, 2)) atRisk.push({ p, r, st });
           break;
         case "Ready":
           readyRel.push({ p, r, st });
@@ -179,7 +180,7 @@ export const detectSignals = (state: AppState, today = TODAY): Signals => {
     upcoming: state.upcoming,
     recent,
     projectCount: state.projects.length,
-    today,
+    cal,
   };
 };
 
@@ -246,7 +247,7 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
       proj: p.id,
       tab: "roadmap",
       projName: shortName(p),
-      title: `${r.id} ${r.name} — ${st.met}/${st.total} go-live criteria met (target ${monthLabel(r.month)})`,
+      title: `${r.id} ${r.name} — ${st.met}/${st.total} go-live criteria met (target ${monthLabel(r.month, s.cal.todayYm)})`,
       release: r,
       state: st,
       rows: r.criteria.map((c, i) => ({ label: c.label, eval: st.evals[i] ?? { ok: false, pending: false, sub: "" } })),
@@ -399,10 +400,10 @@ export interface Glance {
 }
 
 /** The single entry point: full state in, ranked typed blocks out. */
-export const composeGlance = (state: AppState, today = TODAY): Block[] => rankBlocks(detectSignals(state, today), state);
+export const composeGlance = (state: AppState, cal: Calendar = calendarOf(state)): Block[] => rankBlocks(detectSignals(state, cal), state);
 
 /** Blocks plus narrative, for the page header. */
-export const composeGlancePage = (state: AppState, today = TODAY): Glance => {
-  const s = detectSignals(state, today);
+export const composeGlancePage = (state: AppState, cal: Calendar = calendarOf(state)): Glance => {
+  const s = detectSignals(state, cal);
   return { narrative: writeNarrativeFor(state, s), blocks: rankBlocks(s, state), projectCount: state.projects.length };
 };

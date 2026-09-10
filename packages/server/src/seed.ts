@@ -1,9 +1,9 @@
 import type { Database } from "bun:sqlite";
-import { AGENTS, DEV, FEED, PROJECTS, RELEASES, UPCOMING, WORKSPACE, isMeasurable } from "@valueflow/domain";
+import { AGENTS, DEV, FEED, PROJECTS, RELEASES, SEED_ASOF, UPCOMING, WORKSPACE, addMonths, isMeasurable, monthsBetween, ymOf } from "@valueflow/domain";
 import type { AppState, Metric } from "@valueflow/domain";
 
-/** "Today" for seeded history — matches the calendar's Sep 2026. */
-export const SEED_NOW = new Date("2026-09-10T09:00:00Z");
+/** The instant the fixtures describe. Seeding at another time shifts every planned month and timestamp by the same offset. */
+export const SEED_NOW = new Date(SEED_ASOF);
 export const READINGS_PER_METRIC = 30;
 const TRAILING_DAYS = 56;
 
@@ -38,9 +38,12 @@ export const trajectory = (metric: Pick<Metric, "current">, seed: number, n = RE
 export const isSeeded = (db: Database): boolean =>
   (db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM projects").get()?.n ?? 0) > 0;
 
-export const fixtureState = (): AppState => ({ workspace: WORKSPACE, projects: PROJECTS, releases: RELEASES, dev: DEV, agents: AGENTS, feed: FEED, upcoming: UPCOMING });
+export const fixtureState = (): AppState => ({ asOf: SEED_ASOF, workspace: WORKSPACE, projects: PROJECTS, releases: RELEASES, dev: DEV, agents: AGENTS, feed: FEED, upcoming: UPCOMING });
 
 export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_NOW): void => {
+  // Planned months are relative to the fixtures' own "today"; keep them the same distance from `now`.
+  const shift = monthsBetween(ymOf(state.asOf), ymOf(now));
+  const ym = (m: string): string => (shift === 0 ? m : addMonths(m, shift));
   const q = {
     project: db.query("INSERT INTO projects (id, key, name, stage, description, tier, committee_date, committee_ref, target_fte, target_time, sort) VALUES (?,?,?,?,?,?,?,?,?,?,?)"),
     repo: db.query("INSERT INTO project_repos (project_id, name, url, sort) VALUES (?,?,?,?)"),
@@ -66,7 +69,7 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
       p.repos.forEach((r, i) => q.repo.run(p.id, r.name, r.url, i));
       p.team.forEach((t, i) => q.member.run(p.id, t.ini, t.name, t.role, i));
       p.milestones.forEach((m, mi) => {
-        q.milestone.run(p.id, m.id, m.name, m.status, m.month, m.impact.base.fte, m.impact.base.time, m.impact.stretch.fte, m.impact.stretch.time, mi);
+        q.milestone.run(p.id, m.id, m.name, m.status, ym(m.month), m.impact.base.fte, m.impact.base.time, m.impact.stretch.fte, m.impact.stretch.time, mi);
         m.metrics.forEach((x, xi) => {
           q.metric.run(p.id, m.id, x.id, x.label, x.base, x.stretch, xi);
           if (!isMeasurable(m) || x.current <= 0) return;
@@ -80,7 +83,7 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
       });
       p.governance.forEach((g, i) => q.gov.run(p.id, g.id, g.cat, g.name, g.status, g.owner, g.date, g.detail, g.link ?? null, i));
       (state.releases[p.id] ?? []).forEach((r, ri) => {
-        q.release.run(p.id, r.id, r.name, r.month, ri);
+        q.release.run(p.id, r.id, r.name, ym(r.month), ri);
         r.milestoneIds.forEach((mid, i) => q.relMs.run(p.id, r.id, mid, i));
         r.criteria.forEach((c, i) => {
           switch (c.type) {
@@ -106,8 +109,8 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
 };
 
 /** Seed only when empty; returns whether seeding happened. */
-export const ensureSeeded = (db: Database): boolean => {
+export const ensureSeeded = (db: Database, now = new Date()): boolean => {
   if (isSeeded(db)) return false;
-  seed(db);
+  seed(db, fixtureState(), now);
   return true;
 };

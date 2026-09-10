@@ -14,8 +14,8 @@ import {
   releaseState,
   seedState,
   tierOf,
-  TODAY,
-  MONTHS,
+  calendarFor,
+  SEED_ASOF,
 } from "../src/index.ts";
 import type { Milestone, Project, Release } from "../src/index.ts";
 
@@ -23,7 +23,7 @@ const ms = (over: Partial<Milestone> = {}): Milestone => ({
   id: "MS-1",
   name: "Test",
   status: "eval",
-  month: 8,
+  month: "2026-09",
   impact: { base: { fte: 10, time: 12 }, stretch: { fte: 15, time: 18 } },
   metrics: [
     { id: "a", label: "A", base: 80, stretch: 95, current: 90 },
@@ -31,6 +31,9 @@ const ms = (over: Partial<Milestone> = {}): Milestone => ({
   ],
   ...over,
 });
+
+/** The fixtures' calendar: today is Sep 2026. */
+const cal = calendarFor(SEED_ASOF, ["2026-01", "2027-03"]);
 
 const project = (id: string): Project => {
   const p = seedState().projects.find((x) => x.id === id);
@@ -165,11 +168,11 @@ describe("evalCriterion", () => {
 
 describe("releaseState", () => {
   test("seed states match the mockup", () => {
-    expect(releaseState(release("onboarding", "R1"), project("onboarding"))).toMatchObject({ met: 4, total: 4, label: "Shipped", tone: "good" });
-    expect(releaseState(release("onboarding", "R2"), project("onboarding"))).toMatchObject({ met: 1, total: 4, label: "At risk", tone: "bad" });
-    expect(releaseState(release("onboarding", "R3"), project("onboarding"))).toMatchObject({ met: 0, total: 3, label: "At risk", tone: "bad" });
-    expect(releaseState(release("ima", "R1"), project("ima"))).toMatchObject({ met: 1, total: 4, label: "Blocked", tone: "bad" });
-    expect(releaseState(release("sector", "R1"), project("sector"))).toMatchObject({ met: 1, total: 4, label: "At risk" });
+    expect(releaseState(release("onboarding", "R1"), project("onboarding"), cal)).toMatchObject({ met: 4, total: 4, label: "Shipped", tone: "good" });
+    expect(releaseState(release("onboarding", "R2"), project("onboarding"), cal)).toMatchObject({ met: 1, total: 4, label: "At risk", tone: "bad" });
+    expect(releaseState(release("onboarding", "R3"), project("onboarding"), cal)).toMatchObject({ met: 0, total: 3, label: "At risk", tone: "bad" });
+    expect(releaseState(release("ima", "R1"), project("ima"), cal)).toMatchObject({ met: 1, total: 4, label: "Blocked", tone: "bad" });
+    expect(releaseState(release("sector", "R1"), project("sector"), cal)).toMatchObject({ met: 1, total: 4, label: "At risk" });
   });
   test("becomes Ready when all criteria are met and month is in the future", () => {
     const p = project("ima");
@@ -177,44 +180,46 @@ describe("releaseState", () => {
     p.governance.forEach((g) => {
       if (g.id === "sec" || g.id === "mra") g.status = "approved";
     });
-    const st = releaseState(release("ima", "R1"), p);
+    const st = releaseState(release("ima", "R1"), p, cal);
     expect(st.label).toBe("Ready");
     expect(st.met).toBe(4);
-    expect(releaseState(release("ima", "R1"), p, 9).label).toBe("Shipped");
+    expect(releaseState(release("ima", "R1"), p, { todayYm: "2026-10" }).label).toBe("Shipped");
   });
   test("amber when at least half met but not all; a release with zero criteria has nothing outstanding", () => {
     const p = project("onboarding");
     const r = release("onboarding", "R2");
     p.milestones.find((m) => m.id === "MS-13")!.metrics[0]!.current = 90;
-    expect(releaseState(r, p)).toMatchObject({ met: 2, tone: "warn", label: "At risk" });
-    expect(releaseState({ ...r, criteria: [] }, p)).toMatchObject({ met: 0, total: 0, tone: "good", label: "Ready" });
+    expect(releaseState(r, p, cal)).toMatchObject({ met: 2, tone: "warn", label: "At risk" });
+    expect(releaseState({ ...r, criteria: [] }, p, cal)).toMatchObject({ met: 0, total: 0, tone: "good", label: "Ready" });
   });
   test("deleted milestone drops a release to not-met without crashing", () => {
     const p = project("onboarding");
     p.milestones = p.milestones.filter((m) => m.id !== "MS-12");
-    expect(releaseState(release("onboarding", "R1"), p)).toMatchObject({ met: 3, total: 4, label: "Blocked" });
+    expect(releaseState(release("onboarding", "R1"), p, cal)).toMatchObject({ met: 3, total: 4, label: "Blocked" });
   });
   test("nextRelease finds the first release after today", () => {
-    expect(nextRelease(seedState().releases.onboarding!)?.id).toBe("R2");
-    expect(nextRelease(seedState().releases.onboarding!, 13)).toBeUndefined();
+    expect(nextRelease(seedState().releases.onboarding!, cal)?.id).toBe("R2");
+    expect(nextRelease(seedState().releases.onboarding!, { todayYm: "2027-02" })).toBeUndefined();
   });
 });
 
 describe("burnupSeries", () => {
   test("realized is flat after today; committed starts today; ceiling is monotone", () => {
-    const s = burnupSeries(project("onboarding").milestones, "fte");
-    expect(s.real.length).toBe(MONTHS.length);
+    const s = burnupSeries(project("onboarding").milestones, "fte", cal);
+    expect(cal.months.length).toBe(15);
+    expect(cal.today).toBe(8);
+    expect(s.real.length).toBe(cal.months.length);
     expect(s.real[3]).toBe(0);
     expect(s.real[4]).toBe(5);
     expect(s.real[7]).toBe(15);
-    expect(s.real[TODAY]).toBe(15);
-    expect(s.real[MONTHS.length - 1]).toBe(15);
-    expect(s.com[TODAY - 1]).toBeNull();
-    expect(s.com[TODAY]).toBe(15);
+    expect(s.real[cal.today]).toBe(15);
+    expect(s.real[cal.months.length - 1]).toBe(15);
+    expect(s.com[cal.today - 1]).toBeNull();
+    expect(s.com[cal.today]).toBe(15);
     expect(s.com[9]).toBe(15 + 8);
     expect(s.com[13]).toBe(15 + 8 + 6 + 7);
     for (let i = 1; i < s.ceil.length; i++) expect(s.ceil[i]!).toBeGreaterThanOrEqual(s.ceil[i - 1]!);
-    expect(s.ceil[MONTHS.length - 1]).toBe(15 + 5 + 11 + 9 + 10);
+    expect(s.ceil[cal.months.length - 1]).toBe(15 + 5 + 11 + 9 + 10);
   });
 });
 

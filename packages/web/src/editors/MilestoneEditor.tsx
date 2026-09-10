@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { MILESTONE_STATUSES, MONTHS, STATUS_LABEL, TODAY, nextMilestoneId } from "@valueflow/domain";
-import type { Dim, Metric, Milestone, MilestoneStatus, Project } from "@valueflow/domain";
+import { MILESTONE_STATUSES, STATUS_LABEL, addMonths, monthLabel, nextMilestoneId, planningMonths } from "@valueflow/domain";
+import type { Calendar, Dim, Metric, Milestone, MilestoneStatus, Project } from "@valueflow/domain";
 import { Btn, Lbl, Modal, Tip, ghostBtn, inpStyle, reset } from "../ui/primitives.tsx";
 import { C } from "../theme.ts";
 
@@ -8,11 +8,11 @@ const num = (v: string): number => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
 const isStatus = (s: string): s is MilestoneStatus => (MILESTONE_STATUSES as readonly string[]).includes(s);
 
-const blank = (project: Project): Milestone => ({
+const blank = (project: Project, cal: Calendar): Milestone => ({
   id: nextMilestoneId(project),
   name: "",
   status: "backlog",
-  month: Math.min(TODAY + 2, MONTHS.length - 1),
+  month: addMonths(cal.todayYm, 2),
   impact: { base: { fte: 5, time: 5 }, stretch: { fte: 8, time: 8 } },
   metrics: [],
 });
@@ -20,19 +20,22 @@ const blank = (project: Project): Milestone => ({
 export function MilestoneEditor({
   project,
   milestoneId,
+  cal,
   onSave,
   onDelete,
   onClose,
 }: {
   project: Project;
   milestoneId: string | null;
+  cal: Calendar;
   onSave: (ms: Milestone, isNew: boolean) => void;
   onDelete: (mid: string) => void;
   onClose: () => void;
 }) {
   const existing = project.milestones.find((m) => m.id === milestoneId);
   const isNew = !existing;
-  const [d, setD] = useState<Milestone>(() => (existing ? structuredClone(existing) : blank(project)));
+  const [d, setD] = useState<Milestone>(() => (existing ? structuredClone(existing) : blank(project, cal)));
+  const months = planningMonths(cal);
   const [confirmDel, setConfirmDel] = useState(false);
   const set = (patch: Partial<Milestone>) => setD((x) => ({ ...x, ...patch }));
   const setImpact = (tier: "base" | "stretch", dim: Dim, v: number) => setD((x) => ({ ...x, impact: { ...x.impact, [tier]: { ...x.impact[tier], [dim]: v } } }));
@@ -87,10 +90,11 @@ export function MilestoneEditor({
         </div>
         <div style={{ flex: 1 }}>
           <Lbl>Target / ship month</Lbl>
-          <select style={inpStyle} value={d.month} onChange={(e) => set({ month: Number(e.target.value) })}>
-            {MONTHS.map((mo, i) => (
-              <option key={mo} value={i}>
-                {mo}
+          <select style={inpStyle} value={d.month} onChange={(e) => set({ month: e.target.value })}>
+            {!months.includes(d.month) && <option value={d.month}>{d.month}</option>}
+            {months.map((mo) => (
+              <option key={mo} value={mo}>
+                {monthLabel(mo, cal.todayYm)}
               </option>
             ))}
           </select>

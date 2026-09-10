@@ -5,9 +5,14 @@ import { ensureSeeded } from "./seed.ts";
 import { staticHandler } from "./static.ts";
 import index from "../../web/src/index.html";
 
+/** `VALUEFLOW_NOW=2026-09-10T09:00:00Z` pins "today" for demos; otherwise the real clock. */
+const pinned = process.env.VALUEFLOW_NOW ? new Date(process.env.VALUEFLOW_NOW) : null;
+if (pinned && Number.isNaN(pinned.getTime())) throw new Error(`VALUEFLOW_NOW is not a valid date: ${process.env.VALUEFLOW_NOW}`);
+const now = () => pinned ?? new Date();
+
 const db = openDb();
-if (ensureSeeded(db)) console.log("seeded database with mockup fixtures");
-const app = createApp(db);
+if (ensureSeeded(db, now())) console.log(`seeded database with sample data as of ${now().toISOString().slice(0, 10)}`);
+const app = createApp(db, { now });
 const production = process.env.NODE_ENV === "production";
 const port = Number(process.env.PORT ?? 3000);
 const serveStatic = staticHandler(join(import.meta.dir, "../../web/dist"));

@@ -4,7 +4,8 @@
 // status + metric readings against gates; release readiness is always derived
 // from live criteria references. Nothing in this module has side effects.
 
-import { MONTHS, TODAY } from "./calendar.ts";
+import { addMonths } from "./calendar.ts";
+import type { Calendar } from "./calendar.ts";
 import { GSTATUS_LABEL } from "./labels.ts";
 import type {
   Criterion,
@@ -137,18 +138,19 @@ export interface ReleaseState {
   label: ReleaseLabel;
 }
 
-export const releaseState = (rel: Release, p: Pick<Project, "milestones" | "governance">, today = TODAY): ReleaseState => {
+/** Evaluate a release against live state as of the calendar's today. */
+export const releaseState = (rel: Release, p: Pick<Project, "milestones" | "governance">, cal: Pick<Calendar, "todayYm">): ReleaseState => {
   const evals = rel.criteria.map((c) => evalCriterion(c, p));
   const met = evals.filter((e) => e.ok).length;
   const total = rel.criteria.length;
   const allMet = met === total;
   const tone: ReleaseTone = allMet ? "good" : met >= total / 2 ? "warn" : "bad";
-  const label: ReleaseLabel = allMet ? (rel.month <= today ? "Shipped" : "Ready") : rel.month <= today + 1 ? "Blocked" : "At risk";
+  const label: ReleaseLabel = allMet ? (rel.month <= cal.todayYm ? "Shipped" : "Ready") : rel.month <= addMonths(cal.todayYm, 1) ? "Blocked" : "At risk";
   return { evals, met, total, tone, label };
 };
 
-export const nextRelease = (releases: Release[], today = TODAY): Release | undefined =>
-  releases.find((r) => r.month > today);
+export const nextRelease = (releases: Release[], cal: Pick<Calendar, "todayYm">): Release | undefined =>
+  releases.find((r) => r.month > cal.todayYm);
 
 // ---- time series --------------------------------------------------------
 
@@ -161,16 +163,18 @@ export interface BurnupSeries {
   ceil: number[];
 }
 
-export const burnupSeries = (milestones: Milestone[], dim: Dim, today = TODAY): BurnupSeries => {
-  const real = MONTHS.map((_, t) =>
-    milestones.reduce((a, m) => a + (m.status === "shipped" && m.month <= Math.min(t, today) ? impactOf(m, dim) : 0), 0),
+/** One value per month on the calendar axis. */
+export const burnupSeries = (milestones: Milestone[], dim: Dim, cal: Calendar): BurnupSeries => {
+  const { months, today, todayYm } = cal;
+  const real = months.map((ym) =>
+    milestones.reduce((a, m) => a + (m.status === "shipped" && m.month <= (ym < todayYm ? ym : todayYm) ? impactOf(m, dim) : 0), 0),
   );
   const realToday = real[today] ?? 0;
-  const com = MONTHS.map((_, t) => {
+  const com = months.map((ym, t) => {
     if (t < today) return null;
-    return realToday + milestones.reduce((a, m) => a + (m.status !== "shipped" && m.month <= t ? m.impact.base[dim] : 0), 0);
+    return realToday + milestones.reduce((a, m) => a + (m.status !== "shipped" && m.month <= ym ? m.impact.base[dim] : 0), 0);
   });
-  const ceil = MONTHS.map((_, t) => milestones.reduce((a, m) => a + (m.month <= t ? m.impact.stretch[dim] : 0), 0));
+  const ceil = months.map((ym) => milestones.reduce((a, m) => a + (m.month <= ym ? m.impact.stretch[dim] : 0), 0));
   return { real, com, ceil };
 };
 

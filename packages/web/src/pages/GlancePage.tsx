@@ -1,12 +1,12 @@
 import { useMemo } from "react";
-import { MONTHS, composeGlancePage } from "@valueflow/domain";
-import type { AppState, Block, ProjectTab } from "@valueflow/domain";
+import { calendarOf, composeGlancePage, monthLabel } from "@valueflow/domain";
+import type { AppState, Block, Calendar, ProjectTab } from "@valueflow/domain";
 import { Bullet, GovStack, Spark } from "../charts/small.tsx";
 import { Chip, reset } from "../ui/primitives.tsx";
 import { C, FEED_COLOR, toneBorder, toneToChip } from "../theme.ts";
 
 /** Exhaustive renderer for every Glance card variant. */
-function Body({ b }: { b: Block }) {
+function Body({ b, cal }: { b: Block; cal: Calendar }) {
   switch (b.kind) {
     case "blocked_release":
       return (
@@ -53,13 +53,13 @@ function Body({ b }: { b: Block }) {
     case "value_trajectory":
       return (
         <div style={{ marginTop: 4 }}>
-          <Spark milestones={b.milestones} dim={b.dim} target={b.target} />
+          <Spark milestones={b.milestones} dim={b.dim} target={b.target} cal={cal} />
         </div>
       );
     case "ready_release":
       return (
         <div style={{ fontSize: 12, color: C.dim }}>
-          Target {MONTHS[b.release.month]} · {b.release.milestoneIds.join(", ")}
+          Target {monthLabel(b.release.month, cal.todayYm)} · {b.release.milestoneIds.join(", ")}
         </div>
       );
     case "upcoming":
@@ -88,7 +88,7 @@ function Body({ b }: { b: Block }) {
   }
 }
 
-function GlanceCard({ b, onOpen }: { b: Block; onOpen: (id: string, tab: ProjectTab) => void }) {
+function GlanceCard({ b, cal, onOpen }: { b: Block; cal: Calendar; onOpen: (id: string, tab: ProjectTab) => void }) {
   return (
     <button
       type="button"
@@ -116,13 +116,14 @@ function GlanceCard({ b, onOpen }: { b: Block; onOpen: (id: string, tab: Project
         <span style={{ color: C.dim, fontSize: 11 }}>›</span>
       </div>
       <div style={{ fontSize: 14, fontWeight: 500, color: C.text, lineHeight: 1.4, letterSpacing: "-0.01em" }}>{b.title}</div>
-      <Body b={b} />
+      <Body b={b} cal={cal} />
     </button>
   );
 }
 
 export function GlancePage({ state, userName, onOpen }: { state: AppState; userName: string; onOpen: (id: string, tab: ProjectTab) => void }) {
-  const glance = useMemo(() => composeGlancePage(state), [state]);
+  const cal = useMemo(() => calendarOf(state), [state]);
+  const glance = useMemo(() => composeGlancePage(state, cal), [state, cal]);
   return (
     <div style={{ padding: "16px 20px 30px" }}>
       <div style={{ marginBottom: 16 }}>
@@ -134,7 +135,7 @@ export function GlancePage({ state, userName, onOpen }: { state: AppState; userN
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
         {glance.blocks.map((b) => (
-          <GlanceCard key={`${b.kind}:${b.proj}:${b.title}`} b={b} onOpen={onOpen} />
+          <GlanceCard key={`${b.kind}:${b.proj}:${b.title}`} b={b} cal={cal} onOpen={onOpen} />
         ))}
       </div>
     </div>

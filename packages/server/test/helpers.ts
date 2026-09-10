@@ -1,7 +1,7 @@
 import { createApp } from "../src/app.ts";
 import type { App } from "../src/app.ts";
 import { openDb } from "../src/db.ts";
-import { seed } from "../src/seed.ts";
+import { SEED_NOW, seed } from "../src/seed.ts";
 
 export const BASE = "http://valueflow.test";
 
@@ -14,7 +14,7 @@ export interface TestApp extends App {
 export const testApp = (): TestApp => {
   const db = openDb(":memory:");
   seed(db);
-  const app = createApp(db);
+  const app = createApp(db, { now: () => SEED_NOW });
   const call = async <T>(method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> => {
     const res = await app.handleApi(
       new Request(BASE + path, {

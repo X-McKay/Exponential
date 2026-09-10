@@ -6,5 +6,6 @@ import { seed } from "../seed.ts";
 const path = process.env.VALUEFLOW_DB ?? DEFAULT_DB_PATH;
 for (const f of [path, `${path}-wal`, `${path}-shm`]) if (existsSync(f)) unlinkSync(f);
 const db = openDb(path);
-seed(db);
+const pinned = process.env.VALUEFLOW_NOW ? new Date(process.env.VALUEFLOW_NOW) : new Date();
+seed(db, undefined, pinned);
 console.log(`seeded ${path}`);

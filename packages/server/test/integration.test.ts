@@ -4,7 +4,7 @@
 // the "Blocking release" card is replaced by "Ready to ship".
 
 import { describe, expect, test } from "bun:test";
-import { releaseState } from "@valueflow/domain";
+import { calendarOf, releaseState } from "@valueflow/domain";
 import type { AppState, Glance, Metric, MetricReading } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import { testApp } from "./helpers.ts";
@@ -13,7 +13,7 @@ const releaseOf = async (app: ReturnType<typeof testApp>, pid: string, rid: stri
   const state = (await app.get<AppState>(routes.state())).body;
   const p = state.projects.find((x) => x.id === pid)!;
   const r = state.releases[pid]!.find((x) => x.id === rid)!;
-  return releaseState(r, p);
+  return releaseState(r, p, calendarOf(state));
 };
 
 describe("integration: metric crosses a gate", () => {

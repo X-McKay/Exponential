@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { MONTHS, TODAY, nextRelease, releaseState } from "@valueflow/domain";
-import type { Project, Release } from "@valueflow/domain";
+import { monthLabel, nextRelease, releaseState } from "@valueflow/domain";
+import type { Calendar, Project, Release } from "@valueflow/domain";
 import { RoadmapTimeline } from "../charts/RoadmapTimeline.tsx";
 import { ReleaseEditor } from "../editors/ReleaseEditor.tsx";
 import { Caret, Chip, Kpi, SectionCard, Tip, ghostBtn, reset } from "../ui/primitives.tsx";
@@ -9,27 +9,29 @@ import { C, releaseToneColor } from "../theme.ts";
 export function RoadmapPage({
   p,
   releases,
+  cal,
   onSaveRelease,
   onDeleteRelease,
 }: {
   p: Project;
   releases: Release[];
+  cal: Calendar;
   onSaveRelease: (pid: string, rel: Release, isNew: boolean) => void;
   onDeleteRelease: (pid: string, rid: string) => void;
 }) {
   const [editing, setEditing] = useState<"new" | string | null>(null);
-  const states = releases.map((r) => releaseState(r, p));
+  const states = releases.map((r) => releaseState(r, p, cal));
   const [picked, setPicked] = useState<string | null>(() => releases.find((_, i) => states[i]?.label !== "Shipped")?.id ?? releases[0]?.id ?? null);
 
   const readyCount = states.filter((s) => s.met === s.total).length;
-  const next = nextRelease(releases, TODAY);
+  const next = nextRelease(releases, cal);
   const openCriteria = states.reduce((a, s) => a + (s.total - s.met), 0);
 
   return (
     <div style={{ padding: "16px 20px 30px" }}>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
         <Kpi label="Releases go-live ready" value={`${readyCount}/${releases.length}`} sub="all criteria met" color={readyCount === releases.length ? C.green : C.amber} />
-        <Kpi label="Next release" value={next?.id ?? "—"} sub={next ? `${next.name} · ${MONTHS[next.month]}` : "none scheduled"} color={C.indigoHi} />
+        <Kpi label="Next release" value={next?.id ?? "—"} sub={next ? `${next.name} · ${monthLabel(next.month, cal.todayYm)}` : "none scheduled"} color={C.indigoHi} />
         <Kpi label="Open go-live criteria" value={openCriteria} sub="across all releases" color={openCriteria > 0 ? C.amber : C.green} />
       </div>
 
@@ -45,7 +47,7 @@ export function RoadmapPage({
           </span>
         }
       >
-        <RoadmapTimeline p={p} releases={releases} states={states} onPick={setPicked} picked={picked} />
+        <RoadmapTimeline p={p} releases={releases} states={states} onPick={setPicked} picked={picked} cal={cal} />
         <div style={{ display: "flex", gap: 16, padding: "6px 8px 8px", fontSize: 11, color: C.dim, flexWrap: "wrap" }}>
           <span>
             <span style={{ color: C.green }}>◆</span> ready / shipped
@@ -81,7 +83,7 @@ export function RoadmapPage({
               <span style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ fontSize: 14, color: C.text, display: "block" }}>{r.name}</span>
                 <span style={{ fontSize: 11, color: C.dim }}>
-                  {MONTHS[r.month]} · {r.milestoneIds.join(", ")}
+                  {monthLabel(r.month, cal.todayYm)} · {r.milestoneIds.join(", ")}
                 </span>
               </span>
               <span style={{ fontSize: 12, color: C.mut, fontVariantNumeric: "tabular-nums" }}>
@@ -150,6 +152,7 @@ export function RoadmapPage({
           project={p}
           releases={releases}
           release={editing === "new" ? null : (releases.find((r) => r.id === editing) ?? null)}
+          cal={cal}
           onSave={(rel, isNew) => {
             onSaveRelease(p.id, rel, isNew);
             setEditing(null);

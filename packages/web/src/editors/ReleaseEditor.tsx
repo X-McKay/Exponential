@@ -1,15 +1,15 @@
 import { useState } from "react";
-import { MONTHS, TODAY, nextReleaseId } from "@valueflow/domain";
-import type { Criterion, Project, Release } from "@valueflow/domain";
+import { addMonths, monthLabel, nextReleaseId, planningMonths } from "@valueflow/domain";
+import type { Calendar, Criterion, Project, Release } from "@valueflow/domain";
 import { Btn, Lbl, Modal, Tip, ghostBtn, inpStyle } from "../ui/primitives.tsx";
 import { C } from "../theme.ts";
 
 type CritType = Criterion["type"];
 
-const blank = (releases: Release[]): Release => ({
+const blank = (releases: Release[], cal: Calendar): Release => ({
   id: nextReleaseId(releases),
   name: "",
-  month: Math.min(TODAY + 2, MONTHS.length - 1),
+  month: addMonths(cal.todayYm, 2),
   milestoneIds: [],
   criteria: [],
 });
@@ -53,6 +53,7 @@ export function ReleaseEditor({
   project,
   releases,
   release,
+  cal,
   onSave,
   onDelete,
   onClose,
@@ -60,12 +61,14 @@ export function ReleaseEditor({
   project: Project;
   releases: Release[];
   release: Release | null;
+  cal: Calendar;
   onSave: (rel: Release, isNew: boolean) => void;
   onDelete?: (rid: string) => void;
   onClose: () => void;
 }) {
   const isNew = release === null;
-  const [d, setD] = useState<Release>(() => (release ? structuredClone(release) : blank(releases)));
+  const [d, setD] = useState<Release>(() => (release ? structuredClone(release) : blank(releases, cal)));
+  const months = planningMonths(cal);
   const [confirmDel, setConfirmDel] = useState(false);
   const set = (patch: Partial<Release>) => setD((x) => ({ ...x, ...patch }));
   const setCrit = (i: number, c: Criterion) => setD((x) => ({ ...x, criteria: x.criteria.map((y, yi) => (yi === i ? c : y)) }));
@@ -109,10 +112,11 @@ export function ReleaseEditor({
         </div>
         <div>
           <Lbl>Target month</Lbl>
-          <select style={inpStyle} value={d.month} onChange={(e) => set({ month: Number(e.target.value) })}>
-            {MONTHS.map((mo, i) => (
-              <option key={mo} value={i}>
-                {mo}
+          <select style={inpStyle} value={d.month} onChange={(e) => set({ month: e.target.value })}>
+            {!months.includes(d.month) && <option value={d.month}>{d.month}</option>}
+            {months.map((mo) => (
+              <option key={mo} value={mo}>
+                {monthLabel(mo, cal.todayYm)}
               </option>
             ))}
           </select>

@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { MONTHS, STATUS_LABEL, attainment, impactOf, isMeasurable, realized, tierOf } from "@valueflow/domain";
-import type { Dim, ImpactPair, Milestone, Project } from "@valueflow/domain";
+import { STATUS_LABEL, attainment, impactOf, isMeasurable, monthLabel, realized, tierOf } from "@valueflow/domain";
+import type { Calendar, Dim, ImpactPair, Milestone, Project } from "@valueflow/domain";
 import { Burnup } from "../charts/Burnup.tsx";
 import { EvalScatter } from "../charts/EvalScatter.tsx";
 import { levelColor } from "../charts/small.tsx";
@@ -14,6 +14,7 @@ type MetricSetter = (mid: string, xid: string, v: number) => void;
 function MilestoneRow({
   projectId,
   m,
+  cal,
   open,
   onToggle,
   onMetric,
@@ -21,6 +22,7 @@ function MilestoneRow({
 }: {
   projectId: string;
   m: Milestone;
+  cal: Calendar;
   open: boolean;
   onToggle: () => void;
   onMetric: MetricSetter;
@@ -43,7 +45,7 @@ function MilestoneRow({
         <span style={{ flex: 1, minWidth: 0 }}>
           <span style={{ fontSize: 14, color: C.text, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
           <span style={{ fontSize: 11, color: STATUS_COLOR[m.status], display: "inline-flex", alignItems: "center", gap: 5 }}>
-            <StatusIcon status={m.status} /> {STATUS_LABEL[m.status]} · {MONTHS[m.month]}
+            <StatusIcon status={m.status} /> {STATUS_LABEL[m.status]} · {monthLabel(m.month, cal.todayYm)}
           </span>
         </span>
         <span style={{ display: "flex", gap: 5 }}>
@@ -157,6 +159,7 @@ function MilestoneRow({
 
 export function ValuePage({
   p,
+  cal,
   onMetric,
   openMs,
   setOpenMs,
@@ -167,6 +170,7 @@ export function ValuePage({
   onSaveTargets,
 }: {
   p: Project;
+  cal: Calendar;
   onMetric: (pid: string, mid: string, xid: string, v: number) => void;
   openMs: string | null;
   setOpenMs: (id: string | null) => void;
@@ -217,7 +221,7 @@ export function ValuePage({
             </div>
           }
         >
-          <Burnup milestones={p.milestones} dim={dim} target={p.targets[dim]} />
+          <Burnup milestones={p.milestones} dim={dim} target={p.targets[dim]} cal={cal} />
           <div style={{ display: "flex", gap: 16, padding: "8px 4px 4px", fontSize: 11, color: C.dim, flexWrap: "wrap" }}>
             <span>
               <span style={{ color: C.indigo }}>—</span> realized
@@ -247,6 +251,7 @@ export function ValuePage({
               key={m.id}
               projectId={p.id}
               m={m}
+              cal={cal}
               open={openMs === m.id}
               onToggle={() => setOpenMs(openMs === m.id ? null : m.id)}
               onMetric={(mid, xid, v) => onMetric(p.id, mid, xid, v)}
@@ -266,6 +271,7 @@ export function ValuePage({
         <MilestoneEditor
           project={p}
           milestoneId={editing === "new" ? null : editing}
+          cal={cal}
           onSave={(ms, isNew) => {
             onSaveMilestone(p.id, ms, isNew);
             setEditing(null);

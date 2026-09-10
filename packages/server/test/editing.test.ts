@@ -3,7 +3,7 @@
 // user, and the JSON documents mirrored from external systems.
 
 import { describe, expect, test } from "bun:test";
-import { AGENTS, DEV, FEED, UPCOMING, releaseState } from "@valueflow/domain";
+import { AGENTS, DEV, FEED, UPCOMING, calendarOf, releaseState } from "@valueflow/domain";
 import type { AppState, GovernanceItem, Project, Release, Workspace } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import type { ProjectInput } from "@valueflow/shared";
@@ -104,7 +104,7 @@ describe("governance items", () => {
     expect(ima.governance.some((g) => g.id === "sec")).toBe(false);
     const r1 = state.releases.ima![0]!;
     expect(r1.criteria[1]).toEqual({ type: "gov", gid: "sec", label: "Security review & pen test approved" });
-    expect(releaseState(r1, ima).evals[1]).toMatchObject({ ok: false, sub: "not tracked" });
+    expect(releaseState(r1, ima, calendarOf(state)).evals[1]).toMatchObject({ ok: false, sub: "not tracked" });
   });
 });
 
@@ -114,7 +114,7 @@ describe("releases", () => {
     const rel: Release = {
       id: "R4",
       name: "Entity resolution GA",
-      month: 13,
+      month: "2027-02",
       milestoneIds: ["MS-16"],
       criteria: [
         { type: "gate", ms: "MS-16", label: "Entity resolution base gate" },
@@ -129,12 +129,12 @@ describe("releases", () => {
 
     const state = await stateOf(app);
     const p = state.projects[0]!;
-    expect(releaseState(rel, p)).toMatchObject({ met: 0, total: 3, label: "At risk" });
+    expect(releaseState(rel, p, calendarOf(state))).toMatchObject({ met: 0, total: 3, label: "At risk" });
 
     const updated = await app.send<Release>("PUT", routes.release("onboarding", "R4"), { ...rel, criteria: [{ type: "manual", ok: true, label: "Comms plan agreed" }] });
     expect(updated.status).toBe(200);
     expect(updated.body.criteria).toEqual([{ type: "manual", ok: true, label: "Comms plan agreed" }]);
-    expect(releaseState(updated.body, p).label).toBe("Ready");
+    expect(releaseState(updated.body, p, calendarOf(state)).label).toBe("Ready");
     expect((await app.send("PUT", routes.release("onboarding", "R4"), { ...rel, id: "R9" })).status).toBe(400);
     expect((await app.send("PUT", routes.release("onboarding", "R9"), { ...rel, id: "R9" })).status).toBe(404);
 

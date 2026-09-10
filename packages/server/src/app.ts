@@ -97,17 +97,26 @@ export interface App {
   /** Handle an API request; returns null when the path is not an API route. */
   handleApi: (req: Request) => Promise<Response | null>;
   db: Database;
+  /** The clock every derivation uses as "today". */
+  now: () => Date;
 }
 
-export const createApp = (db: Database): App => {
+export interface AppOptions {
+  /** Override the clock (tests, demos: `VALUEFLOW_NOW`). */
+  now?: () => Date;
+}
+
+export const createApp = (db: Database, options: AppOptions = {}): App => {
+  const now = options.now ?? (() => new Date());
+  const state = () => loadState(db, now());
   const routes: Route[] = [];
   const on = (method: Method, pattern: string, handler: Handler): void => {
     routes.push({ method, segments: pattern.split("/").filter(Boolean), handler });
   };
   const p = (params: Params, k: string): string => params[k] ?? "";
 
-  on("GET", patterns.state, () => json(loadState(db)));
-  on("GET", patterns.glance, () => json(composeGlancePage(loadState(db))));
+  on("GET", patterns.state, () => json(state()));
+  on("GET", patterns.glance, () => json(composeGlancePage(state())));
 
   on("PUT", patterns.workspace, async (req) => {
     setWorkspace(db, await parseBody(req, WorkspaceInputSchema));
@@ -117,13 +126,13 @@ export const createApp = (db: Database): App => {
   on("POST", patterns.projects, async (req) => {
     const body = await parseBody(req, ProjectInputSchema);
     upsertProject(db, body, "create");
-    return json(findProject(loadState(db), body.id), 201);
+    return json(findProject(state(), body.id), 201);
   });
   on("PUT", patterns.project, async (req, params) => {
     const body = await parseBody(req, ProjectInputSchema);
     if (body.id !== p(params, "pid")) throw new HttpError(400, "project id in body must match the URL");
     upsertProject(db, body, "update");
-    return json(findProject(loadState(db), body.id));
+    return json(findProject(state(), body.id));
   });
   on("DELETE", patterns.project, (_req, params) => {
     deleteProject(db, p(params, "pid"));
@@ -134,20 +143,20 @@ export const createApp = (db: Database): App => {
   on("PUT", patterns.readings, async (req, params) => {
     const body = await parseBody(req, ReadingInputSchema);
     const reading = recordReading(db, p(params, "pid"), p(params, "mid"), p(params, "xid"), body.value, body.source);
-    const metric = findMilestone(loadState(db), p(params, "pid"), p(params, "mid")).metrics.find((x) => x.id === p(params, "xid"));
+    const metric = findMilestone(state(), p(params, "pid"), p(params, "mid")).metrics.find((x) => x.id === p(params, "xid"));
     return json({ reading, metric }, 201);
   });
 
   on("POST", patterns.milestones, async (req, params) => {
     const body = await parseBody(req, MilestoneInputSchema);
     upsertMilestone(db, p(params, "pid"), body, "create");
-    return json(findMilestone(loadState(db), p(params, "pid"), body.id), 201);
+    return json(findMilestone(state(), p(params, "pid"), body.id), 201);
   });
   on("PUT", patterns.milestone, async (req, params) => {
     const body = await parseBody(req, MilestoneInputSchema);
     if (body.id !== p(params, "mid")) throw new HttpError(400, "milestone id in body must match the URL");
     upsertMilestone(db, p(params, "pid"), body, "update");
-    return json(findMilestone(loadState(db), p(params, "pid"), body.id));
+    return json(findMilestone(state(), p(params, "pid"), body.id));
   });
   on("DELETE", patterns.milestone, (_req, params) => {
     deleteMilestone(db, p(params, "pid"), p(params, "mid"));
@@ -157,19 +166,19 @@ export const createApp = (db: Database): App => {
   on("PUT", patterns.targets, async (req, params) => {
     const body = await parseBody(req, TargetsInputSchema);
     setTargets(db, p(params, "pid"), body);
-    return json(findProject(loadState(db), p(params, "pid")).targets);
+    return json(findProject(state(), p(params, "pid")).targets);
   });
 
   on("PUT", patterns.governance, async (req, params) => {
     const body = await parseBody(req, GovernanceInputSchema);
     updateGovernance(db, p(params, "pid"), p(params, "gid"), body);
-    const item = findProject(loadState(db), p(params, "pid")).governance.find((g) => g.id === p(params, "gid"));
+    const item = findProject(state(), p(params, "pid")).governance.find((g) => g.id === p(params, "gid"));
     return json(item);
   });
   on("POST", patterns.governanceItems, async (req, params) => {
     const body = await parseBody(req, GovernanceItemInputSchema);
     createGovernanceItem(db, p(params, "pid"), body);
-    const item = findProject(loadState(db), p(params, "pid")).governance.find((g) => g.id === body.id);
+    const item = findProject(state(), p(params, "pid")).governance.find((g) => g.id === body.id);
     return json(item, 201);
   });
   on("DELETE", patterns.governance, (_req, params) => {
@@ -177,7 +186,7 @@ export const createApp = (db: Database): App => {
     return json({ ok: true });
   });
 
-  const releaseOf = (pid: string, rid: string) => (loadState(db).releases[pid] ?? []).find((r) => r.id === rid);
+  const releaseOf = (pid: string, rid: string) => (state().releases[pid] ?? []).find((r) => r.id === rid);
   on("POST", patterns.releases, async (req, params) => {
     const body = await parseBody(req, ReleaseInputSchema);
     upsertRelease(db, p(params, "pid"), body, "create");
@@ -197,19 +206,19 @@ export const createApp = (db: Database): App => {
   on("PUT", patterns.dev, async (req, params) => {
     const body = await parseBody(req, DevActivitySchema);
     setDevActivity(db, p(params, "pid"), body);
-    return json(loadState(db).dev[p(params, "pid")]);
+    return json(state().dev[p(params, "pid")]);
   });
   on("PUT", patterns.agents, async (req) => {
     setAgents(db, await parseBody(req, AgentsInputSchema));
-    return json(loadState(db).agents);
+    return json(state().agents);
   });
   on("PUT", patterns.feed, async (req) => {
     setFeed(db, await parseBody(req, FeedInputSchema));
-    return json(loadState(db).feed);
+    return json(state().feed);
   });
   on("PUT", patterns.upcoming, async (req) => {
     setUpcoming(db, await parseBody(req, UpcomingInputSchema));
-    return json(loadState(db).upcoming);
+    return json(state().upcoming);
   });
 
   const handleApi = async (req: Request): Promise<Response | null> => {
@@ -235,5 +244,5 @@ export const createApp = (db: Database): App => {
     return json({ error: pathMatched ? "method not allowed" : "not found" }, pathMatched ? 405 : 404);
   };
 
-  return { handleApi, db };
+  return { handleApi, db, now };
 };

@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { PROJECT_TABS, TODAY_DATE, blockers } from "@valueflow/domain";
+import { PROJECT_TABS, blockers, calendarOf, dayLabel } from "@valueflow/domain";
 import type { Dim, ProjectTab } from "@valueflow/domain";
 import { AgentsInputSchema, DevActivitySchema } from "@valueflow/shared";
 import { JsonDocEditor } from "./editors/JsonDocEditor.tsx";
@@ -23,8 +23,6 @@ import { Avatar, Kbd, Skeleton, TierBadge, Tip, reset } from "./ui/primitives.ts
 import { C, FONT, TIER_COLOR } from "./theme.ts";
 
 const TAB_LABEL: Record<ProjectTab, string> = { overview: "Overview", value: "Value", roadmap: "Roadmap", development: "Development", governance: "Governance" };
-
-const todayLabel = (): string => new Date(`${TODAY_DATE}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
 
 // 14px monochrome glyphs for the primary nav, drawn inline so no icon set ships.
 const ICONS = {
@@ -197,6 +195,7 @@ export function App() {
 
   const user = state.workspace.user;
   const firstName = user.name.split(/\s+/)[0] ?? user.name;
+  const cal = calendarOf(state);
   const closeEditor = () => setEditor(null);
 
   return (
@@ -303,7 +302,7 @@ export function App() {
           <>
             <Header>
               <h1 style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em", margin: 0 }}>Glance</h1>
-              <span style={{ fontSize: 12, color: C.dim }}>{todayLabel()}</span>
+              <span style={{ fontSize: 12, color: C.dim }}>{dayLabel(state.asOf)}</span>
             </Header>
             <GlancePage state={state} userName={firstName} onOpen={openProject} />
           </>
@@ -368,6 +367,7 @@ export function App() {
             {view.tab === "value" && (
               <ValuePage
                 p={proj}
+                cal={cal}
                 onMetric={store.setMetric}
                 openMs={openMs}
                 setOpenMs={setOpenMs}
@@ -382,6 +382,7 @@ export function App() {
               <RoadmapPage
                 p={proj}
                 releases={state.releases[proj.id] ?? []}
+                cal={cal}
                 onSaveRelease={(pid, rel, isNew) => void store.saveRelease(pid, rel, isNew)}
                 onDeleteRelease={(pid, rid) => void store.deleteRelease(pid, rid)}
               />

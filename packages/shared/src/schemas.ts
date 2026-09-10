@@ -4,13 +4,13 @@
 // inferred types are used by the client so both sides share one contract.
 
 import { z } from "zod";
-import { FEED_TYPES, GOV_STATUSES, MILESTONE_STATUSES, MONTHS, PROJECT_TABS } from "@valueflow/domain";
+import { FEED_TYPES, GOV_STATUSES, MILESTONE_STATUSES, PROJECT_TABS, YEAR_MONTH } from "@valueflow/domain";
 
 const pct = z.number().finite().min(0).max(100);
 const id = z.string().trim().min(1).max(64);
 const short = (max: number) => z.string().trim().min(1).max(max);
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD");
-const month = z.number().int().min(0).max(MONTHS.length - 1);
+const month = z.string().regex(YEAR_MONTH, "expected YYYY-MM");
 const enumOf = <T extends string>(values: readonly T[]) => z.enum(values as unknown as [string, ...string[]]).pipe(z.custom<T>());
 
 export const ImpactPairSchema = z.object({ fte: pct, time: pct });

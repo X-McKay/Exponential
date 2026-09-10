@@ -1,19 +1,21 @@
 // Small charts: sparkline, bullet gauge, governance stack, commit bars, people bars.
 
 import { useMemo } from "react";
-import { GSTATUS_LABEL, MONTHS, TODAY, burnupSeries, metricLevel } from "@valueflow/domain";
-import type { Contributor, Dim, GovStatus, Metric, Milestone, Project } from "@valueflow/domain";
+import { GSTATUS_LABEL, burnupSeries, metricLevel } from "@valueflow/domain";
+import type { Calendar, Contributor, Dim, GovStatus, Metric, Milestone, Project } from "@valueflow/domain";
 import { Avatar } from "../ui/primitives.tsx";
 import { C, GSTATUS_COLOR } from "../theme.ts";
 
-export function Spark({ milestones, dim, target }: { milestones: Milestone[]; dim: Dim; target: number }) {
+export function Spark({ milestones, dim, target, cal }: { milestones: Milestone[]; dim: Dim; target: number; cal: Calendar }) {
+  const MONTHS = cal.months;
+  const TODAY = cal.today;
   const W = 220;
   const H = 56;
   const P = 4;
   const iw = W - P * 2;
   const ih = H - P * 2 - 10;
   const X = (i: number) => P + (i / (MONTHS.length - 1)) * iw;
-  const real = burnupSeries(milestones, dim).real;
+  const real = burnupSeries(milestones, dim, cal).real;
   const yMax = Math.max(target, ...real, 1);
   const Y = (v: number) => P + ih - (v / yMax) * ih;
   const d = real

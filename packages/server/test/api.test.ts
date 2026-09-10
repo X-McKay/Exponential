@@ -101,7 +101,7 @@ describe("milestones", () => {
       id: "MS-17",
       name: "Reviewer assist",
       status: "backlog",
-      month: 12,
+      month: "2027-01",
       impact: { base: { fte: 3, time: 3 }, stretch: { fte: 5, time: 5 } },
       metrics: [],
     };

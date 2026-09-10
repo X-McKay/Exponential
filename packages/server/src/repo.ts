@@ -70,7 +70,7 @@ interface MilestoneRow {
   id: string;
   name: string;
   status: MilestoneStatus;
-  month: number;
+  month: string;
   base_fte: number;
   base_time: number;
   stretch_fte: number;
@@ -105,7 +105,7 @@ interface ReleaseRow {
   project_id: string;
   id: string;
   name: string;
-  month: number;
+  month: string;
 }
 interface RelMsRow {
   project_id: string;
@@ -175,7 +175,7 @@ const toCriterion = (c: CritRow): Criterion => {
   }
 };
 
-export const loadState = (db: Database): AppState => {
+export const loadState = (db: Database, now: Date = new Date()): AppState => {
   const projects = db.query<ProjectRow, []>("SELECT * FROM projects ORDER BY sort").all();
   const repos = groupBy(db.query<RepoRow, []>("SELECT * FROM project_repos ORDER BY sort").all(), (r) => r.project_id);
   const members = groupBy(db.query<MemberRow, []>("SELECT * FROM team_members ORDER BY sort").all(), (r) => r.project_id);
@@ -188,7 +188,7 @@ export const loadState = (db: Database): AppState => {
   const crits = groupBy(db.query<CritRow, []>("SELECT * FROM release_criteria ORDER BY sort").all(), (r) => `${r.project_id} ${r.release_id}`);
   const dev = new Map(db.query<DevRow, []>("SELECT * FROM dev_activity").all().map((r) => [r.project_id, JSON.parse(r.doc) as DevActivity]));
 
-  const out: AppState = { workspace: loadWorkspace(db), projects: [], releases: {}, dev: {}, agents: [], feed: [], upcoming: [] };
+  const out: AppState = { asOf: now.toISOString(), workspace: loadWorkspace(db), projects: [], releases: {}, dev: {}, agents: [], feed: [], upcoming: [] };
   for (const p of projects) {
     const ms: Milestone[] = (milestones.get(p.id) ?? []).map((m) => ({
       id: m.id,

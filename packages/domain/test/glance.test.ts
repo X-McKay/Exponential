@@ -30,7 +30,7 @@ describe("detectSignals", () => {
   });
   test("milestones with zero metrics never produce a shortfall", () => {
     const st = seedState();
-    st.projects[0]!.milestones.push({ id: "MS-99", name: "Empty", status: "eval", month: 9, impact: { base: { fte: 1, time: 1 }, stretch: { fte: 2, time: 2 } }, metrics: [] });
+    st.projects[0]!.milestones.push({ id: "MS-99", name: "Empty", status: "eval", month: "2026-10", impact: { base: { fte: 1, time: 1 }, stretch: { fte: 2, time: 2 } }, metrics: [] });
     expect(detectSignals(st).shortfalls.some((x) => x.m.id === "MS-99")).toBe(false);
   });
 });
@@ -92,7 +92,7 @@ describe("rankBlocks / composeGlance", () => {
     expect(find(blocks, "ready_release")!.title).toBe("R1 Shadow mode — all go-live criteria met");
   });
   test("empty state still composes without throwing", () => {
-    const empty: AppState = { workspace: { user: { name: "You", ini: "ME" } }, projects: [], releases: {}, dev: {}, agents: [], feed: [], upcoming: [] };
+    const empty: AppState = { asOf: "2026-09-10T09:00:00.000Z", workspace: { user: { name: "You", ini: "ME" } }, projects: [], releases: {}, dev: {}, agents: [], feed: [], upcoming: [] };
     expect(composeGlance(empty)).toEqual([]);
     expect(composeGlancePage(empty).narrative).toEqual(["No releases are currently blocked."]);
   });

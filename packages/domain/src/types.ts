@@ -53,8 +53,8 @@ export interface Milestone {
   id: string;
   name: string;
   status: MilestoneStatus;
-  /** Index into the calendar month axis (see calendar.ts). */
-  month: number;
+  /** Target (or shipped) month as `YYYY-MM`; see calendar.ts. */
+  month: string;
   impact: Impact;
   metrics: Metric[];
 }
@@ -111,7 +111,8 @@ export type Criterion =
 export interface Release {
   id: string;
   name: string;
-  month: number;
+  /** Target month as `YYYY-MM`. */
+  month: string;
   milestoneIds: string[];
   criteria: Criterion[];
 }
@@ -252,6 +253,8 @@ export interface Workspace {
 
 /** Everything the client needs to render every page. All facts, no derived values. */
 export interface AppState {
+  /** ISO timestamp of the server clock when the state was read; "today" for every derivation. */
+  asOf: string;
   workspace: Workspace;
   projects: Project[];
   releases: Record<string, Release[]>;
