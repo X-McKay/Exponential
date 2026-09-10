@@ -19,8 +19,9 @@ Bun is the runtime, package manager, bundler, and test runner: there is no Node,
 ```sh
 git clone https://github.com/X-McKay/Exponential.git
 cd Exponential
-just setup      # bun install --frozen-lockfile, then seed data/valueflow.sqlite
-just dev        # dev server with HMR on http://localhost:3000
+cp .env.example .env   # optional: LLM endpoint, sync source, pinned clock
+just setup             # bun install --frozen-lockfile, then seed data/valueflow.sqlite
+just dev               # dev server with HMR on http://localhost:3000
 ```
 
 With Nix, enter the dev shell first; it installs dependencies on first entry and puts `bun` and `just` on your PATH:
@@ -51,7 +52,9 @@ Run `just` with no arguments to list every recipe.
 | `just typecheck` / `just lint` | The two halves of `check` on their own. |
 | `just build` | Production bundle to `packages/web/dist`. |
 | `just serve` | Build, then run the production server (no HMR). |
-| `just seed` | Wipe the database and re-seed it from the mockup fixtures. |
+| `just seed` | Wipe the database and re-seed it with the sample portfolio, dated relative to now. |
+| `just sync` | Pull development facts for every project from `SYNC_SOURCE`. |
+| `just agent <agent> <project>` | Run an agent against a project through the API of the running server. |
 | `just reset` | Delete the database; the next start seeds a fresh one. |
 | `just clean` | Remove dependencies, build output, database, logs, and Nix result links. |
 | `just ci` | Exactly what the GitHub Actions Bun job runs (frozen install, typecheck, lint, tests, build). |
@@ -59,12 +62,23 @@ Run `just` with no arguments to list every recipe.
 | `just nix-build` / `just nix-run` | Build the production package to `./result`, or build and run it. |
 | `just nix-hash` | After `bun.lock` changes, recompute the dependency hash and write it into `flake.nix`. |
 
-### Environment
+### Configuration
+
+Settings come from the environment. Bun loads `.env` from its working directory; the server also reads the repo-root `.env` explicitly, so one file at the root works for `just dev`, `just sync`, and `just seed`. `.env.example` lists everything.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `PORT` | `3000` | Port for the dev and production servers. |
 | `VALUEFLOW_DB` | `data/valueflow.sqlite` (repo root) | SQLite file. The Nix package defaults to `~/.local/share/valueflow/valueflow.sqlite`. |
+| `VALUEFLOW_NOW` | unset (real clock) | Pin "today" (`2026-09-10T09:00:00Z`) for demos and screenshots. Every derivation uses this clock. |
+| `SYNC_SOURCE` | `sample` | Where development facts come from: `sample` (generated from the fixtures), `github` (REST API), `none`. |
+| `GITHUB_TOKEN` | unset | Authenticates the GitHub source (unauthenticated calls are limited to 60 an hour). |
+| `SYNC_INTERVAL_MIN` | `0` | Re-sync every project on a timer. `0` means only at boot for never-synced projects and on demand. |
+| `LLM_BASE_URL` | unset (agents disabled) | OpenAI-compatible chat endpoint, e.g. `https://llm.almckay.io/v1` (vLLM, OpenAI, LiteLLM, Ollama). |
+| `LLM_API_KEY` | unset | Bearer token for the endpoint. |
+| `LLM_MODEL` | first model listed by the endpoint | Model name to request. |
+| `LLM_THINKING` | off | `on` lets reasoning models think before answering (slower, more tokens). |
+| `AGENT_SCHEDULE` | on | `off` disables the nightly scheduled runs. |
 | `NODE_ENV` | unset | `production` serves the built bundle instead of bundling on the fly. `bun run start` sets it. |
 
 ### Changing dependencies
@@ -80,52 +94,72 @@ Add or update packages with `bun add` / `bun update` as usual, commit `bun.lock`
 - **`bun: command not found`** after installing: open a new shell, or add `~/.bun/bin` to your PATH.
 - **`nix: command not found`** in a shell that predates the install: run `. /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh` or open a new terminal.
 - **`Port 3000 is in use`**: set `PORT`, or `just stop` a background server you forgot about.
+- **Agents say "no model configured"**: set `LLM_BASE_URL` in `.env` and restart; the server logs the model it resolved at boot.
+- **Development pages are empty after pulling**: `just sync` (or open the project and press *Sync now*).
 - **Stale data after pulling fixture changes**: `just seed`.
 
 ## Architecture
 
 ```
 packages/
-  domain/   pure TypeScript: types (Project, Milestone, Metric, Release, Criterion,
-            GovernanceItem, Agent, …), derived-state functions, Glance composer, seed fixtures
+  domain/   pure TypeScript: types (Project, Milestone, Metric, Release, Criterion, GovernanceItem,
+            RepoStat, PullRequest, Build, CommitDay, Event, CalendarEvent, Agent, AgentRun, …),
+            calendar, derived-state functions, Glance composer, sample fixtures
   shared/   API contract: zod request schemas + route helpers, shared by server and web
-  server/   Bun.serve + bun:sqlite: migrations, seed, repository, framework-free router
+  server/   Bun.serve + bun:sqlite: migrations, seed, repository, router, repo sources (sample,
+            GitHub), sync job, LLM client, agent runner, schedulers
   web/      React 18 app bundled by Bun: pages, charts, editors, ⌘K palette, keyboard chords
 ```
 
 ```
- browser ──GET /api/state──▶ server ──▶ sqlite (facts only)
-    │                           │
-    │   domain.composeGlance    │   domain.composeGlance
-    │   domain.releaseState     │   domain.releaseState      ← same pure functions
-    │   domain.realized …       │   domain.realized …           on both sides
-    ▼                           ▼
-  pages                    GET /api/glance
-    │
-    └──PUT/POST/DELETE (optimistic, then write-through)──▶ server ──▶ sqlite
+ GitHub / CI ──sync──▶ repo stats · pull requests · builds · commit days ─┐
+ eval suites ──PUT readings──▶ metric_readings ───────────────────────────┤
+ people ──editors──▶ projects · milestones · governance · releases · calendar   sqlite (facts only)
+ LLM ◀──briefing── agent runner ──▶ agent_runs ──────────────────────────┤
+ mutations & syncs ──append──▶ events ────────────────────────────────────┘
+                                          │
+                     domain.* (same pure functions on server and client)
+                                          ▼
+   realized value · gate tiers · readiness · release states · burn-up · calendar axis
+   dev stats · commit chart · contributors · feed · "coming up" · agent status · Glance
 ```
 
 ### The invariant: derived, never stored
 
-**Value is never stored. It is always derived from milestone status plus metric readings against gates. Release readiness is always derived from live criteria references.**
+**Value is never stored. It is always derived from milestone status plus metric readings against gates. Release readiness is always derived from live criteria references.** The same rule covers everything else the app shows.
 
-The database holds facts: the workspace user, projects with their team and repositories, milestones, metric definitions, `metric_readings` (every eval run or manual reading, append-only), governance items, releases, and criteria *references*. Realized value, gate tiers, governance readiness, release states, and the entire Glance composition are computed at read time — by `packages/domain` on the server (`GET /api/glance`) and on the client from fetched facts — and never written back. A test in `packages/server/test/api.test.ts` asserts the schema carries no derived column.
+The database holds facts: the workspace user, projects with their team and repositories, milestones, metric definitions, `metric_readings` (every eval run or manual reading, append-only), governance items, releases and criteria *references*, calendar events, synced development facts (repo stats, pull requests, builds, daily commit counts, sync runs), an append-only event log, agent definitions, and agent runs. Realized value, gate tiers, governance readiness, release states, the calendar axis, development KPIs and charts, the activity feed, "coming up", agent status and success rates, and the entire Glance composition are computed at read time by `packages/domain` and never written back. A test asserts the schema carries no derived column.
 
 Consequences you can see in the app:
 
 - A metric's `current` is the latest row in `metric_readings`. Dragging a slider or editing "Current" appends a reading; history is never rewritten.
-- Deleting a milestone leaves the release criterion that referenced it in place; it resolves to *not met* at read time rather than crashing or silently disappearing.
+- Deleting a milestone or governance item leaves any release criterion that referenced it in place; it resolves to *not met* / *not tracked* at read time rather than crashing or silently disappearing.
 - N/A governance items are excluded from readiness. A measurable milestone with no metrics can never clear a gate.
+- "3h ago", "Sep 14", "Jan '27", and every KPI tile are formatted from timestamps and counts at read time, against the server clock.
+
+### Time
+
+Milestones and releases are planned by month (`YYYY-MM`). "Today" is the server clock, reported to the client as `asOf` (pin it with `VALUEFLOW_NOW`). The axis every chart draws is derived: eight months back and six ahead of today, widened to include every planned month, so the app works on any date. Seeding shifts the sample portfolio's planned months and timestamps so the sample stays coherent whenever it is loaded.
+
+### Sources of ground truth
+
+Development facts come from a **repo source** behind one interface (`packages/server/src/connectors`): `fetchRepo(repo) → { stat, prs, builds, commits }`. The **sample** source materialises the fixtures relative to the clock; the **GitHub** source reads pull requests, check runs, reviews, workflow runs, and commits from the REST API. A sync replaces a project's facts wholesale, records a sync run, and appends events for merges, failed builds, deploys, and eval runs; a failed fetch keeps the previous facts. Syncs run at boot for never-synced projects, on a timer (`SYNC_INTERVAL_MIN`), from the Development and Data pages (*Sync now*), through `POST /api/projects/:pid/sync`, and via `just sync`. Coverage and quality grades stay null until a source reports them.
+
+Eval suites report readings with `PUT …/readings { value, source: "eval" }`; each eval reading appends a feed event. Milestone status changes and governance moves append events too, so the feed is a log of what actually happened.
+
+### Agents
+
+An agent is a definition (kind, model, owner, schedule); a run is a fact. A run briefs the agent with the project's live state — targets, milestones and gates, governance, releases, synced development activity, recent events, and the calendar — then asks the configured model for a JSON reply (`summary`, `attention`, `body`) and stores it. Four kinds ship: **Slider** (decks), **Comma** (communications), **Nova** (ideation), and **Audie** (audit), which runs nightly. Runs flagged for attention appear on Glance. The LLM client is a minimal fetch wrapper over the OpenAI chat API with JSON-schema output; nothing else is required of the endpoint.
 
 ### Glance as a composition contract
 
-`composeGlance(state) → Block[]` in `packages/domain/src/glance.ts` runs three replaceable stages behind one data contract: `detectSignals` (deterministic detectors), `rankBlocks` (priority ranker), and `writeNarrative` (the briefing sentences). Blocks are typed variants (`blocked_release`, `below_gate`, `ci_failing`, `tier1_gaps`, `near_stretch`, `value_trajectory`, `ready_release`, `upcoming`, `activity`) carrying data only; the web app renders each kind with an exhaustive switch. An LLM can later replace the ranker or the narrative writer without touching the renderer.
+`composeGlance(state) → Block[]` in `packages/domain/src/glance.ts` runs three replaceable stages behind one data contract: `detectSignals` (deterministic detectors), `rankBlocks` (priority ranker), and `writeNarrative` (the briefing sentences). Blocks are typed variants (`blocked_release`, `below_gate`, `ci_failing`, `tier1_gaps`, `agent_flag`, `near_stretch`, `value_trajectory`, `ready_release`, `upcoming`, `activity`) carrying data only; the web app renders each kind with an exhaustive switch. An LLM can later replace the ranker or the narrative writer without touching the renderer.
 
 ### Stack
 
 - **Bun** — runtime, package manager, bundler, test runner. No Node, npm, or Vite.
 - **TypeScript** `strict`, `noUncheckedIndexedAccess`, exhaustive `switch` over every union; no `any` in the domain layer.
-- **SQLite** via `bun:sqlite`, WAL mode, foreign keys on, versioned migrations.
+- **SQLite** via `bun:sqlite`, WAL mode, foreign keys on, versioned migrations (six so far; existing databases upgrade in place).
 - **React 18** with inline styles and one global stylesheet, no component library or CSS framework. Inter Variable is self-hosted from `packages/web/src/fonts` (SIL OFL).
 - **zod** for request validation at the API boundary (the only runtime dependency besides React).
 - **Nix** flake: dev shell, `packages.default` (production bundle + server), `checks.default` (typecheck + lint + tests). Dependencies are a fixed-output derivation built from the manifests alone, so editing source never triggers a reinstall.
@@ -140,12 +174,16 @@ Nothing is hard-coded: every fact the app shows can be changed in the UI, and ev
 | Milestones, eval gates, current readings | Value → *+ New milestone*, the pencil on a row, or drag a slider |
 | Governance items (add, rename, recategorise, status, owner, delete) | Governance → *+ New item*, *+ Add* per category, *Edit item* on an expanded row |
 | Releases: target month, milestones shipped, go-live criteria (gate / governance / manual) | Roadmap → *+ New release*, the pencil on a release |
-| Development activity, agents, activity feed, calendar | *Data* in the sidebar (or *Edit data* / *Edit agents* on those pages): each is a JSON document validated against the API schema before it can be saved |
+| Development activity | Synced, not edited: *Sync now* on Development or Data, `just sync`, or the timer |
+| Activity feed | Derived from the event log, not edited |
+| Calendar events | Data → Calendar → *+ Add event* / *Edit* |
+| Agent definitions | Agents → *Edit agents* (a validated JSON document) |
+| Agent runs | Agents → expand an agent → *Run…*; nightly for scheduled agents |
 | Signed-in user (sidebar, Glance greeting, default owner) | Click your name at the bottom of the sidebar, or *Data → Workspace* |
 
-Ids are generated for you: milestones `MS-n`, releases `Rn`, project keys `PRJ-n`, and URL ids and governance ids are slugs of the name. Deleting a milestone or governance item leaves any release criterion that referenced it in place; it resolves to *not met* / *not tracked* at read time. Deleting a project removes everything under it.
+Ids are generated for you: milestones `MS-n`, releases `Rn`, project keys `PRJ-n`, runs `run-n`; URL ids, governance ids, and calendar ids are slugs of the name. Deleting a milestone or governance item leaves any release criterion that referenced it in place; it resolves to *not met* / *not tracked* at read time. Deleting a project removes everything under it.
 
-To start from a clean slate rather than the fixtures, delete the three seeded projects and edit the Data documents, or `just reset` and delete after the automatic seed.
+To start from a clean slate rather than the sample portfolio, delete the three seeded projects; the default agents stay.
 
 ## API
 
@@ -164,12 +202,14 @@ To start from a clean slate rather than the fixtures, delete the three seeded pr
 | PUT / DELETE | `/api/projects/:pid/governance/:gid` | `GovernanceInput` |
 | POST | `/api/projects/:pid/releases` | `ReleaseInput` |
 | PUT / DELETE | `/api/projects/:pid/releases/:rid` | `ReleaseInput` |
-| PUT | `/api/projects/:pid/dev` | `DevActivity` document |
-| PUT | `/api/agents` | `Agent[]` document |
-| PUT | `/api/feed` | `FeedDay[]` document |
-| PUT | `/api/upcoming` | `Upcoming[]` document |
+| POST | `/api/projects/:pid/sync` | |
+| GET | `/api/sync` | |
+| PUT | `/api/agents` | `Agent[]` |
+| POST | `/api/agents/:aid/runs` | `{ proj, tab?, instruction? }` |
+| POST | `/api/calendar` | `CalendarEventInput` |
+| PUT / DELETE | `/api/calendar/:id` | `CalendarEventInput` |
 
-Schemas live in `packages/shared/src/schemas.ts`; the web client and the server import the same definitions, and the JSON editors validate with them before sending.
+Schemas live in `packages/shared/src/schemas.ts`; the web client and the server import the same definitions, and the JSON editor validates with them before sending. A sync returns `{ run, facts }` with status 502 when the source failed; an agent run returns the finished run (state `failed` carries the error).
 
 ## Keyboard
 
@@ -178,13 +218,25 @@ Schemas live in `packages/shared/src/schemas.ts`; the web client and the server 
 - `g` then `o` / `v` / `r` / `d` / `n` — Overview / Value / Roadmap / Development / Governance of the current (or last visited) project
 - `⌘↵` / `Ctrl+↵` — save in any editor dialog; `esc` closes it
 
+## Going live
+
+What is already production-shaped, and what to decide when connecting real systems:
+
+1. **Source control and CI.** Set `SYNC_SOURCE=github` and `GITHUB_TOKEN`, make sure each project's repository URLs point at real GitHub repos, and set `SYNC_INTERVAL_MIN`. Coverage and quality grades need a second source (a coverage service, a static-analysis tool); add it by implementing the `RepoSource` interface and merging its `stat` fields, or by extending the GitHub source to read a badge or artifact. GitLab or Bitbucket are the same interface.
+2. **Eval suites.** Have the nightly eval job `PUT` its results to the readings endpoint with `source: "eval"`. That is the whole integration: gates, release criteria, the feed, and Glance follow.
+3. **The model.** Any OpenAI-compatible endpoint works. For production, set `LLM_API_KEY`, pin `LLM_MODEL`, and consider `LLM_THINKING=on` for audit runs if latency allows. Runs are synchronous today (the request waits for the model); if runs grow long, queue them and poll `runs` in state.
+4. **The database.** SQLite through `bun:sqlite` in WAL mode is fine for a single server. Every read and write goes through `packages/server/src/repo.ts`, so a Postgres move is contained to that file plus `migrations.ts` and `seed.ts`; the schema uses only portable SQL (text ids, ISO timestamps, JSON in text columns).
+5. **Identity.** The workspace user is a single stored record. Put an authenticating proxy in front and map its identity onto that record, or add a users table alongside it; nothing else assumes a single user.
+6. **Operations.** Back up the SQLite file (or its WAL checkpoint), watch the server log for `sync … failed` and `scheduled agents failed`, and run `just check` in CI on every change.
+
 ## Deviations from the mockup
 
-- **Eval history is real.** The scatter renders `metric_readings` (30 seeded per measurable metric, shaped like the mockup's trajectories, plus any manual readings you add) instead of a deterministic fake.
+- **Everything is editable and nothing is hard-coded.** The mockup's project details, team, repositories, governance list, releases, calendar, feed, development activity, agents, and signed-in user were constants. They are stored facts with editors, sources, or derivations now.
+- **Time is real.** The mockup pinned today as Sep 2026 on a fixed 15-month axis; the app uses the clock and derives the axis.
+- **Eval history is real.** The scatter renders `metric_readings` (30 seeded per measurable metric, shaped like the mockup's trajectories, plus any readings you add) instead of a deterministic fake.
+- **The commit chart is real.** It draws daily commit counts synced per repository, not a seeded curve.
 - **Editors persist.** Milestone, targets, and governance edits are optimistic and write through the API; on failure the client reloads server state and shows a toast.
-- **Row carets rotate when a row is expanded.** The mockup sets `transform: rotate(90deg)` on an inline `span`, which browsers ignore; the intent is clear so the caret here is an inline SVG that rotates.
-- **Development, agents, feed and calendar** mirror external systems and are stored as validated JSON documents rather than normalized tables; they are editable as documents from the Data page.
-- **Everything is editable.** The mockup's project details, team, repositories, governance list, releases, and signed-in user were constants; they are all stored facts with editors and API endpoints now.
+- **Row carets rotate when a row is expanded.** The mockup sets `transform: rotate(90deg)` on an inline `span`, which browsers ignore; the caret here is an inline SVG that rotates.
 - **Deep links.** View state is mirrored to the URL hash (`#/project/ima/value`) so pages survive a reload.
 
 ### Visual polish pass

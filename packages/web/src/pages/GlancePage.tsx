@@ -67,7 +67,13 @@ function Body({ b, cal }: { b: Block; cal: Calendar }) {
         <div style={{ fontSize: 12, color: C.dim, lineHeight: 1.6 }}>
           {b.agentName} · {relTime(b.run.startedAt, cal.asOf)}
           {b.run.model ? ` · ${b.run.model}` : ""}
-          <div style={{ color: "#C6CAD6" }}>{b.run.output.split("\n").find((l) => l.trim() && !l.startsWith("#"))?.slice(0, 160) ?? "Open the Agents page for the full report."}</div>
+          <div style={{ color: "#C6CAD6" }}>
+            {b.run.output
+              .split("\n")
+              .find((l) => l.trim() && !l.startsWith("#"))
+              ?.replace(/\*\*|`/g, "")
+              .slice(0, 160) ?? "Open the Agents page for the full report."}
+          </div>
         </div>
       );
     case "upcoming":

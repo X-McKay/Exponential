@@ -31,6 +31,12 @@ seed:
 sync:
     bun run sync
 
+# Run an agent against a project through the running server, e.g. `just agent audie ima "focus on audit trails"`.
+agent agent project instruction="":
+    @curl -sf -X POST "http://localhost:{{port}}/api/agents/{{agent}}/runs" -H 'content-type: application/json' \
+        -d '{"proj":"{{project}}","instruction":"{{instruction}}"}' \
+        | bun -e 'const r = await new Response(Bun.stdin).json(); console.log(`${r.state}: ${r.summary}\n`); console.log(r.output || r.error)'
+
 # ---- run -------------------------------------------------------------------
 
 # Dev server with HMR in the foreground (PORT={{port}}).
