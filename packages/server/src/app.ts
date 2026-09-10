@@ -14,6 +14,7 @@ import {
   ProjectInputSchema,
   ReadingInputSchema,
   ReleaseInputSchema,
+  RunAgentInputSchema,
   TargetsInputSchema,
   WorkspaceInputSchema,
   patterns,
@@ -43,7 +44,9 @@ import {
   upsertProject,
   upsertRelease,
 } from "./repo.ts";
+import { runAgent } from "./agents.ts";
 import type { RepoSource } from "./connectors/index.ts";
+import type { Llm } from "./llm.ts";
 import { syncProject } from "./sync.ts";
 
 type Params = Record<string, string>;
@@ -105,12 +108,15 @@ export interface AppOptions {
   now?: () => Date;
   /** Where development facts come from; null disables syncing. */
   source?: RepoSource | null;
+  /** The model agents run against; null disables runs. */
+  llm?: Llm | null;
 }
 
 export const createApp = (db: Database, options: AppOptions = {}): App => {
   const now = options.now ?? (() => new Date());
   const source = options.source ?? null;
-  const state = () => ({ ...loadState(db, now()), syncSource: source?.name ?? null });
+  const llm = options.llm ?? null;
+  const state = () => ({ ...loadState(db, now()), syncSource: source?.name ?? null, llm: llm ? llm.describe() : null });
   const routes: Route[] = [];
   const on = (method: Method, pattern: string, handler: Handler): void => {
     routes.push({ method, segments: pattern.split("/").filter(Boolean), handler });
@@ -218,6 +224,12 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   on("PUT", patterns.agents, async (req) => {
     setAgents(db, await parseBody(req, AgentsInputSchema));
     return json(state().agents);
+  });
+  on("POST", patterns.agentRuns, async (req, params) => {
+    if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
+    const body = await parseBody(req, RunAgentInputSchema.omit({ agentId: true }));
+    const run = await runAgent(db, llm, { ...body, agentId: p(params, "aid") }, now());
+    return json(run, 201);
   });
   on("POST", patterns.calendar, async (req) => {
     const body = await parseBody(req, CalendarEventInputSchema);

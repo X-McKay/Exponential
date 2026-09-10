@@ -1,6 +1,6 @@
 // ================= typed API client =================
 
-import type { Agent, CalendarEvent, DevFacts, GovernanceItem, ImpactPair, Metric, MetricReading, Milestone, Project, Release, SyncRun, Workspace } from "@valueflow/domain";
+import type { Agent, AgentRun, CalendarEvent, DevFacts, GovernanceItem, ImpactPair, Metric, MetricReading, Milestone, Project, Release, SyncRun, Workspace } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import type {
   AgentsInput,
@@ -12,6 +12,7 @@ import type {
   ProjectInput,
   ReadingInput,
   ReleaseInput,
+  RunAgentInput,
   TargetsInput,
   WorkspaceInput,
 } from "@valueflow/shared";
@@ -73,6 +74,10 @@ export const api = {
   syncProject: (pid: string) => request<{ run: SyncRun; facts: DevFacts | null }>("POST", routes.sync(pid)),
   syncStatus: () => request<{ source: string | null; projects: Record<string, SyncRun | null> }>("GET", routes.syncStatus()),
   setAgents: (body: AgentsInput) => request<Agent[]>("PUT", routes.agents(), body),
+  runAgent: (input: RunAgentInput) => {
+    const { agentId, ...body } = input;
+    return request<AgentRun>("POST", routes.agentRuns(agentId), body);
+  },
   createCalendarEvent: (body: CalendarEventInput) => request<CalendarEvent>("POST", routes.calendar(), body),
   updateCalendarEvent: (body: CalendarEventInput) => request<CalendarEvent>("PUT", routes.calendarEvent(body.id), body),
   deleteCalendarEvent: (id: string) => request<Ok>("DELETE", routes.calendarEvent(id)),

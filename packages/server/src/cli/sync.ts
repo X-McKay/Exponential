@@ -2,8 +2,10 @@
 //   SYNC_SOURCE=github GITHUB_TOKEN=… bun run sync
 import { sourceFromEnv } from "../connectors/index.ts";
 import { openDb } from "../db.ts";
+import { loadDotEnv } from "../env.ts";
 import { syncAll } from "../sync.ts";
 
+loadDotEnv();
 const source = sourceFromEnv(process.env);
 if (!source) {
   console.error("SYNC_SOURCE=none: nothing to sync");

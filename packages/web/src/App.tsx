@@ -221,7 +221,7 @@ export function App() {
       {editor?.kind === "agents" && (
         <JsonDocEditor
           title="Agents"
-          help={`One entry per workspace agent; sessions link to a project id (${projects.map((p) => p.id).join(", ")}) and a tab.`}
+          help="One entry per workspace agent: id, name, grad (CSS gradient), purpose, kind (deck | comms | ideation | audit), model (null = workspace default), owner initials, caps, schedule (null | nightly). Runs are kept when an agent is edited and removed when it is deleted."
           value={state.agents}
           schema={AgentsInputSchema}
           onSave={(agents) => {
@@ -297,9 +297,21 @@ export function App() {
           <>
             <Header>
               <h1 style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em", margin: 0 }}>Agents</h1>
-              <span style={{ fontSize: 12, color: C.dim }}>{state.agents.length} workspace agents</span>
+              <span style={{ fontSize: 12, color: C.dim }}>
+                {state.agents.length} workspace agents{state.llm ? ` · ${state.llm.model ?? "model resolving"}` : " · no model configured"}
+              </span>
             </Header>
-            <AgentsPage agents={state.agents} projects={projects} onOpen={openProject} onEdit={() => setEditor({ kind: "agents" })} />
+            <AgentsPage
+              agents={state.agents}
+              runs={state.runs}
+              projects={projects}
+              asOf={state.asOf}
+              llm={state.llm}
+              currentProject={view.projectId ?? lastProject}
+              onOpen={openProject}
+              onEdit={() => setEditor({ kind: "agents" })}
+              onRun={(input) => void store.runAgent(input)}
+            />
           </>
         ) : view.page === "portfolio" ? (
           <>

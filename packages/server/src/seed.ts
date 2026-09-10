@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
-import { AGENTS, CALENDAR, DEV, PROJECTS, RELEASES, SEED_ASOF, WORKSPACE, addMonths, isMeasurable, monthsBetween, seedEvents, ymOf } from "@valueflow/domain";
-import { recordEvent, replaceDevFacts } from "./repo.ts";
+import { AGENTS, CALENDAR, DEV, PROJECTS, RELEASES, RUNS, SEED_ASOF, WORKSPACE, addMonths, isMeasurable, monthsBetween, seedEvents, ymOf } from "@valueflow/domain";
+import { insertRun, recordEvent, replaceDevFacts, setAgents } from "./repo.ts";
 import type { AppState, Metric } from "@valueflow/domain";
 
 /** The instant the fixtures describe. Seeding at another time shifts every planned month and timestamp by the same offset. */
@@ -39,7 +39,7 @@ export const trajectory = (metric: Pick<Metric, "current">, seed: number, n = RE
 export const isSeeded = (db: Database): boolean =>
   (db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM projects").get()?.n ?? 0) > 0;
 
-export const fixtureState = (asOf = SEED_ASOF): AppState => ({ asOf, syncSource: null, workspace: WORKSPACE, projects: PROJECTS, releases: RELEASES, dev: DEV(asOf), agents: AGENTS, events: seedEvents(asOf), calendar: CALENDAR(asOf) });
+export const fixtureState = (asOf = SEED_ASOF): AppState => ({ asOf, syncSource: null, workspace: WORKSPACE, projects: PROJECTS, releases: RELEASES, dev: DEV(asOf), agents: AGENTS, runs: RUNS(asOf), llm: null, events: seedEvents(asOf), calendar: CALENDAR(asOf) });
 
 export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_NOW): void => {
   // Planned months are relative to the fixtures' own "today"; keep them the same distance from `now`.
@@ -56,7 +56,6 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
     release: db.query("INSERT INTO releases (project_id, id, name, month, sort) VALUES (?,?,?,?,?)"),
     relMs: db.query("INSERT INTO release_milestones (project_id, release_id, milestone_id, sort) VALUES (?,?,?,?)"),
     crit: db.query("INSERT INTO release_criteria (project_id, release_id, sort, type, milestone_id, governance_id, ok, label) VALUES (?,?,?,?,?,?,?,?)"),
-    agent: db.query("INSERT INTO agents (id, sort, doc) VALUES (?,?,?)"),
     calendar: db.query("INSERT INTO calendar_events (id, date, project_id, tab, text, sub) VALUES (?,?,?,?,?,?)"),
     workspace: db.query("INSERT OR REPLACE INTO workspace (id, user_name, user_ini) VALUES (1, ?, ?)"),
   };
@@ -104,10 +103,18 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
       const d = state.dev[p.id];
       if (d) replaceDevFacts(db, p.id, d, d.lastSync ?? { source: "sample", startedAt: now.toISOString(), finishedAt: now.toISOString(), ok: true, message: "seeded" });
     }
-    state.agents.forEach((a, i) => q.agent.run(a.id, i, JSON.stringify(a)));
+    setAgents(db, state.agents);
+    for (const r of state.runs) insertRun(db, r);
     for (const e of state.events) recordEvent(db, e);
     for (const c of state.calendar) q.calendar.run(c.id, c.date, c.proj, c.tab, c.text, c.sub);
   })();
+};
+
+/** Install the default agent definitions when none exist (fresh or migrated databases). */
+export const ensureAgents = (db: Database): boolean => {
+  if ((db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM agents").get()?.n ?? 0) > 0) return false;
+  setAgents(db, AGENTS);
+  return true;
 };
 
 /** Seed only when empty; returns whether seeding happened. */

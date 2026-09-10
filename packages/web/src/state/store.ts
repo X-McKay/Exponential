@@ -5,8 +5,8 @@
 // reloads from the server and surfaces the error.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Agent, AppState, CalendarEvent, GovernanceItem, ImpactPair, Milestone, Project, Release, Workspace } from "@valueflow/domain";
-import type { ProjectInput } from "@valueflow/shared";
+import type { Agent, AgentRun, AppState, CalendarEvent, GovernanceItem, ImpactPair, Milestone, Project, Release, Workspace } from "@valueflow/domain";
+import type { ProjectInput, RunAgentInput } from "@valueflow/shared";
 import { api } from "../api/client.ts";
 
 export interface Store {
@@ -27,6 +27,8 @@ export interface Store {
   /** Pull fresh development facts for a project from the configured source. */
   syncProject: (pid: string) => Promise<void>;
   saveAgents: (agents: Agent[]) => Promise<void>;
+  /** Start an agent run; a working placeholder shows until the model replies. */
+  runAgent: (input: RunAgentInput) => Promise<void>;
   saveCalendar: (ev: CalendarEvent, isNew: boolean) => Promise<void>;
   deleteCalendar: (id: string) => Promise<void>;
   saveWorkspace: (w: Workspace) => Promise<void>;
@@ -220,6 +222,34 @@ export const useStore = (): Store => {
       ),
     [commit],
   );
+  const runAgent = useCallback(
+    async (input: RunAgentInput) => {
+      const placeholder: AgentRun = {
+        id: `pending-${Date.now()}`,
+        agentId: input.agentId,
+        proj: input.proj,
+        tab: input.tab ?? "value",
+        state: "working",
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+        instruction: input.instruction ?? null,
+        summary: "Working…",
+        output: "",
+        model: null,
+        error: null,
+      };
+      setState((s) => (s ? { ...s, runs: [placeholder, ...s.runs] } : s));
+      try {
+        const run = await api.runAgent(input);
+        setState((s) => (s ? { ...s, runs: [run, ...s.runs.filter((r) => r.id !== placeholder.id && r.id !== run.id)] } : s));
+        if (run.state === "failed") setError(`${run.summary}: ${run.error ?? "unknown error"}`);
+      } catch (e) {
+        fail(e);
+      }
+    },
+    [fail],
+  );
+
   const saveCalendar = useCallback(
     (ev: CalendarEvent, isNew: boolean) =>
       commit(
@@ -265,6 +295,7 @@ export const useStore = (): Store => {
       deleteRelease,
       syncProject,
       saveAgents,
+      runAgent,
       saveCalendar,
       deleteCalendar,
       saveWorkspace,
@@ -286,6 +317,7 @@ export const useStore = (): Store => {
       deleteRelease,
       syncProject,
       saveAgents,
+      runAgent,
       saveCalendar,
       deleteCalendar,
       saveWorkspace,

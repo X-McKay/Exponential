@@ -62,6 +62,14 @@ function Body({ b, cal }: { b: Block; cal: Calendar }) {
           Target {monthLabel(b.release.month, cal.todayYm)} · {b.release.milestoneIds.join(", ")}
         </div>
       );
+    case "agent_flag":
+      return (
+        <div style={{ fontSize: 12, color: C.dim, lineHeight: 1.6 }}>
+          {b.agentName} · {relTime(b.run.startedAt, cal.asOf)}
+          {b.run.model ? ` · ${b.run.model}` : ""}
+          <div style={{ color: "#C6CAD6" }}>{b.run.output.split("\n").find((l) => l.trim() && !l.startsWith("#"))?.slice(0, 160) ?? "Open the Agents page for the full report."}</div>
+        </div>
+      );
     case "upcoming":
       return (
         <div style={{ marginTop: 2 }}>

@@ -1,7 +1,7 @@
 // ================= design tokens =================
 // Exact palette from the mockup's `C` constant plus per-status colors.
 
-import type { AgentStatus, CheckStatus, FeedType, GovStatus, MilestoneStatus, RiskTier, SessionState } from "@valueflow/domain";
+import type { AgentStatus, CheckStatus, FeedType, GovStatus, MilestoneStatus, RiskTier, RunState } from "@valueflow/domain";
 import type { ReleaseTone, Tone } from "@valueflow/domain";
 
 export const C = {
@@ -55,7 +55,7 @@ export const AGENT_STATUS: Record<AgentStatus, { color: string; pulse: boolean }
   scheduled: { color: C.teal, pulse: false },
 };
 
-export const SESSION_COLOR: Record<SessionState, string> = { done: C.green, working: C.indigoHi, attention: C.amber };
+export const RUN_COLOR: Record<RunState, string> = { queued: C.dim, working: C.indigoHi, done: C.green, attention: C.amber, failed: C.red };
 
 export type ChipTone = "default" | "accent" | "good" | "warn" | "bad";
 

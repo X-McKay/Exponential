@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { AGENT_STATUS_LABEL, SESSION_ICON } from "@valueflow/domain";
-import type { Agent, Project, ProjectTab } from "@valueflow/domain";
-import { Avatar, Caret, Chip, Kpi, SectionCard, ghostBtn, reset } from "../ui/primitives.tsx";
-import { AGENT_STATUS, C, SESSION_COLOR } from "../theme.ts";
+import { AGENT_KIND_LABEL, AGENT_STATUS_LABEL, RUN_STATE_ICON, agentStats, relTime, runsOf } from "@valueflow/domain";
+import type { Agent, AgentRun, LlmInfo, Project, ProjectTab } from "@valueflow/domain";
+import type { RunAgentInput } from "@valueflow/shared";
+import { RunAgentEditor, RunViewer } from "../editors/RunAgent.tsx";
+import { Avatar, Caret, Chip, Kpi, SectionCard, Tip, ghostBtn, reset } from "../ui/primitives.tsx";
+import { AGENT_STATUS, C, RUN_COLOR } from "../theme.ts";
 
 function AgentAvatar({ a, size = 26 }: { a: Agent; size?: number }) {
   return (
@@ -27,41 +29,67 @@ function AgentAvatar({ a, size = 26 }: { a: Agent; size?: number }) {
   );
 }
 
-/** Short project names for the session list (the mockup's byId map), falling back to the first two words. */
-const SHORT_NAMES: Record<string, string> = { onboarding: "Client onboarding", ima: "IMA compliance", sector: "Sector reports" };
-const shortProjectName = (p: Project | undefined): string => {
-  if (!p) return "";
-  return SHORT_NAMES[p.id] ?? p.name.split(" ").slice(0, 2).join(" ");
-};
+const shortProjectName = (p: Project | undefined): string => (p ? p.name.split(" ").slice(0, 2).join(" ") : "");
 
-export function AgentsPage({ agents, projects, onOpen, onEdit }: { agents: Agent[]; projects: Project[]; onOpen: (id: string, tab: ProjectTab) => void; onEdit: () => void }) {
+export function AgentsPage({
+  agents,
+  runs,
+  projects,
+  asOf,
+  llm,
+  currentProject,
+  onOpen,
+  onEdit,
+  onRun,
+}: {
+  agents: Agent[];
+  runs: AgentRun[];
+  projects: Project[];
+  asOf: string;
+  llm: LlmInfo | null;
+  currentProject: string | null;
+  onOpen: (id: string, tab: ProjectTab) => void;
+  onEdit: () => void;
+  onRun: (input: RunAgentInput) => void;
+}) {
   const [open, setOpen] = useState<string | null>(agents.find((a) => a.id === "audie")?.id ?? agents[0]?.id ?? null);
-  const totalRuns = agents.reduce((a, x) => a + x.runs, 0);
-  const avgSuccess = totalRuns ? Math.round(agents.reduce((a, x) => a + x.success * x.runs, 0) / totalRuns) : 0;
-  const workingAgents = agents.filter((a) => a.status === "working");
-  const attention = agents.flatMap((a) => a.sessions).filter((s) => s.state === "attention").length;
-  const auditors = agents.filter((a) => a.sessions.some((s) => s.state === "attention")).map((a) => a.name);
+  const [running, setRunning] = useState<Agent | null>(null);
+  const [viewing, setViewing] = useState<AgentRun | null>(null);
+  const stats = new Map(agents.map((a) => [a.id, agentStats(a, runs, asOf)]));
+  const totalRuns = [...stats.values()].reduce((a, s) => a + s.runs, 0);
+  const rates = [...stats.values()].map((s) => s.success).filter((s): s is number => s !== null);
+  const avgSuccess = rates.length ? Math.round(rates.reduce((a, b) => a + b, 0) / rates.length) : null;
+  const workingAgents = agents.filter((a) => stats.get(a.id)?.status === "working");
+  const attention = [...stats.values()].reduce((a, s) => a + s.attention, 0);
+  const auditors = agents.filter((a) => (stats.get(a.id)?.attention ?? 0) > 0).map((a) => a.name);
   const byId = new Map(projects.map((p) => [p.id, p]));
+  const viewingAgent = viewing ? agents.find((a) => a.id === viewing.agentId) : undefined;
 
   return (
     <div style={{ padding: "16px 20px 30px" }}>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
-        <Kpi label="Runs · 30d" value={totalRuns} sub={`across ${agents.length} agents`} color={C.indigoHi} />
-        <Kpi label="Success rate" value={`${avgSuccess}%`} sub="accepted without rework" color={C.green} ring={avgSuccess / 100} />
+        <Kpi label="Runs · 30d" value={totalRuns} sub={`across ${agents.length} agent${agents.length === 1 ? "" : "s"}`} color={C.indigoHi} />
+        <Kpi label="Success rate" value={avgSuccess === null ? "—" : `${avgSuccess}%`} sub="runs that completed" color={avgSuccess === null ? C.dim : C.green} ring={avgSuccess === null ? undefined : avgSuccess / 100} />
         <Kpi
           label="Active now"
           value={workingAgents.length}
-          sub={workingAgents.length ? `${workingAgents.map((a) => a.name).join(", ")} ${workingAgents.length === 1 ? "is" : "are"} drafting` : "all idle"}
+          sub={workingAgents.length ? `${workingAgents.map((a) => a.name).join(", ")} ${workingAgents.length === 1 ? "is" : "are"} working` : "all idle"}
           color={workingAgents.length ? C.indigoHi : C.dim}
         />
-        <Kpi label="Attention flags" value={attention} sub={auditors.length ? `from ${auditors.join(", ")}'s audit scans` : "none raised"} color={C.amber} />
+        <Kpi label="Attention flags · 30d" value={attention} sub={auditors.length ? `from ${auditors.join(", ")}` : "none raised"} color={attention ? C.amber : C.dim} />
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+        <span style={{ fontSize: 12, color: C.dim, flex: 1 }}>
+          {llm ? `Agents run against ${llm.model ?? "the configured model"} at ${llm.baseUrl}` : "Agents cannot run: set LLM_BASE_URL to an OpenAI-compatible endpoint"}
+        </span>
       </div>
 
       <SectionCard
         title="Workspace agents"
         pad="0"
         right={
-          <button type="button" className="vf-ghost" onClick={onEdit} style={{ ...ghostBtn, height: 24, color: C.indigoHi }}>
+          <button type="button" className="vf-ghost" onClick={onEdit} style={{ ...ghostBtn, height: 24 }}>
             Edit agents
           </button>
         }
@@ -77,8 +105,10 @@ export function AgentsPage({ agents, projects, onOpen, onEdit }: { agents: Agent
           <span style={{ width: 14 }} />
         </div>
         {agents.map((a) => {
-          const st = AGENT_STATUS[a.status];
+          const s = stats.get(a.id);
+          const st = AGENT_STATUS[s?.status ?? "idle"];
           const isOpen = open === a.id;
+          const mine = runsOf(a, runs).slice(0, 6);
           return (
             <div key={a.id} style={{ borderBottom: `1px solid ${C.line}` }}>
               <button
@@ -90,45 +120,65 @@ export function AgentsPage({ agents, projects, onOpen, onEdit }: { agents: Agent
                 <AgentAvatar a={a} />
                 <span style={{ width: 110, flexShrink: 0 }}>
                   <span style={{ fontSize: 14, fontWeight: 500, color: C.text, display: "block" }}>{a.name}</span>
-                  <span style={{ fontSize: 11, color: C.dim }}>{a.model}</span>
+                  <span style={{ fontSize: 11, color: C.dim }}>{a.model ?? llm?.model ?? AGENT_KIND_LABEL[a.kind].toLowerCase()}</span>
                 </span>
                 <span style={{ flex: 1, fontSize: 13, color: C.mut, lineHeight: 1.45, minWidth: 0 }}>{a.purpose}</span>
                 <span style={{ width: 104, flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}>
                   <span className={st.pulse ? "vf-pulse" : undefined} style={{ width: 7, height: 7, borderRadius: "50%", background: st.color }} />
-                  <span style={{ fontSize: 12, color: st.color }}>{AGENT_STATUS_LABEL[a.status]}</span>
+                  <span style={{ fontSize: 12, color: st.color }}>{AGENT_STATUS_LABEL[s?.status ?? "idle"]}</span>
                 </span>
-                <span style={{ width: 56, textAlign: "right", fontSize: 13, color: C.mut, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{a.runs}</span>
-                <span style={{ width: 62, textAlign: "right", fontSize: 13, color: a.success >= 95 ? C.green : C.mut, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{a.success}%</span>
-                <span style={{ width: 58, textAlign: "right", fontSize: 12, color: C.dim, flexShrink: 0 }}>{a.last}</span>
+                <span style={{ width: 56, textAlign: "right", fontSize: 13, color: C.mut, flexShrink: 0 }}>{s?.runs ?? 0}</span>
+                <span style={{ width: 62, textAlign: "right", fontSize: 13, color: s?.success !== null && s !== undefined && s.success >= 95 ? C.green : C.mut, flexShrink: 0 }}>
+                  {s?.success === null || s === undefined ? "—" : `${s.success}%`}
+                </span>
+                <span style={{ width: 58, textAlign: "right", fontSize: 12, color: C.dim, flexShrink: 0 }}>{s?.last ? relTime(s.last, asOf) : "never"}</span>
                 <span style={{ width: 14, textAlign: "center" }}>
                   <Caret open={isOpen} />
                 </span>
               </button>
               {isOpen && (
                 <div style={{ padding: "2px 14px 14px 51px" }}>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "6px 0 10px" }}>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", margin: "6px 0 10px" }}>
                     {a.caps.map((c) => (
                       <Chip key={c}>{c}</Chip>
                     ))}
+                    {a.schedule && <Chip tone="accent">runs {a.schedule}</Chip>}
                     <span style={{ flex: 1 }} />
                     <span style={{ fontSize: 11, color: C.dim }}>Owner</span>
                     <Avatar ini={a.owner} size={18} />
+                    <Tip label={llm ? `Brief ${a.name} with a project's live state` : "Set LLM_BASE_URL to enable runs"}>
+                      <button type="button" className="vf-ghost" disabled={!llm} onClick={() => setRunning(a)} style={{ ...ghostBtn, color: C.indigoHi, opacity: llm ? 1 : 0.5, marginLeft: 6 }}>
+                        Run…
+                      </button>
+                    </Tip>
                   </div>
                   <div style={{ background: "#0B0C0E", border: `1px solid ${C.line}`, borderRadius: 8, padding: "2px 12px" }}>
-                    {a.sessions.map((s2, i) => (
+                    {mine.length === 0 && <div style={{ fontSize: 12, color: C.dim, padding: "10px 2px" }}>No runs yet.</div>}
+                    {mine.map((r, i) => (
                       <button
-                        key={i}
+                        key={r.id}
                         type="button"
-                        onClick={() => onOpen(s2.proj, s2.tab)}
+                        onClick={() => setViewing(r)}
                         className="vf-row"
                         style={{ ...reset, width: "100%", display: "flex", gap: 10, padding: "9px 2px", borderTop: i === 0 ? "none" : `1px solid ${C.line}`, alignItems: "baseline", transition: "background .12s" }}
                       >
-                        <span className={s2.state === "working" ? "vf-pulse" : undefined} style={{ fontSize: 11, color: SESSION_COLOR[s2.state], width: 12, flexShrink: 0 }}>
-                          {SESSION_ICON[s2.state]}
+                        <span className={r.state === "working" || r.state === "queued" ? "vf-pulse" : undefined} style={{ fontSize: 11, color: RUN_COLOR[r.state], width: 12, flexShrink: 0 }}>
+                          {RUN_STATE_ICON[r.state]}
                         </span>
-                        <span style={{ flex: 1, fontSize: 13, color: s2.state === "attention" ? C.text : "#C6CAD6", lineHeight: 1.5, minWidth: 0 }}>{s2.text}</span>
-                        <span style={{ fontSize: 11, color: C.dim, flexShrink: 0 }}>{shortProjectName(byId.get(s2.proj))}</span>
-                        <span style={{ fontSize: 11, color: C.dim, width: 44, textAlign: "right", flexShrink: 0 }}>{s2.when}</span>
+                        <span style={{ flex: 1, fontSize: 13, color: r.state === "attention" ? C.text : r.state === "failed" ? "#F08A84" : "#C6CAD6", lineHeight: 1.5, minWidth: 0 }}>{r.summary}</span>
+                        <span
+                          role="link"
+                          tabIndex={-1}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpen(r.proj, r.tab);
+                          }}
+                          className="vf-link"
+                          style={{ fontSize: 11, color: C.dim, flexShrink: 0 }}
+                        >
+                          {shortProjectName(byId.get(r.proj))}
+                        </span>
+                        <span style={{ fontSize: 11, color: C.dim, width: 52, textAlign: "right", flexShrink: 0 }}>{relTime(r.startedAt, asOf)}</span>
                       </button>
                     ))}
                   </div>
@@ -140,9 +190,23 @@ export function AgentsPage({ agents, projects, onOpen, onEdit }: { agents: Agent
       </SectionCard>
 
       <div style={{ fontSize: 12, color: C.dim, lineHeight: 1.6, maxWidth: 680 }}>
-        Agents run against the same live project state as every other page — Audie's attention flags surface on Glance, and Slider's decks pull current burn-up and gate data at
-        generation time.
+        Every run briefs the agent with the project's live state — targets, gates, governance, releases, synced development activity, and recent events — and
+        stores the result. Runs flagged for attention surface on Glance. Audie runs nightly when a model is configured.
       </div>
+
+      {running && (
+        <RunAgentEditor
+          agent={running}
+          projects={projects}
+          defaultProject={currentProject}
+          onRun={(input) => {
+            onRun(input);
+            setRunning(null);
+          }}
+          onClose={() => setRunning(null)}
+        />
+      )}
+      {viewing && <RunViewer run={runs.find((r) => r.id === viewing.id) ?? viewing} agent={viewingAgent} project={byId.get(viewing.proj)} asOf={asOf} onClose={() => setViewing(null)} />}
     </div>
   );
 }

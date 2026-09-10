@@ -198,9 +198,9 @@ describe("sync", () => {
 
   test("PUT replaces the agents document after validating it", async () => {
     const app = testApp();
-    const agents = AGENTS.slice(0, 2).map((a) => ({ ...a, runs: a.runs + 1 }));
+    const agents = AGENTS.slice(0, 2).map((a) => ({ ...a, purpose: a.purpose + " (edited)" }));
     expect((await app.send("PUT", routes.agents(), agents)).status).toBe(200);
-    expect((await app.send("PUT", routes.agents(), [{ ...agents[0]!, status: "asleep" }])).status).toBe(400);
+    expect((await app.send("PUT", routes.agents(), [{ ...agents[0]!, kind: "asleep" }])).status).toBe(400);
     expect((await stateOf(app)).agents).toEqual(agents);
   });
 });

@@ -4,5 +4,6 @@ export * from "./labels.ts";
 export * from "./derive.ts";
 export * from "./dev.ts";
 export * from "./feed.ts";
+export * from "./agents.ts";
 export * from "./glance.ts";
 export * from "./fixtures/index.ts";

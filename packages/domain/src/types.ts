@@ -199,30 +199,49 @@ export interface DevFacts {
 
 // ---- agents -------------------------------------------------------------
 
+export type AgentKind = "deck" | "comms" | "ideation" | "audit";
+export const AGENT_KINDS: readonly AgentKind[] = ["deck", "comms", "ideation", "audit"];
+/** Derived from runs: working while a run is in flight, scheduled when a schedule is set, otherwise idle. */
 export type AgentStatus = "working" | "idle" | "scheduled";
-export type SessionState = "done" | "working" | "attention";
+export type RunState = "queued" | "working" | "done" | "attention" | "failed";
+export const RUN_STATES: readonly RunState[] = ["queued", "working", "done", "attention", "failed"];
+export type AgentSchedule = "nightly" | null;
 
-export interface AgentSession {
-  when: string;
-  state: SessionState;
-  text: string;
-  proj: string;
-  tab: ProjectTab;
-}
-
+/** What an agent is; everything about how it has been doing derives from its runs. */
 export interface Agent {
   id: string;
   name: string;
   grad: string;
   purpose: string;
-  status: AgentStatus;
-  model: string;
-  runs: number;
-  success: number;
-  last: string;
+  kind: AgentKind;
+  /** Model override; null uses the workspace default. */
+  model: string | null;
   owner: string;
   caps: string[];
-  sessions: AgentSession[];
+  schedule: AgentSchedule;
+}
+
+/** One execution of an agent against one project. */
+export interface AgentRun {
+  id: string;
+  agentId: string;
+  proj: string;
+  tab: ProjectTab;
+  state: RunState;
+  startedAt: string;
+  finishedAt: string | null;
+  instruction: string | null;
+  /** One line describing the output; shown in lists. */
+  summary: string;
+  /** Full output (markdown). */
+  output: string;
+  model: string | null;
+  error: string | null;
+}
+
+export interface LlmInfo {
+  baseUrl: string;
+  model: string | null;
 }
 
 // ---- feed & calendar ----------------------------------------------------
@@ -279,6 +298,10 @@ export interface AppState {
   releases: Record<string, Release[]>;
   dev: Record<string, DevFacts>;
   agents: Agent[];
+  /** Newest first, trailing RUN_WINDOW_DAYS. */
+  runs: AgentRun[];
+  /** The configured model, or null when agents cannot run. */
+  llm: LlmInfo | null;
   /** Newest first, trailing EVENT_WINDOW_DAYS. */
   events: Event[];
   calendar: CalendarEvent[];

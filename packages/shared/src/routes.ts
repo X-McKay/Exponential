@@ -22,6 +22,7 @@ export const routes = {
   sync: (pid: string) => `/api/projects/${enc(pid)}/sync`,
   syncStatus: () => "/api/sync",
   agents: () => "/api/agents",
+  agentRuns: (aid: string) => `/api/agents/${enc(aid)}/runs`,
   calendar: () => "/api/calendar",
   calendarEvent: (id: string) => `/api/calendar/${enc(id)}`,
 } as const;
@@ -44,6 +45,7 @@ export const patterns = {
   sync: "/api/projects/:pid/sync",
   syncStatus: "/api/sync",
   agents: "/api/agents",
+  agentRuns: "/api/agents/:aid/runs",
   calendar: "/api/calendar",
   calendarEvent: "/api/calendar/:id",
 } as const;

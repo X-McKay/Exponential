@@ -4,7 +4,7 @@
 // inferred types are used by the client so both sides share one contract.
 
 import { z } from "zod";
-import { GOV_STATUSES, MILESTONE_STATUSES, PROJECT_TABS, YEAR_MONTH } from "@valueflow/domain";
+import { AGENT_KINDS, GOV_STATUSES, MILESTONE_STATUSES, PROJECT_TABS, YEAR_MONTH } from "@valueflow/domain";
 
 const pct = z.number().finite().min(0).max(100);
 const id = z.string().trim().min(1).max(64);
@@ -118,17 +118,22 @@ export const AgentSchema = z.object({
   name: short(40),
   grad: short(200),
   purpose: short(300),
-  status: z.enum(["working", "idle", "scheduled"]),
-  model: short(40),
-  runs: z.number().int().min(0),
-  success: pct,
-  last: short(20),
+  kind: enumOf(AGENT_KINDS),
+  model: z.string().trim().max(80).nullable(),
   owner: short(3),
   caps: z.array(short(60)).max(12),
-  sessions: z.array(z.object({ when: short(20), state: z.enum(["done", "working", "attention"]), text: short(300), proj: id, tab: projectTab })).max(20),
+  schedule: z.enum(["nightly"]).nullable(),
 });
 export const AgentsInputSchema = z.array(AgentSchema).max(20);
 export type AgentsInput = z.infer<typeof AgentsInputSchema>;
+
+export const RunAgentInputSchema = z.object({
+  agentId: id,
+  proj: id,
+  tab: projectTab.optional(),
+  instruction: z.string().trim().max(2000).optional(),
+});
+export type RunAgentInput = z.infer<typeof RunAgentInputSchema>;
 
 export const CalendarEventInputSchema = z.object({
   id,

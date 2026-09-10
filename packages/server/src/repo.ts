@@ -4,9 +4,10 @@
 // value is read or written here.
 
 import type { Database } from "bun:sqlite";
-import { EVENT_WINDOW_DAYS, GSTATUS_LABEL, deriveDevEvents } from "@valueflow/domain";
+import { EVENT_WINDOW_DAYS, GSTATUS_LABEL, RUN_WINDOW_DAYS, deriveDevEvents } from "@valueflow/domain";
 import type {
   Agent,
+  AgentRun,
   AppState,
   Build,
   CalendarEvent,
@@ -123,8 +124,30 @@ interface CritRow {
   ok: number | null;
   label: string;
 }
-interface DocRow {
-  doc: string;
+interface AgentRow {
+  id: string;
+  name: string;
+  grad: string;
+  purpose: string;
+  kind: Agent["kind"];
+  model: string | null;
+  owner: string;
+  caps: string;
+  schedule: Agent["schedule"];
+}
+interface RunRow {
+  id: string;
+  agent_id: string;
+  project_id: string;
+  tab: AgentRun["tab"];
+  state: AgentRun["state"];
+  started_at: string;
+  finished_at: string | null;
+  instruction: string | null;
+  summary: string;
+  output: string;
+  model: string | null;
+  error: string | null;
 }
 interface WorkspaceRow {
   user_name: string;
@@ -261,7 +284,9 @@ export const loadState = (db: Database, now: Date = new Date()): AppState => {
     projects: [],
     releases: {},
     dev: {},
-    agents: [],
+    agents: loadAgents(db),
+    runs: loadRuns(db, now),
+    llm: null,
     events: loadEvents(db, now),
     calendar: loadCalendar(db),
   };
@@ -314,8 +339,48 @@ export const loadState = (db: Database, now: Date = new Date()): AppState => {
     const d = dev.get(p.id);
     if (d) out.dev[p.id] = d;
   }
-  out.agents = db.query<DocRow, []>("SELECT doc FROM agents ORDER BY sort").all().map((r) => JSON.parse(r.doc) as Agent);
   return out;
+};
+
+// ---- agents & runs -------------------------------------------------------
+
+export const loadAgents = (db: Database): Agent[] =>
+  db
+    .query<AgentRow, []>("SELECT * FROM agents ORDER BY sort")
+    .all()
+    .map((r) => ({ id: r.id, name: r.name, grad: r.grad, purpose: r.purpose, kind: r.kind, model: r.model, owner: r.owner, caps: JSON.parse(r.caps) as string[], schedule: r.schedule }));
+
+const toRun = (r: RunRow): AgentRun => ({
+  id: r.id,
+  agentId: r.agent_id,
+  proj: r.project_id,
+  tab: r.tab,
+  state: r.state,
+  startedAt: r.started_at,
+  finishedAt: r.finished_at,
+  instruction: r.instruction,
+  summary: r.summary,
+  output: r.output,
+  model: r.model,
+  error: r.error,
+});
+
+export const loadRuns = (db: Database, now: Date, windowDays = RUN_WINDOW_DAYS * 2): AgentRun[] => {
+  const since = new Date(now.getTime() - windowDays * 86_400_000).toISOString();
+  return db.query<RunRow, [string]>("SELECT * FROM agent_runs WHERE started_at >= ? ORDER BY started_at DESC, id").all(since).map(toRun);
+};
+
+export const insertRun = (db: Database, r: AgentRun): void => {
+  db.query(
+    "INSERT INTO agent_runs (id, agent_id, project_id, tab, state, started_at, finished_at, instruction, summary, output, model, error) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+  ).run(r.id, r.agentId, r.proj, r.tab, r.state, r.startedAt, r.finishedAt, r.instruction, r.summary, r.output, r.model, r.error);
+};
+
+export const updateRun = (db: Database, r: AgentRun): void => {
+  const res = db
+    .query("UPDATE agent_runs SET state = ?, finished_at = ?, summary = ?, output = ?, model = ?, error = ? WHERE id = ?")
+    .run(r.state, r.finishedAt, r.summary, r.output, r.model, r.error, r.id);
+  if (res.changes === 0) throw new NotFound(`run ${r.id} not found`);
 };
 
 // ---- events & calendar ---------------------------------------------------
@@ -703,10 +768,15 @@ export const deleteRelease = (db: Database, pid: string, rid: string): void => {
 
 // ---- JSON documents ------------------------------------------------------
 
+/** Replace the agent definitions; agents that disappear take their runs with them, the rest keep theirs. */
 export const setAgents = (db: Database, agents: AgentsInput): void => {
   db.transaction(() => {
-    db.query("DELETE FROM agents").run();
-    agents.forEach((a, i) => db.query("INSERT INTO agents (id, sort, doc) VALUES (?,?,?)").run(a.id, i, JSON.stringify(a)));
+    const keep = agents.map((a) => a.id);
+    for (const row of db.query<{ id: string }, []>("SELECT id FROM agents").all()) if (!keep.includes(row.id)) db.query("DELETE FROM agents WHERE id = ?").run(row.id);
+    const q = db.query(
+      "INSERT INTO agents (id, sort, name, grad, purpose, kind, model, owner, caps, schedule) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET sort = excluded.sort, name = excluded.name, grad = excluded.grad, purpose = excluded.purpose, kind = excluded.kind, model = excluded.model, owner = excluded.owner, caps = excluded.caps, schedule = excluded.schedule",
+    );
+    agents.forEach((a, i) => q.run(a.id, i, a.name, a.grad, a.purpose, a.kind, a.model, a.owner, JSON.stringify(a.caps), a.schedule));
   })();
 };
 

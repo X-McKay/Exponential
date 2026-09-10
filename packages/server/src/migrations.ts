@@ -188,6 +188,24 @@ const MIGRATIONS: readonly string[] = [
   DROP TABLE feed_days;
   DROP TABLE upcoming;
   `,
+  // Agents become definitions plus a log of runs; status and counts derive from runs.
+  `
+  DROP TABLE agents;
+  CREATE TABLE agents (
+    id TEXT PRIMARY KEY, sort INTEGER NOT NULL, name TEXT NOT NULL, grad TEXT NOT NULL, purpose TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('deck','comms','ideation','audit')),
+    model TEXT, owner TEXT NOT NULL, caps TEXT NOT NULL, schedule TEXT CHECK (schedule IS NULL OR schedule = 'nightly')
+  );
+  CREATE TABLE agent_runs (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    tab TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('queued','working','done','attention','failed')),
+    started_at TEXT NOT NULL, finished_at TEXT, instruction TEXT, summary TEXT NOT NULL, output TEXT NOT NULL, model TEXT, error TEXT
+  );
+  CREATE INDEX agent_runs_by_start ON agent_runs(started_at);
+  `,
 ];
 
 export const migrate = (db: Database): void => {

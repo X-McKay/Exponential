@@ -1,4 +1,4 @@
-import type { AgentStatus, CheckStatus, FeedType, GovStatus, MilestoneStatus, RiskTier, SessionState } from "./types.ts";
+import type { AgentKind, AgentStatus, CheckStatus, FeedType, GovStatus, MilestoneStatus, RiskTier } from "./types.ts";
 
 export const STATUS_LABEL: Record<MilestoneStatus, string> = {
   backlog: "Backlog",
@@ -37,7 +37,8 @@ export const AGENT_STATUS_LABEL: Record<AgentStatus, string> = {
 };
 
 export const CHECK_ICON: Record<CheckStatus, string> = { pass: "✓", fail: "✗", running: "◌" };
-export const SESSION_ICON: Record<SessionState, string> = { done: "✓", working: "◌", attention: "!" };
+
+export const AGENT_KIND_LABEL: Record<AgentKind, string> = { deck: "Decks", comms: "Communications", ideation: "Ideation", audit: "Audit" };
 
 /** Re-review cadence implied by a project's AI risk tier. */
 export const reReviewCadence = (tier: RiskTier | null): string => {

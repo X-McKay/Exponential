@@ -151,7 +151,7 @@ export function DataPage({
       {editing?.kind === "agents" && (
         <JsonDocEditor
           title="Agents"
-          help={`One entry per workspace agent. Sessions link to a project and tab. ${refHelp}`}
+          help={`One entry per workspace agent: kind is deck | comms | ideation | audit, schedule is null or "nightly", model null uses the workspace default. ${refHelp}`}
           value={state.agents}
           schema={AgentsInputSchema}
           onSave={(a) => {

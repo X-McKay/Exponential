@@ -1,11 +1,16 @@
 import { join } from "node:path";
+import { runDue } from "./agents.ts";
 import { createApp } from "./app.ts";
 import { sourceFromEnv } from "./connectors/index.ts";
+import { llmFromEnv } from "./llm.ts";
 import { openDb } from "./db.ts";
-import { ensureSeeded } from "./seed.ts";
+import { ensureAgents, ensureSeeded } from "./seed.ts";
 import { syncAll, syncMissing } from "./sync.ts";
+import { loadDotEnv } from "./env.ts";
 import { staticHandler } from "./static.ts";
 import index from "../../web/src/index.html";
+
+loadDotEnv();
 
 /** `VALUEFLOW_NOW=2026-09-10T09:00:00Z` pins "today" for demos; otherwise the real clock. */
 const pinned = process.env.VALUEFLOW_NOW ? new Date(process.env.VALUEFLOW_NOW) : null;
@@ -14,10 +19,31 @@ const now = () => pinned ?? new Date();
 
 const db = openDb();
 if (ensureSeeded(db, now())) console.log(`seeded database with sample data as of ${now().toISOString().slice(0, 10)}`);
+if (ensureAgents(db)) console.log("installed the default workspace agents");
 
 /** `SYNC_SOURCE=sample|github|none`; `SYNC_INTERVAL_MIN=30` re-syncs every project on a timer. */
 const source = sourceFromEnv(process.env);
-const app = createApp(db, { now, source });
+/** `LLM_BASE_URL` (OpenAI-compatible) enables agent runs; `AGENT_SCHEDULE=off` disables nightly runs. */
+const llm = llmFromEnv(process.env);
+const app = createApp(db, { now, source, llm });
+if (llm) {
+  llm
+    .model()
+    .then((m) => console.log(`agents run against ${m} at ${llm.describe().baseUrl}`))
+    .catch((e: unknown) => console.error("LLM unreachable:", e instanceof Error ? e.message : e));
+  if (process.env.AGENT_SCHEDULE !== "off") {
+    const tick = () =>
+      runDue(db, llm, now())
+        .then((runs) => {
+          if (runs.length) console.log(`scheduled agents: ${runs.length} run${runs.length === 1 ? "" : "s"}, ${runs.filter((r) => r.state === "failed").length} failed`);
+        })
+        .catch((e: unknown) => console.error("scheduled agents failed", e));
+    setTimeout(tick, 60_000);
+    setInterval(tick, 30 * 60_000);
+  }
+} else {
+  console.log("agents disabled: set LLM_BASE_URL to enable runs");
+}
 if (source) {
   const first = await syncMissing(db, source, now());
   for (const [pid, run] of Object.entries(first)) console.log(`sync ${pid} via ${source.name}: ${run.ok ? run.message : "failed — " + run.message}`);

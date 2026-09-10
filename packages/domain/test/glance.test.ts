@@ -44,6 +44,7 @@ describe("rankBlocks / composeGlance", () => {
       "below_gate",
       "ci_failing",
       "tier1_gaps",
+      "agent_flag",
       "value_trajectory",
       "upcoming",
       "activity",
@@ -92,7 +93,7 @@ describe("rankBlocks / composeGlance", () => {
     expect(find(blocks, "ready_release")!.title).toBe("R1 Shadow mode — all go-live criteria met");
   });
   test("empty state still composes without throwing", () => {
-    const empty: AppState = { asOf: "2026-09-10T09:00:00.000Z", syncSource: null, workspace: { user: { name: "You", ini: "ME" } }, projects: [], releases: {}, dev: {}, agents: [], events: [], calendar: [] };
+    const empty: AppState = { asOf: "2026-09-10T09:00:00.000Z", syncSource: null, workspace: { user: { name: "You", ini: "ME" } }, projects: [], releases: {}, dev: {}, agents: [], runs: [], llm: null, events: [], calendar: [] };
     expect(composeGlance(empty)).toEqual([]);
     expect(composeGlancePage(empty).narrative).toEqual(["No releases are currently blocked."]);
   });
