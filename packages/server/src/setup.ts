@@ -206,7 +206,7 @@ export const normalizeDraft = (raw: unknown, todayYm: string): ProjectDraft => {
   const tg = val(o.targets);
   const defaultMonth = addMonths(todayYm, 3);
   const milestoneNames = new Set(list(o.milestones, 10).map((m) => str(val(m).name, 160)));
-  const govNames = new Set(list(o.governance, 16).map((g) => str(val(g).name, 160)));
+  const govNames = new Set(list(o.governance, 16).map((item) => str(val(item).name, 160)));
   const findName = (names: Set<string>, ref: string): string | null => {
     if (names.has(ref)) return ref;
     const lower = ref.toLowerCase();

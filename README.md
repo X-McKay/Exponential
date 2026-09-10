@@ -149,7 +149,11 @@ Eval suites report readings with `PUT …/readings { value, source: "eval" }`; e
 
 ### Agents
 
-An agent is a definition (kind, model, owner, schedule); a run is a fact. A run briefs the agent with the project's live state — targets, milestones and gates, governance, releases, synced development activity, recent events, and the calendar — then asks the configured model for a JSON reply (`summary`, `attention`, `body`) and stores it. Four kinds ship: **Slider** (decks), **Comma** (communications), **Nova** (ideation), and **Audie** (audit), which runs nightly. Runs flagged for attention appear on Glance. The LLM client is a minimal fetch wrapper over the OpenAI chat API with JSON-schema output; nothing else is required of the endpoint.
+An agent is a definition (kind, model, owner, schedule); a run is a fact. A run briefs the agent with the project's live state — targets, milestones and gates, governance, releases, synced development activity, recent events, and the calendar — then asks the configured model for a JSON reply (`summary`, `attention`, `body`, `proposals`) and stores it. Four kinds ship: **Slider** (decks), **Comma** (communications), **Nova** (ideation), and **Audie** (audit), which runs nightly. Runs flagged for attention appear on Glance. The LLM client is a minimal fetch wrapper over the OpenAI chat API with JSON-schema output; nothing else is required of the endpoint.
+
+**Proposals.** Alongside prose, an agent may propose concrete changes: move a governance item or milestone to another status, add a missing governance item, add a dated calendar event, or change the value targets. Proposals are typed (the schema is enforced per type), validated against the project (unknown ids are dropped), and stored pending. A person accepts or dismisses them in the run viewer or the inbox at the top of the Agents page; accepting applies the change through the same repository functions the editors use, so events are appended and every derivation follows. A proposal whose target has since been deleted is refused rather than applied.
+
+**Setting up a project from documents.** *Set up from documents…* on Portfolio hands a setup agent a name, a brief, pasted snippets, and uploaded Word, PowerPoint, or text files (a dependency-free zip reader pulls the text out of `.docx` and `.pptx`; PDFs are reported as unsupported). The agent drafts every field of the project record — stage, risk tier, committee approval, targets, team, repositories, milestones with gate metrics, governance items with evidence-based statuses, releases with criteria — each with a rationale, its source document, and a confidence. The review step lets you untick, edit, or ask the agent to change things (rows you edited survive a refinement), then creates everything in one transaction.
 
 ### Glance as a composition contract
 
@@ -170,7 +174,9 @@ Nothing is hard-coded: every fact the app shows can be changed in the UI, and ev
 
 | What | Where |
 | --- | --- |
-| Project name, key, stage, description, risk tier, committee approval, **team**, **repositories**, targets | Overview → *Edit* on any card; *+ New project* on Portfolio; delete from the editor |
+| Project name, key, stage, description, risk tier, committee approval, team, repositories, targets | Overview → *Edit* on any card; *+ New project* on Portfolio; delete from the editor |
+| A whole new project from a charter, deck, or notes | Portfolio → *Set up from documents…*, then review the draft |
+| Changes an agent proposed | Agents → the inbox at the top, or a run's viewer → *Accept* / *Dismiss* |
 | Milestones, eval gates, current readings | Value → *+ New milestone*, the pencil on a row, or drag a slider |
 | Governance items (add, rename, recategorise, status, owner, delete) | Governance → *+ New item*, *+ Add* per category, *Edit item* on an expanded row |
 | Releases: target month, milestones shipped, go-live criteria (gate / governance / manual) | Roadmap → *+ New release*, the pencil on a release |
@@ -206,6 +212,11 @@ To start from a clean slate rather than the sample portfolio, delete the three s
 | GET | `/api/sync` | |
 | PUT | `/api/agents` | `Agent[]` |
 | POST | `/api/agents/:aid/runs` | `{ proj, tab?, instruction? }` |
+| POST | `/api/proposals/:id/accept` · `/dismiss` | |
+| POST | `/api/setup` | multipart: `name`, `key?`, `brief`, `snippet[]`, `file[]` |
+| GET | `/api/setup/:id` | |
+| POST | `/api/setup/:id/refine` | `{ feedback }` |
+| POST | `/api/setup/:id/create` | `{ project, milestones, governance, releases }` |
 | POST | `/api/calendar` | `CalendarEventInput` |
 | PUT / DELETE | `/api/calendar/:id` | `CalendarEventInput` |
 
