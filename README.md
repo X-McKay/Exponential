@@ -192,7 +192,7 @@ Nothing is hard-coded: every fact the app shows can be changed in the UI, and ev
 | --- | --- |
 | Project name, key, stage, description, risk tier, committee approval, team, repositories, targets | Overview → *Edit* on any card; *+ New project* on Portfolio; delete from the editor |
 | A whole new project from a charter, deck, or notes | Portfolio → *Set up from documents…*, then review the draft |
-| Changes an agent proposed | Agents → the inbox at the top, or a run's viewer → *Accept* / *Dismiss* |
+| Changes an agent proposed | Inbox (sidebar, with a count; `g i`) grouped by project, or a run's viewer → *Accept* / *Dismiss* |
 | Milestones, eval gates, current readings | Value → *+ New milestone*, the pencil on a row, or drag a slider |
 | Governance items (add, rename, recategorise, status, owner, delete) | Governance → *+ New item*, *+ Add* per category, *Edit item* on an expanded row |
 | Releases: target month, milestones shipped, go-live criteria (gate / governance / manual) | Roadmap → *+ New release*, the pencil on a release |
@@ -202,8 +202,9 @@ Nothing is hard-coded: every fact the app shows can be changed in the UI, and ev
 | Agent definitions | Agents → *Edit agents* (a validated JSON document) |
 | Agent runs | Agents → expand an agent → *Run…*; nightly for scheduled agents; the Ask panel (`⌘J`) for the conversational agent |
 | Run ratings and judge scores | A run's viewer → 👍 / 👎 with a note, *Judge this run*; Agents → Quality → *Run benchmark* |
-| Standing rules (add, edit, enable, autonomy) | Agents → *Standing rules* → *+ New rule*, click a rule to edit; *Check now* runs Sentry |
-| An agent's extra instructions and model | Agents → Quality → expand the agent → *Edit instructions* / *Tune prompt* / *Scout models*; or accept Coach's and Scout's proposals |
+| Standing rules (add, edit, enable, autonomy) | Agents → *Standing rules* tab → *+ New rule*, click a rule to edit; *Check now* runs Sentry |
+| An agent's extra instructions and model | Agents → *Quality* tab → expand the agent's row → *Edit instructions* / *Tune prompt* / *Scout models*; or accept Coach's and Scout's proposals |
+| Theme | The sidebar's theme button cycles system → light → dark; the choice is kept in the browser |
 | The weekly brief | Agents → Monday → *Run…*, or `just brief`; shows on Glance as *Your week* |
 | Signed-in user (sidebar, Glance greeting, default owner) | Click your name at the bottom of the sidebar, or *Data → Workspace* |
 
@@ -253,8 +254,9 @@ Schemas live in `packages/shared/src/schemas.ts`; the web client and the server 
 ## Keyboard
 
 - `⌘J` / `Ctrl+J` — Ask the workspace (↵ send, ⇧↵ newline, esc close)
+- `g` then `i` — Inbox; there, `j` / `k` (or ↑ ↓) move between proposals, `a` accepts, `d` dismisses
 - `⌘K` / `Ctrl+K` — command palette (↑↓ navigate, ↵ open, esc close; recent destinations are listed first; includes the Data page)
-- `g` then `g` / `p` / `a` — Glance / Portfolio / Agents (the sidebar tooltips show these)
+- `g` then `g` / `p` / `a` — Glance / Portfolio / Agents (the sidebar tooltips show these); `#/agents/rules` and `#/agents/quality` open those tabs directly
 - `g` then `o` / `v` / `r` / `d` / `n` — Overview / Value / Roadmap / Development / Governance of the current (or last visited) project
 - `⌘↵` / `Ctrl+↵` — save in any editor dialog; `esc` closes it
 
@@ -278,6 +280,14 @@ What is already production-shaped, and what to decide when connecting real syste
 - **Editors persist.** Milestone, targets, and governance edits are optimistic and write through the API; on failure the client reloads server state and shows a toast.
 - **Row carets rotate when a row is expanded.** The mockup sets `transform: rotate(90deg)` on an inline `span`, which browsers ignore; the caret here is an inline SVG that rotates.
 - **Deep links.** View state is mirrored to the URL hash (`#/project/ima/value`) so pages survive a reload.
+
+### Structure and theming pass
+
+- **Inbox** is its own page: proposals grouped by project (workspace-level changes first), a count in the sidebar, keyboard triage, and a folded "recently decided" list. The Agents page has tabs for agents, standing rules, and quality, each with a URL.
+- **Quality is a table**: one row per agent with rules, judge, a judge trend sparkline, acceptance, ratings, cost, and the latest benchmark with its delta; expanding a row shows prompt versions and model comparisons.
+- **Long jobs show progress**: a slim bar under the header while a benchmark or scout runs (with done / total), and a toast when it finishes; runs and applied proposals toast too. A job started elsewhere is picked up on load.
+- **Glance** leads with the week's brief when one exists (summary and "what moved" as the narrative, decisions in the card) and cards share a fixed height with "+n more" overflow.
+- **Themes**: every colour is a CSS variable (`styles.css`), so the same inline styles render dark or light; the sidebar button cycles system / light / dark. Dim text was lifted one step for contrast. Narrow screens get a compact top nav, tighter KPIs, and hidden hint text.
 
 ### Visual polish pass
 

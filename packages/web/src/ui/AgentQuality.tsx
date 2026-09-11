@@ -9,7 +9,7 @@ const scoreColor = (v: number | null): string => (v === null ? C.dim : v >= 0.8 
 const day = (iso: string | null) => (iso ? iso.slice(0, 10) : "—");
 
 const th: React.CSSProperties = { fontSize: 10.5, color: C.dim, letterSpacing: "0.04em", textTransform: "uppercase", textAlign: "left", padding: "4px 12px 4px 0", fontWeight: 500, whiteSpace: "nowrap" };
-const td: React.CSSProperties = { fontSize: 12.5, padding: "5px 12px 5px 0", color: "#C6CAD6", whiteSpace: "nowrap", verticalAlign: "top" };
+const td: React.CSSProperties = { fontSize: 12.5, padding: "5px 12px 5px 0", color: C.text2, whiteSpace: "nowrap", verticalAlign: "top" };
 
 /** Edit the extra instructions layered on an agent's built-in role. Saving records a prompt version. */
 function InstructionsEditor({ agent, onSave, onClose }: { agent: Agent; onSave: (prompt: string | null) => void; onClose: () => void }) {
@@ -83,7 +83,7 @@ export function AgentQuality({
     <div style={{ padding: "6px 0 10px", display: "grid", gap: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12, color: C.mut, flex: 1, minWidth: 200 }}>
-          Extra instructions: {agent.prompt ? <span style={{ color: "#C6CAD6" }}>{agent.prompt.length > 140 ? `${agent.prompt.slice(0, 140)}…` : agent.prompt}</span> : <span style={{ color: C.dim }}>none (built-in prompt only)</span>}
+          Extra instructions: {agent.prompt ? <span style={{ color: C.text2 }}>{agent.prompt.length > 140 ? `${agent.prompt.slice(0, 140)}…` : agent.prompt}</span> : <span style={{ color: C.dim }}>none (built-in prompt only)</span>}
         </span>
         <button type="button" className="vf-ghost" onClick={() => setEditing(true)} style={{ ...ghostBtn, height: 24 }}>
           Edit instructions
@@ -150,7 +150,7 @@ export function AgentQuality({
           </tbody>
         </table>
         {shown && (
-          <pre style={{ margin: "6px 0 0", whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: 12, lineHeight: 1.55, color: "#C6CAD6", background: "#0B0C0E", border: `1px solid ${C.line}`, borderRadius: 6, padding: "8px 10px" }}>
+          <pre style={{ margin: "6px 0 0", whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: 12, lineHeight: 1.55, color: C.text2, background: C.deep, border: `1px solid ${C.line}`, borderRadius: 6, padding: "8px 10px" }}>
             {shown.prompt === undefined ? "Instructions for this version were not recorded (set in code before versions were kept)." : shown.prompt === null ? "Built-in instructions only." : shown.prompt}
           </pre>
         )}

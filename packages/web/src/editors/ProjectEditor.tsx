@@ -143,7 +143,7 @@ export function ProjectEditor({
         <div>
           <Lbl>AI committee approval date</Lbl>
           <input
-            style={{ ...inpStyle, borderColor: committeeOk ? C.line2 : "rgba(229,83,75,.6)" }}
+            style={{ ...inpStyle, borderColor: committeeOk ? C.line2 : C.badLine2 }}
             value={committee.date}
             placeholder="YYYY-MM-DD (blank = pending)"
             onChange={(e) => setCommittee((c) => ({ ...c, date: e.target.value }))}

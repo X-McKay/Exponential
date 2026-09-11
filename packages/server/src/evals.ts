@@ -167,6 +167,7 @@ export const benchmarkCases = (agentId?: string): EvalCase[] => EVAL_CASES.filte
 export const runBenchmark = async (db: Database, llm: Llm, now: Date, agentId?: string, onProgress?: (done: number, total: number) => void, model?: string): Promise<AgentRun[]> => {
   const cases = benchmarkCases(agentId);
   const out: AgentRun[] = [];
+  onProgress?.(0, cases.length);
   for (const [i, c] of cases.entries()) {
     const projects = loadState(db, now).projects;
     if (!projects.some((p) => p.id === c.proj)) continue;

@@ -100,16 +100,16 @@ export function ChatPanel({
         bottom: 0,
         width: 440,
         maxWidth: "100vw",
-        background: "#0E1015",
+        background: C.inset,
         borderLeft: `1px solid ${C.line2}`,
-        boxShadow: "-16px 0 48px rgba(0,0,0,.45)",
+        boxShadow: `-16px 0 48px ${C.shadow}`,
         zIndex: 60,
         display: "flex",
         flexDirection: "column",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 14px", borderBottom: `1px solid ${C.line}` }}>
-        <span style={{ width: 20, height: 20, borderRadius: 6, background: "linear-gradient(135deg,#EEEFF1,#8A8F98)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600, color: "#08090A" }}>A</span>
+        <span style={{ width: 20, height: 20, borderRadius: 6, background: "linear-gradient(135deg,#EEEFF1,#8A8F98)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600, color: C.bg }}>A</span>
         <span style={{ fontSize: 13, fontWeight: 550, letterSpacing: "-0.01em" }}>Ask the workspace</span>
         <span style={{ fontSize: 11, color: C.dim, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{project ? `looking at ${project.name}` : "all projects"}</span>
         {turns.length > 0 && (
@@ -137,10 +137,10 @@ export function ChatPanel({
         {turns.map((t, i) => (
           <div key={i} style={{ alignSelf: t.role === "user" ? "flex-end" : "stretch", maxWidth: t.role === "user" ? "85%" : "100%" }}>
             {t.role === "user" ? (
-              <div style={{ background: "rgba(110,123,242,.14)", border: "1px solid rgba(110,123,242,.3)", borderRadius: 10, padding: "8px 11px", fontSize: 13, color: C.text, lineHeight: 1.5 }}>{t.content}</div>
+              <div style={{ background: C.accentSoft2, border: `1px solid ${C.accentLine2}`, borderRadius: 10, padding: "8px 11px", fontSize: 13, color: C.text, lineHeight: 1.5 }}>{t.content}</div>
             ) : (
-              <div style={{ background: C.panel, border: `1px solid ${t.error ? "rgba(229,83,75,.4)" : C.line}`, borderRadius: 10, padding: "10px 12px" }}>
-                {t.error ? <div style={{ fontSize: 12.5, color: "#F08A84" }}>{t.content}</div> : <Markdown text={t.content} />}
+              <div style={{ background: C.panel, border: `1px solid ${t.error ? C.badLine2 : C.line}`, borderRadius: 10, padding: "10px 12px" }}>
+                {t.error ? <div style={{ fontSize: 12.5, color: C.redHi }}>{t.content}</div> : <Markdown text={t.content} />}
                 {t.links && t.links.length > 0 && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
                     {t.links.map((l, li) => (

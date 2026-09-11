@@ -30,11 +30,11 @@ export function Ring({ pct, size = 22, stroke = 2.5, color = C.indigo }: { pct: 
 
 // Chips carry colour in the text (and optional dot); fills and borders stay faint.
 const CHIP: Record<ChipTone, { bg: string; fg: string; bd: string; dot: string }> = {
-  default: { bg: "rgba(255,255,255,.03)", fg: C.mut, bd: C.line2, dot: C.dim },
-  accent: { bg: "rgba(110,123,242,.08)", fg: "#A5AEF7", bd: "rgba(110,123,242,.22)", dot: C.indigoHi },
-  good: { bg: "rgba(76,195,138,.08)", fg: "#6FD6A4", bd: "rgba(76,195,138,.22)", dot: C.green },
-  warn: { bg: "rgba(227,179,65,.08)", fg: C.amber, bd: "rgba(227,179,65,.22)", dot: C.amber },
-  bad: { bg: "rgba(229,83,75,.08)", fg: "#F08A84", bd: "rgba(229,83,75,.22)", dot: C.red },
+  default: { bg: C.chipBg, fg: C.mut, bd: C.line2, dot: C.dim },
+  accent: { bg: C.accentSoft, fg: C.indigoSoft, bd: C.accentLine, dot: C.indigoHi },
+  good: { bg: C.goodSoft, fg: C.greenHi, bd: C.goodLine, dot: C.green },
+  warn: { bg: C.warnSoft, fg: C.amber, bd: C.warnLine, dot: C.amber },
+  bad: { bg: C.badSoft, fg: C.redHi, bd: C.badLine, dot: C.red },
 };
 
 export function Chip({ children, tone = "default", dot }: { children: ReactNode; tone?: ChipTone; dot?: boolean | string }) {
@@ -74,13 +74,13 @@ export function Avatar({ ini, size = 24 }: { ini: string; size?: number }) {
         width: size,
         height: size,
         borderRadius: "50%",
-        background: "#2A2E3A",
+        background: C.line3,
         fontSize: size * 0.42,
         fontWeight: 500,
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        color: "#C6CAD6",
+        color: C.text2,
         flexShrink: 0,
         border: `1px solid ${C.line2}`,
       }}
@@ -92,7 +92,7 @@ export function Avatar({ ini, size = 24 }: { ini: string; size?: number }) {
 
 export function Kpi({ label, value, sub, color = C.text, ring }: { label: string; value: ReactNode; sub: ReactNode; color?: string; ring?: number }) {
   return (
-    <div style={{ flex: "1 1 150px", minWidth: 150, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "14px 16px" }}>
+    <div className="vf-kpi" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "14px 16px" }}>
       <div style={{ fontSize: 12, color: C.mut, marginBottom: 8 }}>{label}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         {ring !== undefined && <Ring pct={ring} size={30} stroke={3} color={color} />}
@@ -107,7 +107,7 @@ export function SectionCard({ title, right, children, pad = "14px" }: { title?: 
   return (
     <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, marginBottom: 14 }}>
       {(title || right) && (
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", borderBottom: `1px solid ${C.line}` }}>
+        <div className="vf-section-head" style={{ padding: "12px 14px", borderBottom: `1px solid ${C.line}` }}>
           <span style={{ fontSize: 13, fontWeight: 550, letterSpacing: "-0.01em" }}>{title}</span>
           {right}
         </div>
@@ -147,7 +147,7 @@ export function StatusIcon({ status, size = 11 }: { status: MilestoneStatus; siz
             <path
               d={`M ${cx - r * 0.55} ${cy} l ${r * 0.4} ${r * 0.45} l ${r * 0.75} -${r * 0.95}`}
               fill="none"
-              stroke="#08090A"
+              stroke={C.bg}
               strokeWidth="1.5"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -202,7 +202,7 @@ export const inpStyle: CSSProperties = {
   boxSizing: "border-box",
   width: "100%",
   height: 32,
-  background: "#0E1015",
+  background: C.inset,
   border: `1px solid ${C.line2}`,
   borderRadius: 6,
   color: C.text,
@@ -218,9 +218,9 @@ export function Lbl({ children }: { children: ReactNode }) {
 }
 
 const BTN = {
-  default: { bg: "#1B1E27", fg: C.text, bd: C.line2 },
+  default: { bg: C.field, fg: C.text, bd: C.line2 },
   primary: { bg: C.indigo, fg: "#fff", bd: C.indigo },
-  danger: { bg: "rgba(229,83,75,.15)", fg: "#F08A84", bd: "rgba(229,83,75,.4)" },
+  danger: { bg: C.badSoft2, fg: C.redHi, bd: C.badLine2 },
 } as const;
 
 export function Btn({ children, onClick, tone = "default", disabled }: { children: ReactNode; onClick?: () => void; tone?: keyof typeof BTN; disabled?: boolean }) {
@@ -305,7 +305,7 @@ export function Modal({
     <div
       onClick={onClose}
       className="vf-overlay"
-      style={{ position: "fixed", inset: 0, background: "rgba(5,6,9,0.68)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }}
+      style={{ position: "fixed", inset: 0, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -319,13 +319,13 @@ export function Modal({
           maxWidth: width,
           maxHeight: "86vh",
           overflowY: "auto",
-          background: "#13151C",
+          background: C.raised,
           border: `1px solid ${C.line2}`,
           borderRadius: 12,
-          boxShadow: "0 24px 64px rgba(0,0,0,.6)",
+          boxShadow: `0 24px 64px ${C.shadow2}`,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 20px 0", position: "sticky", top: 0, background: "#13151C", zIndex: 2 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 20px 0", position: "sticky", top: 0, background: C.raised, zIndex: 2 }}>
           <span style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em" }}>{title}</span>
           <Tip label="Close" keys={["esc"]}>
             <button type="button" onClick={onClose} aria-label="Close" className="vf-ghost" style={{ ...ghostBtn, width: 26, padding: 0, justifyContent: "center", border: "1px solid transparent" }}>
@@ -347,7 +347,7 @@ export function Modal({
               borderTop: `1px solid ${C.line}`,
               position: "sticky",
               bottom: 0,
-              background: "#13151C",
+              background: C.raised,
             }}
           >
             {footer}
@@ -379,5 +379,105 @@ export function Caret({ open }: { open: boolean }) {
     >
       <path d="M3.5 2l3 3-3 3" />
     </svg>
+  );
+}
+
+/**
+ * The one list row: an optional leading glyph, a title line, a dim sub line,
+ * and controls on the right. Proposals, rules, and runs all use it so the
+ * pages read as one product.
+ */
+export function ListRow({
+  lead,
+  title,
+  sub,
+  right,
+  below,
+  onClick,
+  selected,
+  first,
+  muted,
+}: {
+  lead?: ReactNode;
+  title: ReactNode;
+  sub?: ReactNode;
+  right?: ReactNode;
+  /** Extra content under the title/sub column (folded details, previews). */
+  below?: ReactNode;
+  onClick?: () => void;
+  selected?: boolean;
+  first?: boolean;
+  muted?: boolean;
+}) {
+  const body = (
+    <>
+      {lead !== undefined && <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", minWidth: 14, paddingTop: 2 }}>{lead}</span>}
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ fontSize: 13, color: C.text, lineHeight: 1.5, display: "block" }}>{title}</span>
+        {sub !== undefined && <span style={{ fontSize: 11.5, color: C.dim, display: "block", marginTop: 2, lineHeight: 1.5 }}>{sub}</span>}
+        {below}
+      </span>
+    </>
+  );
+  const style: CSSProperties = {
+    display: "flex",
+    gap: 12,
+    alignItems: "flex-start",
+    padding: "10px 12px",
+    margin: "0 -12px",
+    borderTop: first ? "none" : `1px solid ${C.line}`,
+    background: selected ? C.accentSoft : "transparent",
+    boxShadow: selected ? `inset 2px 0 0 ${C.indigo}` : "none",
+    opacity: muted ? 0.55 : 1,
+    transition: "background .12s",
+  };
+  return (
+    <div style={style} data-selected={selected ? "1" : undefined}>
+      {onClick ? (
+        <button type="button" onClick={onClick} className="vf-row" style={{ ...reset, flex: 1, minWidth: 0, display: "flex", gap: 12, alignItems: "flex-start", textAlign: "left", borderRadius: 6 }}>
+          {body}
+        </button>
+      ) : (
+        body
+      )}
+      {right !== undefined && <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>{right}</span>}
+    </div>
+  );
+}
+
+export interface Notice {
+  id: number;
+  text: string;
+  tone: "info" | "good" | "bad";
+}
+
+/** Bottom-right toasts; click to dismiss. */
+export function Toasts({ notices, onDismiss }: { notices: Notice[]; onDismiss: (id: number) => void }) {
+  if (notices.length === 0) return null;
+  return (
+    <div className="vf-toasts">
+      {notices.map((n) => (
+        <div key={n.id} className="vf-toast" data-tone={n.tone} role={n.tone === "bad" ? "alert" : "status"} onClick={() => onDismiss(n.id)}>
+          <span style={{ flexShrink: 0, color: n.tone === "good" ? C.green : n.tone === "bad" ? C.red : C.indigoHi }}>{n.tone === "good" ? "✓" : n.tone === "bad" ? "✗" : "◌"}</span>
+          <span>{n.text}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A slim progress strip for the background benchmark or scout job. */
+export function JobBar({ kind, done, total }: { kind: "benchmark" | "scout"; done: number; total: number }) {
+  const known = total > 0;
+  return (
+    <div className="vf-jobbar" data-indeterminate={known ? "0" : "1"} role="status" aria-live="polite">
+      <span className="vf-pulse" style={{ color: C.indigoHi }}>
+        {kind === "scout" ? "Scouting models" : "Running benchmark"}
+      </span>
+      <span className="vf-jobtrack">
+        <span style={{ width: known ? `${Math.round((100 * done) / total)}%` : "30%" }} />
+      </span>
+      <span style={{ fontVariantNumeric: "tabular-nums" }}>{known ? `${done} of ${total} ${kind === "scout" ? "model runs" : "cases"}` : "starting…"}</span>
+    </div>
   );
 }

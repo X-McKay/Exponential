@@ -113,6 +113,7 @@ export const scoutModels = async (db: Database, llm: Llm, scout: Agent, now: Dat
       for (const m of [current, ...candidates]) if (!have.has(m) && !jobs.some((j) => j.agent.id === a.id && j.model === m)) jobs.push({ agent: a, model: m });
     }
     let done = 0;
+    options.onProgress?.(0, jobs.length);
     for (const job of jobs) {
       await runBenchmark(db, llm, new Date(), job.agent.id, undefined, job.model);
       done += 1;

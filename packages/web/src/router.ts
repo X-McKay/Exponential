@@ -4,30 +4,38 @@ import { useCallback, useEffect, useState } from "react";
 import { PROJECT_TABS } from "@valueflow/domain";
 import type { ProjectTab } from "@valueflow/domain";
 
-export type Page = "glance" | "portfolio" | "agents" | "data" | "project";
+export type Page = "glance" | "inbox" | "portfolio" | "agents" | "data" | "project";
+
+/** Sections of the Agents page, each with its own URL. */
+export type AgentsSection = "agents" | "rules" | "quality";
+export const AGENTS_SECTIONS: readonly AgentsSection[] = ["agents", "rules", "quality"];
 
 export interface View {
   page: Page;
   projectId: string | null;
   tab: ProjectTab;
+  section: AgentsSection;
 }
 
-export const HOME: View = { page: "glance", projectId: null, tab: "overview" };
+export const HOME: View = { page: "glance", projectId: null, tab: "overview", section: "agents" };
 
 const isTab = (s: string): s is ProjectTab => (PROJECT_TABS as readonly string[]).includes(s);
+const isSection = (s: string): s is AgentsSection => (AGENTS_SECTIONS as readonly string[]).includes(s);
 
 export const parseHash = (hash: string): View => {
   const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean);
   const [head, a, b] = parts;
   switch (head) {
+    case "inbox":
+      return { ...HOME, page: "inbox" };
     case "portfolio":
-      return { page: "portfolio", projectId: null, tab: "overview" };
+      return { ...HOME, page: "portfolio" };
     case "agents":
-      return { page: "agents", projectId: null, tab: "overview" };
+      return { ...HOME, page: "agents", section: a && isSection(a) ? a : "agents" };
     case "data":
-      return { page: "data", projectId: null, tab: "overview" };
+      return { ...HOME, page: "data" };
     case "project":
-      if (a) return { page: "project", projectId: decodeURIComponent(a), tab: b && isTab(b) ? b : "overview" };
+      if (a) return { ...HOME, page: "project", projectId: decodeURIComponent(a), tab: b && isTab(b) ? b : "overview" };
       return HOME;
     default:
       return HOME;
@@ -38,10 +46,12 @@ export const toHash = (v: View): string => {
   switch (v.page) {
     case "glance":
       return "#/glance";
+    case "inbox":
+      return "#/inbox";
     case "portfolio":
       return "#/portfolio";
     case "agents":
-      return "#/agents";
+      return v.section === "agents" ? "#/agents" : `#/agents/${v.section}`;
     case "data":
       return "#/data";
     case "project":
@@ -69,6 +79,7 @@ export const useView = (): [View, (v: View) => void] => {
 /** `g`-prefixed navigation chords, Linear style. */
 export const CHORDS: readonly { key: string; label: string; target: Page | ProjectTab }[] = [
   { key: "g", label: "Glance", target: "glance" },
+  { key: "i", label: "Inbox", target: "inbox" },
   { key: "p", label: "Portfolio", target: "portfolio" },
   { key: "a", label: "Agents", target: "agents" },
   { key: "o", label: "Overview", target: "overview" },
@@ -133,6 +144,7 @@ export const useKeyboard = (h: KeyboardHandlers): boolean => {
         e.preventDefault();
         switch (chord.target) {
           case "glance":
+          case "inbox":
           case "portfolio":
           case "agents":
           case "data":

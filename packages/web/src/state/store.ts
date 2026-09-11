@@ -5,14 +5,23 @@
 // reloads from the server and surfaces the error.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { describeAction } from "@valueflow/domain";
 import type { Agent, AgentRun, AppState, CalendarEvent, GovernanceItem, ImpactPair, Milestone, Project, Proposal, Release, Rule, Workspace } from "@valueflow/domain";
 import type { ProjectInput, RuleInput, RunAgentInput } from "@valueflow/shared";
 import { api } from "../api/client.ts";
+import type { JobStatus } from "../api/client.ts";
+import type { Notice } from "../ui/primitives.tsx";
 
 export interface Store {
   state: AppState | null;
   error: string | null;
   clearError: () => void;
+  /** The background benchmark or scout job, while one runs. */
+  job: JobStatus | null;
+  /** Toasts: job and run completions, applied proposals. */
+  notices: Notice[];
+  notify: (text: string, tone?: Notice["tone"]) => void;
+  dismissNotice: (id: number) => void;
   reload: () => Promise<void>;
   setMetric: (pid: string, mid: string, xid: string, value: number) => void;
   saveMilestone: (pid: string, ms: Milestone, isNew: boolean) => Promise<void>;
@@ -58,7 +67,21 @@ const METRIC_DEBOUNCE_MS = 180;
 export const useStore = (): Store => {
   const [state, setState] = useState<AppState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [job, setJob] = useState<JobStatus | null>(null);
+  const [notices, setNotices] = useState<Notice[]>([]);
+  const noticeSeq = useRef(0);
+  const polling = useRef(false);
   const pending = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  const dismissNotice = useCallback((id: number) => setNotices((n) => n.filter((x) => x.id !== id)), []);
+  const notify = useCallback(
+    (text: string, tone: Notice["tone"] = "info") => {
+      const id = ++noticeSeq.current;
+      setNotices((n) => [...n.slice(-3), { id, text, tone }]);
+      if (tone !== "bad") setTimeout(() => dismissNotice(id), 7000);
+    },
+    [dismissNotice],
+  );
 
   const reload = useCallback(async () => {
     try {
@@ -68,9 +91,37 @@ export const useStore = (): Store => {
     }
   }, []);
 
+  /** Poll the job until it finishes, reloading state as batches land. */
+  const awaitJob = useCallback(async () => {
+    if (polling.current) return;
+    polling.current = true;
+    let last: JobStatus | null = null;
+    try {
+      for (let i = 0; i < 1200; i++) {
+        const st = await api.benchmarkStatus();
+        last = st;
+        setJob(st.running ? st : null);
+        if (!st.running) break;
+        if (i % 5 === 4) void reload();
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    } finally {
+      polling.current = false;
+    }
+    await reload();
+    if (last) notify(last.kind === "scout" ? `Scout finished: ${last.done} model run${last.done === 1 ? "" : "s"} benchmarked. See the Quality tab and the inbox.` : `Benchmark finished: ${last.done} of ${last.total} cases judged.`, "good");
+  }, [notify, reload]);
+
   useEffect(() => {
     void reload();
-  }, [reload]);
+    // A job started before this page loaded (or by another tab) still gets a progress bar.
+    api
+      .benchmarkStatus()
+      .then((st) => {
+        if (st.running) void awaitJob();
+      })
+      .catch(() => undefined);
+  }, [reload, awaitJob]);
 
   const fail = useCallback(
     (e: unknown) => {
@@ -264,21 +315,28 @@ export const useStore = (): Store => {
         const run = await api.runAgent(input);
         setState((s) => (s ? { ...s, runs: [run, ...s.runs.filter((r) => r.id !== placeholder.id && r.id !== run.id)] } : s));
         if (run.state === "failed") setError(`${run.summary}: ${run.error ?? "unknown error"}`);
+        else {
+          notify(`${run.summary}`, run.state === "attention" ? "info" : "good");
+          void reload();
+        }
       } catch (e) {
         fail(e);
       }
     },
-    [fail],
+    [fail, notify, reload],
   );
 
   const decideProposal = useCallback(
     async (id: string, decision: "accept" | "dismiss") => {
       const next = decision === "accept" ? "accepted" : "dismissed";
+      const target = state?.proposals.find((p) => p.id === id);
       setState((s) => (s ? { ...s, proposals: s.proposals.map((p) => (p.id === id ? { ...p, state: next } : p)) } : s));
       try {
         if (decision === "accept") {
           await api.acceptProposal(id);
+          if (target && state) notify(`Applied: ${describeAction(target.action, state, target.proj)}${target.action.type === "agent_prompt" ? " · benchmarking the new version" : ""}`, "good");
           await reload();
+          if (target?.action.type === "agent_prompt") void awaitJob();
         } else {
           await api.dismissProposal(id);
         }
@@ -286,7 +344,7 @@ export const useStore = (): Store => {
         fail(e);
       }
     },
-    [fail, reload],
+    [awaitJob, fail, notify, reload, state],
   );
 
   const addProposals = useCallback(
@@ -321,15 +379,6 @@ export const useStore = (): Store => {
     [fail],
   );
 
-  const awaitJob = useCallback(async () => {
-    for (let i = 0; i < 1200; i++) {
-      await new Promise((r) => setTimeout(r, 3000));
-      const st = await api.benchmarkStatus();
-      if (!st.running) break;
-      if (i % 5 === 4) void reload();
-    }
-    await reload();
-  }, [reload]);
   const runBenchmark = useCallback(
     async (agentId?: string) => {
       try {
@@ -420,6 +469,10 @@ export const useStore = (): Store => {
       state,
       error,
       clearError,
+      job,
+      notices,
+      notify,
+      dismissNotice,
       reload,
       setMetric,
       saveMilestone,
@@ -451,6 +504,10 @@ export const useStore = (): Store => {
       state,
       error,
       clearError,
+      job,
+      notices,
+      notify,
+      dismissNotice,
       reload,
       setMetric,
       saveMilestone,

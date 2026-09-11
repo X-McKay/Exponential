@@ -62,7 +62,7 @@ export function CalendarEditor({
       <div style={{ display: "grid", gridTemplateColumns: "130px 1fr 1fr", gap: 10 }}>
         <div>
           <Lbl>Date</Lbl>
-          <input style={{ ...inpStyle, borderColor: dateOk ? C.line2 : "rgba(229,83,75,.6)" }} value={d.date} placeholder="YYYY-MM-DD" onChange={(e) => set({ date: e.target.value })} />
+          <input style={{ ...inpStyle, borderColor: dateOk ? C.line2 : C.badLine2 }} value={d.date} placeholder="YYYY-MM-DD" onChange={(e) => set({ date: e.target.value })} />
         </div>
         <div>
           <Lbl>Project</Lbl>

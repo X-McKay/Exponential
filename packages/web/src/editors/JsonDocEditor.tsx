@@ -76,11 +76,11 @@ export function JsonDocEditor<T>({
           fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
           fontSize: 12,
           whiteSpace: "pre",
-          borderColor: result.ok ? C.line2 : "rgba(229,83,75,.5)",
+          borderColor: result.ok ? C.line2 : C.badLine2,
         }}
       />
       {!result.ok && (
-        <ul style={{ margin: "8px 0 0", padding: "0 0 0 18px", fontSize: 12, color: "#F08A84", lineHeight: 1.6 }}>
+        <ul style={{ margin: "8px 0 0", padding: "0 0 0 18px", fontSize: 12, color: C.redHi, lineHeight: 1.6 }}>
           {result.errors.map((e, i) => (
             <li key={i}>{e}</li>
           ))}

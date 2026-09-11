@@ -78,7 +78,7 @@ export function PortfolioPage({ projects, onOpen, onNew, onSetup, canSetup }: { 
                         {v}% / {tg}%
                       </span>
                     </div>
-                    <div style={{ height: 5, borderRadius: 4, background: "#1B1E27" }}>
+                    <div style={{ height: 5, borderRadius: 4, background: C.field }}>
                       <div style={{ height: "100%", width: `${tg > 0 ? Math.min(100, (v / tg) * 100) : 0}%`, background: "linear-gradient(90deg,#5C6AF0,#7B87F5)", borderRadius: 4 }} />
                     </div>
                   </div>

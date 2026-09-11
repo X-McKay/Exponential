@@ -220,7 +220,7 @@ describe("model scouting", () => {
     const run = await scoutModels(db, llm, scout, NOW, { agentId: "audie", onProgress: (d) => progress.push(d) });
     expect(run.state).toBe("done");
     expect(run.proj).toBeNull();
-    expect(progress).toEqual([1, 2, 3]);
+    expect(progress).toEqual([0, 1, 2, 3]);
     expect(run.summary).toContain("Audie → better");
     expect(run.output).toContain("| better |");
     const state = loadState(db, NOW);

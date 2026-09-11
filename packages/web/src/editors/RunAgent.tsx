@@ -158,7 +158,7 @@ export function Markdown({ text }: { text: string }) {
       if (part.startsWith("**") && part.endsWith("**")) return <strong key={i}>{part.slice(2, -2)}</strong>;
       if (part.startsWith("`") && part.endsWith("`"))
         return (
-          <code key={i} style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12, background: "#0E1015", padding: "0 4px", borderRadius: 3 }}>
+          <code key={i} style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12, background: C.inset, padding: "0 4px", borderRadius: 3 }}>
             {part.slice(1, -1)}
           </code>
         );
@@ -181,7 +181,7 @@ export function Markdown({ text }: { text: string }) {
     else blocks.push({ kind: "p", text: line });
   }
   return (
-    <div style={{ fontSize: 13, lineHeight: 1.6, color: "#C6CAD6" }}>
+    <div style={{ fontSize: 13, lineHeight: 1.6, color: C.text2 }}>
       {blocks.map((b, i) => {
         switch (b.kind) {
           case "h":
@@ -212,7 +212,7 @@ export function Markdown({ text }: { text: string }) {
                     {(b.rows ?? []).map((row, ri) => (
                       <tr key={ri} style={{ borderBottom: `1px solid ${C.line}` }}>
                         {row.map((cell, ci) => (
-                          <td key={ci} style={{ padding: "4px 10px 4px 0", color: ri === 0 ? C.dim : "#C6CAD6", fontWeight: ri === 0 ? 500 : 400 }}>
+                          <td key={ci} style={{ padding: "4px 10px 4px 0", color: ri === 0 ? C.dim : C.text2, fontWeight: ri === 0 ? 500 : 400 }}>
                             {inline(cell)}
                           </td>
                         ))}
@@ -276,13 +276,13 @@ export function RunViewer({
         </span>
       </div>
       {run.instruction && (
-        <div style={{ fontSize: 12, color: C.mut, background: "#0E1015", border: `1px solid ${C.line}`, borderRadius: 8, padding: "8px 10px", marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: C.mut, background: C.inset, border: `1px solid ${C.line}`, borderRadius: 8, padding: "8px 10px", marginBottom: 12 }}>
           <span style={{ color: C.dim }}>Instruction · </span>
           {run.instruction}
         </div>
       )}
       {(rules.length > 0 || judge.length > 0 || run.state === "done" || run.state === "attention") && (
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginBottom: 12, padding: "8px 10px", background: "#0E1015", border: `1px solid ${C.line}`, borderRadius: 8 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginBottom: 12, padding: "8px 10px", background: C.inset, border: `1px solid ${C.line}`, borderRadius: 8 }}>
           <span style={{ fontSize: 11, color: C.dim, marginRight: 2 }}>Quality</span>
           {rules.map((s) => (
             <Tip key={s.dimension} label={s.note || s.dimension}>
@@ -364,7 +364,7 @@ export function RunViewer({
         </div>
       )}
       {run.state === "failed" ? (
-        <div style={{ fontSize: 12.5, color: "#F08A84", lineHeight: 1.5 }}>{run.error ?? "The run failed without a message."}</div>
+        <div style={{ fontSize: 12.5, color: C.redHi, lineHeight: 1.5 }}>{run.error ?? "The run failed without a message."}</div>
       ) : run.output ? (
         <Markdown text={run.output} />
       ) : (

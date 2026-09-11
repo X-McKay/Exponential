@@ -138,8 +138,8 @@ export function ReleaseEditor({
                 ...ghostBtn,
                 height: 28,
                 color: on ? C.text : C.mut,
-                background: on ? "rgba(110,123,242,.12)" : "transparent",
-                borderColor: on ? "rgba(110,123,242,.4)" : C.line2,
+                background: on ? C.accentSoft2 : "transparent",
+                borderColor: on ? C.accentLine2 : C.line2,
               }}
             >
               <span style={{ fontSize: 11, color: C.dim }}>{m.id}</span> {m.name}
@@ -155,7 +155,7 @@ export function ReleaseEditor({
         </button>
       </div>
       {d.criteria.length === 0 && (
-        <div style={{ fontSize: 12, color: C.dim, background: "#0E1015", border: `1px dashed ${C.line2}`, borderRadius: 8, padding: 12 }}>
+        <div style={{ fontSize: 12, color: C.dim, background: C.inset, border: `1px dashed ${C.line2}`, borderRadius: 8, padding: 12 }}>
           No criteria — a release with none is always ready. Add a performance gate, a governance approval, or a manual sign-off.
         </div>
       )}

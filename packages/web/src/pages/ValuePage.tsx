@@ -96,7 +96,7 @@ function MilestoneRow({
                 key={tb}
                 type="button"
                 onClick={() => setTab(tb)}
-                style={{ ...reset, fontSize: 12, padding: "4px 12px", borderRadius: 6, color: tab === tb ? C.text : C.dim, background: tab === tb ? "#1E222D" : "transparent" }}
+                style={{ ...reset, fontSize: 12, padding: "4px 12px", borderRadius: 6, color: tab === tb ? C.text : C.dim, background: tab === tb ? C.field : "transparent" }}
               >
                 {tb === "gates" ? "Performance gates" : "Eval history"}
               </button>
@@ -110,10 +110,10 @@ function MilestoneRow({
                 return (
                   <div key={x.id} style={{ padding: "10px 0", borderTop: `1px solid ${C.line}` }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <span style={{ fontSize: 13, color: "#C6CAD6" }}>{x.label}</span>
+                      <span style={{ fontSize: 13, color: C.text2 }}>{x.label}</span>
                       <span style={{ fontSize: 13, color: st, fontWeight: 500 }}>{x.current}%</span>
                     </div>
-                    <div style={{ position: "relative", height: 6, borderRadius: 4, background: "#1B1E27" }}>
+                    <div style={{ position: "relative", height: 6, borderRadius: 4, background: C.field }}>
                       <div style={{ position: "absolute", inset: 0, width: `${x.current}%`, background: st, borderRadius: 4, transition: "width .2s, background .2s" }} />
                       <div style={{ position: "absolute", top: -3, bottom: -3, left: `${x.base}%`, width: 1.5, background: C.indigo }} />
                       <div style={{ position: "absolute", top: -3, bottom: -3, left: `${x.stretch}%`, width: 1.5, background: C.green }} />
@@ -212,7 +212,7 @@ export function ValuePage({
                     key={k}
                     type="button"
                     onClick={() => setDim(k)}
-                    style={{ ...reset, fontSize: 12, padding: "3px 12px", borderRadius: 6, color: dim === k ? C.text : C.dim, background: dim === k ? "#1E222D" : "transparent" }}
+                    style={{ ...reset, fontSize: 12, padding: "3px 12px", borderRadius: 6, color: dim === k ? C.text : C.dim, background: dim === k ? C.field : "transparent" }}
                   >
                     {l}
                   </button>

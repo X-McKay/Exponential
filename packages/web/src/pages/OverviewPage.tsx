@@ -18,7 +18,7 @@ export function OverviewPage({ p, onEdit }: { p: Project; onEdit: () => void }) 
   return (
     <div style={{ padding: "16px 20px 30px" }}>
       <SectionCard title="About" right={edit}>
-        <div style={{ fontSize: 14, lineHeight: 1.65, color: "#C6CAD6" }}>{p.description}</div>
+        <div style={{ fontSize: 14, lineHeight: 1.65, color: C.text2 }}>{p.description}</div>
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
           <Chip>{p.stage}</Chip>
           <TierBadge tier={p.tier} />
@@ -62,7 +62,7 @@ export function OverviewPage({ p, onEdit }: { p: Project; onEdit: () => void }) 
             {facts.map(([k, v]) => (
               <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "8px 0", borderTop: `1px solid ${C.line}` }}>
                 <span style={{ fontSize: 13, color: C.dim }}>{k}</span>
-                <span style={{ fontSize: 13, color: "#C6CAD6", textAlign: "right" }}>{v}</span>
+                <span style={{ fontSize: 13, color: C.text2, textAlign: "right" }}>{v}</span>
               </div>
             ))}
           </SectionCard>

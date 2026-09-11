@@ -52,7 +52,7 @@ export function RoadmapTimeline({
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block" }}>
       <defs>
         <pattern id="rmH" width="7" height="7" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
-          <line x1="0" y1="0" x2="0" y2="7" stroke="#242836" strokeWidth="1.3" />
+          <line x1="0" y1="0" x2="0" y2="7" stroke={C.line2} strokeWidth="1.3" />
         </pattern>
       </defs>
       <rect x={X(TODAY)} y={PT - 12} width={X(MONTHS.length - 1) - X(TODAY)} height={H - PT - PB + 12} fill="url(#rmH)" opacity="0.45" />
@@ -66,7 +66,7 @@ export function RoadmapTimeline({
           </g>
         ) : null,
       )}
-      <line x1={X(TODAY)} x2={X(TODAY)} y1={PT - 12} y2={H - PB} stroke="#3B4152" strokeWidth="1.2" />
+      <line x1={X(TODAY)} x2={X(TODAY)} y1={PT - 12} y2={H - PB} stroke={C.line3} strokeWidth="1.2" />
 
       <text x={4} y={PT + RH / 2 + 3} fontSize="11" fill={C.mut}>
         Releases

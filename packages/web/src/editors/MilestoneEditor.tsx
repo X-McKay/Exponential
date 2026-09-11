@@ -102,14 +102,14 @@ export function MilestoneEditor({
       </div>
 
       <Lbl>Value impact — reduction contributed when the gate clears</Lbl>
-      <div style={{ display: "grid", gridTemplateColumns: "70px 1fr 1fr", gap: 8, alignItems: "center", background: "#0E1015", border: `1px solid ${C.line}`, borderRadius: 8, padding: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "70px 1fr 1fr", gap: 8, alignItems: "center", background: C.inset, border: `1px solid ${C.line}`, borderRadius: 8, padding: 10 }}>
         <span />
         <span style={{ fontSize: 11, color: C.dim }}>FTE %</span>
         <span style={{ fontSize: 11, color: C.dim }}>Time %</span>
-        <span style={{ fontSize: 12, color: "#A5AEF7" }}>Base</span>
+        <span style={{ fontSize: 12, color: C.indigoSoft }}>Base</span>
         <input type="number" style={inpStyle} value={d.impact.base.fte} onChange={(e) => setImpact("base", "fte", num(e.target.value))} />
         <input type="number" style={inpStyle} value={d.impact.base.time} onChange={(e) => setImpact("base", "time", num(e.target.value))} />
-        <span style={{ fontSize: 12, color: "#6FD6A4" }}>Stretch</span>
+        <span style={{ fontSize: 12, color: C.greenHi }}>Stretch</span>
         <input type="number" style={inpStyle} value={d.impact.stretch.fte} onChange={(e) => setImpact("stretch", "fte", num(e.target.value))} />
         <input type="number" style={inpStyle} value={d.impact.stretch.time} onChange={(e) => setImpact("stretch", "time", num(e.target.value))} />
       </div>
@@ -118,7 +118,7 @@ export function MilestoneEditor({
         <span style={{ fontSize: 12, color: C.mut }}>Success criteria — all must clear base for base impact, all must clear stretch for stretch impact</span>
       </div>
       {d.metrics.length === 0 && (
-        <div style={{ fontSize: 12, color: C.dim, background: "#0E1015", border: `1px dashed ${C.line2}`, borderRadius: 8, padding: "12px 12px", marginBottom: 6 }}>
+        <div style={{ fontSize: 12, color: C.dim, background: C.inset, border: `1px dashed ${C.line2}`, borderRadius: 8, padding: "12px 12px", marginBottom: 6 }}>
           No criteria yet — without at least one, this milestone can never clear a gate or realize value.
         </div>
       )}
@@ -129,11 +129,11 @@ export function MilestoneEditor({
             <input style={inpStyle} value={mx.label} placeholder="e.g. Mapping accuracy" onChange={(e) => setMetric(i, { label: e.target.value })} />
           </div>
           <div>
-            {i === 0 && <div style={{ fontSize: 11, color: "#A5AEF7", marginBottom: 3 }}>Base ≥</div>}
+            {i === 0 && <div style={{ fontSize: 11, color: C.indigoSoft, marginBottom: 3 }}>Base ≥</div>}
             <input type="number" style={inpStyle} value={mx.base} onChange={(e) => setMetric(i, { base: num(e.target.value) })} />
           </div>
           <div>
-            {i === 0 && <div style={{ fontSize: 11, color: "#6FD6A4", marginBottom: 3 }}>Stretch ≥</div>}
+            {i === 0 && <div style={{ fontSize: 11, color: C.greenHi, marginBottom: 3 }}>Stretch ≥</div>}
             <input type="number" style={inpStyle} value={mx.stretch} onChange={(e) => setMetric(i, { stretch: num(e.target.value) })} />
           </div>
           <div>

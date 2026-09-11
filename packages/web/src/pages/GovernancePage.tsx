@@ -41,14 +41,14 @@ export function GovernancePage({
             display: "flex",
             gap: 10,
             alignItems: "center",
-            background: "rgba(229,83,75,.08)",
-            border: "1px solid rgba(229,83,75,.3)",
+            background: C.badSoft,
+            border: `1px solid ${C.badLine2}`,
             borderRadius: 8,
             padding: "10px 14px",
             marginBottom: 14,
           }}
         >
-          <span style={{ color: "#F08A84", fontSize: 13 }}>
+          <span style={{ color: C.redHi, fontSize: 13 }}>
             Tier 1 controls apply — production release blocked until all items reach Approved. Quarterly committee re-review.
           </span>
         </div>

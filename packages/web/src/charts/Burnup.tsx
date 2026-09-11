@@ -48,7 +48,7 @@ export function Burnup({ milestones, dim, target, cal }: { milestones: Milestone
             <stop offset="100%" stopColor={C.indigo} stopOpacity="0.02" />
           </linearGradient>
           <pattern id="vfH" width="7" height="7" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
-            <line x1="0" y1="0" x2="0" y2="7" stroke="#2A2E3C" strokeWidth="1.4" />
+            <line x1="0" y1="0" x2="0" y2="7" stroke={C.line2} strokeWidth="1.4" />
           </pattern>
         </defs>
         <rect x={X(TODAY)} y={PT} width={X(MONTHS.length - 1) - X(TODAY)} height={ih} fill="url(#vfH)" opacity="0.5" />
@@ -77,7 +77,7 @@ export function Burnup({ milestones, dim, target, cal }: { milestones: Milestone
             <circle cx={XM(m.month)} cy={PT + ih + 8} r="2.6" fill={STATUS_COLOR[m.status]} />
           </g>
         ))}
-        <line x1={X(TODAY)} x2={X(TODAY)} y1={PT} y2={PT + ih} stroke="#3B4152" strokeWidth="1" />
+        <line x1={X(TODAY)} x2={X(TODAY)} y1={PT} y2={PT + ih} stroke={C.line3} strokeWidth="1" />
         {MONTHS.map((mo, i) =>
           i % 2 === 0 ? (
             <text key={mo} x={X(i)} y={H - 8} fontSize="9.5" fill={i === TODAY ? C.mut : C.dim} textAnchor="middle">
@@ -94,12 +94,12 @@ export function Burnup({ milestones, dim, target, cal }: { milestones: Milestone
             top: 8,
             left: `min(max(${(X(hover) / W) * 100}%, 12%), 70%)`,
             transform: "translateX(-50%)",
-            background: "#181B24",
+            background: C.raised,
             border: `1px solid ${C.line2}`,
             borderRadius: 8,
             padding: "8px 11px",
             pointerEvents: "none",
-            boxShadow: "0 8px 24px rgba(0,0,0,.5)",
+            boxShadow: `0 8px 24px ${C.shadow2}`,
             zIndex: 5,
           }}
         >

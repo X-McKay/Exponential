@@ -49,8 +49,8 @@ export type Block =
   | (BlockBase & { kind: "ready_release"; release: Release })
   | (BlockBase & { kind: "agent_flag"; run: AgentRun; agentName: string })
   | (BlockBase & { kind: "brief"; run: AgentRun; agentName: string })
-  | (BlockBase & { kind: "upcoming"; items: Upcoming[] })
-  | (BlockBase & { kind: "activity"; items: FeedItem[] });
+  | (BlockBase & { kind: "upcoming"; items: Upcoming[]; more: number })
+  | (BlockBase & { kind: "activity"; items: FeedItem[]; more: number });
 
 export type BlockKind = Block["kind"];
 
@@ -402,6 +402,7 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
       projName: null,
       title: "Next 8 weeks",
       items: s.upcoming.slice(0, 4),
+      more: Math.max(0, s.upcoming.length - 4),
     });
   }
 
@@ -418,6 +419,7 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
       projName: null,
       title: "Since yesterday",
       items: s.recent.slice(0, 5),
+      more: Math.max(0, s.recent.length - 5),
     });
   }
 

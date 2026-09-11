@@ -323,7 +323,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
         {files.length > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
             {files.map((f) => (
-              <span key={`${f.name}-${f.size}`} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: C.text, background: "#0E1015", border: `1px solid ${C.line2}`, borderRadius: 6, padding: "3px 8px" }}>
+              <span key={`${f.name}-${f.size}`} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: C.text, background: C.inset, border: `1px solid ${C.line2}`, borderRadius: 6, padding: "3px 8px" }}>
                 {f.name}
                 <span style={{ color: C.dim }}>{f.size > 1_000_000 ? `${(f.size / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(f.size / 1000))} kB`}</span>
                 <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((x) => x.filter((y) => y !== f))} style={{ ...reset, color: C.dim, fontSize: 12 }}>
@@ -357,7 +357,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
             {busy}
           </div>
         )}
-        {error && <div style={{ fontSize: 12.5, color: "#F08A84", marginTop: 12 }}>{error}</div>}
+        {error && <div style={{ fontSize: 12.5, color: C.redHi, marginTop: 12 }}>{error}</div>}
       </Modal>
     );
   }
@@ -404,7 +404,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
         <span style={{ color: C.amber }}>medium</span>, <span style={{ color: C.dim }}>low</span>.
       </div>
       {d.notes.length > 0 && (
-        <div style={{ marginTop: 10, background: "#0E1015", border: `1px solid ${C.line}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: C.mut, lineHeight: 1.55 }}>
+        <div style={{ marginTop: 10, background: C.inset, border: `1px solid ${C.line}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: C.mut, lineHeight: 1.55 }}>
           <div style={{ color: C.dim, marginBottom: 2 }}>Open questions from the documents</div>
           {d.notes.map((n, i) => (
             <div key={i}>• {n}</div>
@@ -576,7 +576,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
                 {includedMilestoneNames.map((n) => {
                   const on = r.milestones.includes(n);
                   return (
-                    <button key={n} type="button" aria-pressed={on} onClick={() => set((y) => ({ ...y, milestones: on ? y.milestones.filter((m) => m !== n) : [...y.milestones, n] }))} style={{ ...ghostBtn, height: 24, fontSize: 11.5, color: on ? C.text : C.mut, background: on ? "rgba(110,123,242,.12)" : "transparent", borderColor: on ? "rgba(110,123,242,.4)" : C.line2 }}>
+                    <button key={n} type="button" aria-pressed={on} onClick={() => set((y) => ({ ...y, milestones: on ? y.milestones.filter((m) => m !== n) : [...y.milestones, n] }))} style={{ ...ghostBtn, height: 24, fontSize: 11.5, color: on ? C.text : C.mut, background: on ? C.accentSoft2 : "transparent", borderColor: on ? C.accentLine2 : C.line2 }}>
                       {n}
                     </button>
                   );
@@ -640,7 +640,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
             {busy}
           </div>
         )}
-        {error && <div style={{ fontSize: 12.5, color: "#F08A84", marginTop: 10 }}>{error}</div>}
+        {error && <div style={{ fontSize: 12.5, color: C.redHi, marginTop: 10 }}>{error}</div>}
       </Section>
     </Modal>
   );

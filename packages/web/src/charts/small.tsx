@@ -58,7 +58,7 @@ export function Bullet({ metric }: { metric: Metric }) {
         <span style={{ color: C.mut }}>{metric.label}</span>
         <span style={{ color: col, fontVariantNumeric: "tabular-nums", fontWeight: 500 }}>{cur}%</span>
       </div>
-      <div style={{ position: "relative", height: 7, borderRadius: 4, background: "#1B1E27" }}>
+      <div style={{ position: "relative", height: 7, borderRadius: 4, background: C.field }}>
         <div style={{ position: "absolute", inset: 0, width: `${cur}%`, background: col, borderRadius: 4, opacity: 0.85, transition: "width .25s" }} />
         <div style={{ position: "absolute", top: -2.5, bottom: -2.5, left: `${metric.base}%`, width: 1.5, background: C.indigo }} />
         <div style={{ position: "absolute", top: -2.5, bottom: -2.5, left: `${metric.stretch}%`, width: 1.5, background: C.green }} />
@@ -152,7 +152,7 @@ export function PeopleBars({ people, field, color }: { people: Contributor[]; fi
         <div key={p.ini} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: `1px solid ${C.line}` }}>
           <Avatar ini={p.ini} size={22} />
           <span style={{ fontSize: 13, color: C.text, width: 92, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-          <div style={{ flex: 1, height: 6, borderRadius: 4, background: "#1B1E27" }}>
+          <div style={{ flex: 1, height: 6, borderRadius: 4, background: C.field }}>
             <div style={{ height: "100%", width: `${(p[field] / max) * 100}%`, background: color, borderRadius: 4, opacity: 0.8, transition: "width .3s" }} />
           </div>
           <span style={{ fontSize: 12, color: C.mut, width: 28, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{p[field]}</span>

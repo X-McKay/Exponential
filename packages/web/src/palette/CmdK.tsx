@@ -4,7 +4,7 @@ import { CHORDS } from "../router.ts";
 import { Kbd, reset } from "../ui/primitives.tsx";
 import { C } from "../theme.ts";
 
-type Go = (page: "glance" | "portfolio" | "agents" | "data" | "project", projectId: string | null, tab?: ProjectTab) => void;
+type Go = (page: "glance" | "inbox" | "portfolio" | "agents" | "data" | "project", projectId: string | null, tab?: ProjectTab, section?: "agents" | "rules" | "quality") => void;
 
 interface Item {
   id: string;
@@ -44,8 +44,11 @@ const pushRecent = (id: string) => {
 
 const buildItems = (projects: Project[], go: Go): Item[] => [
   { id: "glance", label: "Glance", hint: "g g", group: "Pages", act: () => go("glance", null) },
+  { id: "inbox", label: "Inbox", hint: "g i", group: "Pages", act: () => go("inbox", null) },
   { id: "portfolio", label: "Portfolio", hint: "g p", group: "Pages", act: () => go("portfolio", null) },
   { id: "agents", label: "Agents", hint: "g a", group: "Pages", act: () => go("agents", null) },
+  { id: "agents:rules", label: "Agents › Standing rules", hint: "", group: "Pages", act: () => go("agents", null, "overview", "rules") },
+  { id: "agents:quality", label: "Agents › Quality", hint: "", group: "Pages", act: () => go("agents", null, "overview", "quality") },
   { id: "data", label: "Data & settings", hint: "", group: "Pages", act: () => go("data", null) },
   ...projects.map((p): Item => ({ id: `p:${p.id}`, label: p.name, hint: p.key, group: "Projects", act: () => go("project", p.id, "overview") })),
   ...projects.flatMap((p): Item[] =>
@@ -98,14 +101,14 @@ export function CmdK({ projects, go, onClose }: { projects: Project[]; go: Go; o
   let lastGroup: Item["group"] | null = null;
 
   return (
-    <div className="vf-overlay" onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(4,5,7,0.7)", zIndex: 80, display: "flex", justifyContent: "center", paddingTop: "14vh" }}>
+    <div className="vf-overlay" onClick={onClose} style={{ position: "fixed", inset: 0, background: C.overlay, zIndex: 80, display: "flex", justifyContent: "center", paddingTop: "14vh" }}>
       <div
         className="vf-modal"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal
         aria-label="Jump to"
-        style={{ width: "100%", maxWidth: 540, height: "fit-content", background: "#101114", border: `1px solid ${C.line2}`, borderRadius: 12, boxShadow: "0 24px 70px rgba(0,0,0,.65)", overflow: "hidden" }}
+        style={{ width: "100%", maxWidth: 540, height: "fit-content", background: C.popover, border: `1px solid ${C.line2}`, borderRadius: 12, boxShadow: `0 24px 70px ${C.shadow2}`, overflow: "hidden" }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 16px", borderBottom: `1px solid ${C.line}` }}>
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke={C.dim} strokeWidth="1.5" strokeLinecap="round">
@@ -162,11 +165,11 @@ export function CmdK({ projects, go, onClose }: { projects: Project[]; go: Go; o
                     height: 34,
                     padding: "0 10px",
                     borderRadius: 6,
-                    background: i === sel ? "#191B20" : "transparent",
+                    background: i === sel ? C.hover : "transparent",
                     transition: "background .08s",
                   }}
                 >
-                  <span style={{ fontSize: 13, color: i === sel ? C.text : "#C6CAD6", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.label}</span>
+                  <span style={{ fontSize: 13, color: i === sel ? C.text : C.text2, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.label}</span>
                   {it.hint === "" ? null : it.group === "Pages" || (it.group === "Recent" && it.hint.startsWith("g ")) ? (
                     <span style={{ display: "inline-flex", gap: 3 }}>
                       {it.hint.split(" ").map((k, ki) => (
