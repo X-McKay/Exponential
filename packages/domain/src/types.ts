@@ -448,29 +448,45 @@ export interface Workspace {
   lastGlanceAt: string | null;
 }
 
-/** Where a card sits on Glance: what needs a decision, what to keep an eye on, what happened. */
-export type Zone = "decide" | "watch" | "know";
-export const ZONES: readonly Zone[] = ["decide", "watch", "know"];
+/**
+ * A widget the daily brief may embed. Every widget points at facts by id and
+ * is rendered from live state, so a brief written this morning shows this
+ * afternoon's numbers. The table is the one free-form shape; its cells are
+ * checked against the briefing like any other cited figure.
+ */
+export type Widget =
+  | { type: "metric"; proj: string; mid: string; xid: string }
+  | { type: "gates"; proj: string; mid: string }
+  | { type: "release"; proj: string; rid: string }
+  | { type: "governance"; proj: string }
+  | { type: "value"; proj: string; dim: Dim }
+  | { type: "proposals"; ids: string[] }
+  | { type: "ci"; proj: string; repo: string; number: number }
+  | { type: "upcoming"; days: number }
+  | { type: "activity"; hours: number }
+  | { type: "table"; columns: string[]; rows: string[][] };
 
-export interface Placement {
-  zone: Zone;
-  blockId: string;
-  /** One line from the curator on why this matters to the reader today. */
-  why: string;
+export type WidgetType = Widget["type"];
+export const WIDGET_TYPES: readonly WidgetType[] = ["metric", "gates", "release", "governance", "value", "proposals", "ci", "upcoming", "activity", "table"];
+
+/** One paragraph of the brief, with at most one widget under it. */
+export interface BriefSection {
+  text: string;
+  widget: Widget | null;
 }
 
 /**
- * A curated Glance: which of the composer's blocks to show, where, and why.
- * The model chose from blocks the composer found; it holds pointers, never
- * values, so a day-old layout still renders this morning's numbers.
+ * The daily brief for one reader: prose that says what they need to know,
+ * with widgets where a visual earns its place. A run's output, stored as
+ * pointers and text; never a copy of derived state.
  */
-export interface GlanceLayout {
+export interface DailyBrief {
   runId: string;
   at: string;
-  /** Hash of the candidate blocks the layout was made from; a different hash means facts moved. */
+  /** Hash of the composer's signals the brief was written from; a different hash means facts moved. */
   stateHash: string;
   headline: string;
-  placements: Placement[];
+  sections: BriefSection[];
   model: string | null;
 }
 
@@ -498,8 +514,8 @@ export interface AppState {
   rules: Rule[];
   /** Prompt changes people and the tuner made, newest first. */
   promptVersions: PromptVersion[];
-  /** The latest curated Glance for the signed-in user, or null for the composer's default order. */
-  layout: GlanceLayout | null;
+  /** The latest daily brief for the signed-in user, or null for the composer's own. */
+  brief: DailyBrief | null;
   /** Newest first, trailing EVENT_WINDOW_DAYS. */
   events: Event[];
   calendar: CalendarEvent[];

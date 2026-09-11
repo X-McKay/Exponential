@@ -56,8 +56,8 @@ export const ROLE: Record<AgentKind, { brief: string; task: string; tab: Project
     tab: "overview",
   },
   curator: {
-    brief: "You lay out a person's morning page from the cards the composer found; you never invent a card.",
-    task: "Choose at most six cards, put each in decide / watch / know, order them by what the reader must act on first, and say in one line why each matters to them today. Write a headline under 120 characters.",
+    brief: "You write a person's daily brief from the signals the composer found; you never invent a fact.",
+    task: "At most six short sections, most urgent first, each with at most one widget that points at facts by id, under a one-sentence headline.",
     tab: "overview",
   },
 };

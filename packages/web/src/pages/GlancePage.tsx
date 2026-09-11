@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ZONES, applyLayout, calendarOf, composeGlancePage, describeAction, monthLabel, relTime, shortAge } from "@valueflow/domain";
-import type { AppState, Block, Calendar, Placed, ProjectTab, Zone } from "@valueflow/domain";
+import { calendarOf, composeGlancePage, defaultBrief, describeAction, monthLabel, relTime, resolveWidget, shortAge } from "@valueflow/domain";
+import type { AppState, Block, BriefSection, Calendar, ProjectTab, ResolvedWidget } from "@valueflow/domain";
 import { Bullet, GovStack, Spark } from "../charts/small.tsx";
 import { Markdown } from "../editors/RunAgent.tsx";
 import { Btn, Caret, Chip, Tip, ghostBtn, reset } from "../ui/primitives.tsx";
@@ -175,8 +175,7 @@ function Body({ b, cal, pending, state, onDecide }: { b: Block; cal: Calendar; p
   }
 }
 
-function GlanceCard({ placed, cal, state, onOpen, onOpenAgents, onOpenInbox, onDecide }: { placed: Placed; cal: Calendar; state: AppState; onOpen: (id: string, tab: ProjectTab) => void; onOpenAgents: () => void; onOpenInbox: () => void; onDecide: (id: string, d: "accept" | "dismiss") => void }) {
-  const b = placed.block;
+function GlanceCard({ b, cal, state, onOpen, onOpenAgents, onOpenInbox, onDecide }: { b: Block; cal: Calendar; state: AppState; onOpen: (id: string, tab: ProjectTab) => void; onOpenAgents: () => void; onOpenInbox: () => void; onDecide: (id: string, d: "accept" | "dismiss") => void }) {
   const pending = b.kind === "agent_flag" ? state.proposals.filter((p) => p.runId === b.run.id && p.state === "pending").length : 0;
   const open = () => (b.kind === "decisions" ? onOpenInbox() : b.kind === "brief" || (b.kind === "agent_flag" && !b.run.proj) ? onOpenAgents() : onOpen(b.proj, b.tab));
   return (
@@ -211,7 +210,6 @@ function GlanceCard({ placed, cal, state, onOpen, onOpenAgents, onOpenInbox, onD
         <span style={{ color: C.dim, fontSize: 11 }}>›</span>
       </div>
       <div style={{ fontSize: 14, fontWeight: 500, color: C.text, lineHeight: 1.4, letterSpacing: "-0.01em", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{b.title}</div>
-      {placed.why && <div style={{ fontSize: 12, color: C.indigoSoft, lineHeight: 1.5 }}>{placed.why}</div>}
       <div style={{ maxHeight: 148, overflow: "hidden", position: "relative", flex: 1 }}>
         <Body b={b} cal={cal} pending={pending} state={state} onDecide={onDecide} />
         <span aria-hidden style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 22, background: `linear-gradient(to bottom, transparent, ${C.panel})`, pointerEvents: "none" }} />
@@ -220,16 +218,179 @@ function GlanceCard({ placed, cal, state, onOpen, onOpenAgents, onOpenInbox, onD
   );
 }
 
-const ZONE_LABEL: Record<Zone, { title: string; sub: string }> = {
-  decide: { title: "Decide", sub: "waiting on you" },
-  watch: { title: "Watch", sub: "risks and gates" },
-  know: { title: "Know", sub: "what moved, what is coming" },
-};
+// ---- widgets --------------------------------------------------------------
+
+const Row = ({ children, borderTop }: { children: React.ReactNode; borderTop?: boolean }) => <div style={{ display: "flex", gap: 8, padding: "5px 0", alignItems: "baseline", borderTop: borderTop ? `1px solid ${C.line}` : "none" }}>{children}</div>;
+
+/** One widget from the brief, rendered from live facts. */
+function WidgetView({ w, cal, state, onOpen, onDecide }: { w: ResolvedWidget; cal: Calendar; state: AppState; onOpen: (id: string, tab: ProjectTab) => void; onDecide: (id: string, d: "accept" | "dismiss") => void }) {
+  const caption = (text: string, proj: string, tab: ProjectTab) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+      <span style={{ fontSize: 11, color: C.dim, flex: 1 }}>{text}</span>
+      <button type="button" className="vf-ghost" onClick={() => onOpen(proj, tab)} style={{ ...ghostBtn, height: 20, fontSize: 11, padding: "0 6px" }}>
+        open ↗
+      </button>
+    </div>
+  );
+  switch (w.type) {
+    case "metric":
+      return (
+        <div>
+          {caption(`${w.project.name} · ${w.milestone.name}`, w.project.id, "value")}
+          <Bullet metric={w.metric} />
+        </div>
+      );
+    case "gates":
+      return (
+        <div>
+          {caption(`${w.project.name} · ${w.milestone.name} · gates`, w.project.id, "value")}
+          {w.milestone.metrics.map((x) => (
+            <Bullet key={x.id} metric={x} />
+          ))}
+        </div>
+      );
+    case "release":
+      return (
+        <div>
+          {caption(`${w.project.name} · ${w.release.id} ${w.release.name} · ${w.state.label} · ${w.state.met}/${w.state.total} criteria · target ${monthLabel(w.release.month, cal.todayYm)}`, w.project.id, "roadmap")}
+          {w.rows.map((row, i) => (
+            <Row key={i}>
+              <span style={{ fontSize: 11, color: row.eval.ok ? C.green : row.eval.pending ? C.amber : C.red, width: 12, flexShrink: 0 }}>{row.eval.ok ? "✓" : row.eval.pending ? "◐" : "✗"}</span>
+              <span style={{ fontSize: 12.5, color: row.eval.ok ? C.dim : C.text2, flex: 1 }}>{row.label}</span>
+              <span style={{ fontSize: 11, color: C.dim, flexShrink: 0 }}>{row.eval.sub}</span>
+            </Row>
+          ))}
+        </div>
+      );
+    case "governance":
+      return (
+        <div>
+          {caption(`${w.project.name} · governance`, w.project.id, "governance")}
+          <GovStack counts={w.counts} />
+          {w.missing.length > 0 && <div style={{ fontSize: 11.5, color: C.mut, marginTop: 4 }}>Missing: {w.missing.join(" · ")}</div>}
+        </div>
+      );
+    case "value":
+      return (
+        <div>
+          {caption(`${w.project.name} · ${w.realized}% of ${w.target}% ${w.dim === "fte" ? "FTE" : "time"} target realized`, w.project.id, "value")}
+          <Spark milestones={w.project.milestones} dim={w.dim} target={w.target} cal={cal} />
+        </div>
+      );
+    case "proposals":
+      return (
+        <div>
+          {w.proposals.map((p, i) => (
+            <div key={p.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "6px 0", borderTop: i === 0 ? "none" : `1px solid ${C.line}` }}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 12.5, color: C.text2, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{describeAction(p.action, state, p.proj)}</span>
+                <span style={{ fontSize: 11, color: C.dim }}>
+                  {state.agents.find((a) => a.id === p.agentId)?.name ?? p.agentId}
+                  {p.proj ? ` · ${state.projects.find((x) => x.id === p.proj)?.name ?? p.proj}` : ""}
+                  {p.state !== "pending" ? ` · ${p.state}` : ""}
+                </span>
+              </span>
+              {p.state === "pending" && (
+                <span style={{ display: "inline-flex", gap: 4, flexShrink: 0 }}>
+                  <Btn onClick={() => onDecide(p.id, "dismiss")}>Dismiss</Btn>
+                  <Btn tone="primary" onClick={() => onDecide(p.id, "accept")}>
+                    Accept
+                  </Btn>
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      );
+    case "ci":
+      return (
+        <div>
+          {caption(`${w.project.name} · ${w.pr.repo} #${w.pr.number} · open ${shortAge(w.pr.openedAt, cal.asOf)}`, w.project.id, "development")}
+          <div style={{ fontSize: 12.5, color: C.text2 }}>{w.pr.title}</div>
+          <div style={{ fontSize: 11.5, color: C.dim, marginTop: 2 }}>
+            checks {w.pr.checks} · <span style={{ color: C.green }}>+{w.pr.add}</span> <span style={{ color: C.red }}>−{w.pr.del}</span>
+            {w.build ? ` · ${w.build.note}` : ""}
+          </div>
+        </div>
+      );
+    case "upcoming":
+      return (
+        <div>
+          {w.items.map((u, i) => (
+            <Row key={i} borderTop={i > 0}>
+              <span style={{ fontSize: 11, color: C.mut, width: 44, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{u.date}</span>
+              <span style={{ fontSize: 12.5, color: C.text2, flex: 1 }}>{u.text}</span>
+              <button type="button" className="vf-link" onClick={() => onOpen(u.proj, u.tab)} style={{ ...reset, fontSize: 11, color: C.dim }}>
+                {state.projects.find((p) => p.id === u.proj)?.name.split(" ").slice(0, 2).join(" ") ?? u.proj}
+              </button>
+            </Row>
+          ))}
+        </div>
+      );
+    case "activity":
+      return (
+        <div>
+          {w.items.map((it, i) => (
+            <Row key={i} borderTop={i > 0}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: FEED_COLOR[it.type], flexShrink: 0, alignSelf: "center" }} />
+              <span style={{ fontSize: 12.5, color: C.text2, flex: 1 }}>{it.text}</span>
+              <span style={{ fontSize: 11, color: C.dim, flexShrink: 0 }}>{relTime(it.at, cal.asOf)}</span>
+            </Row>
+          ))}
+        </div>
+      );
+    case "table":
+      return (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ borderCollapse: "collapse", fontSize: 12.5, whiteSpace: "nowrap" }}>
+            <thead>
+              <tr>
+                {w.columns.map((c, i) => (
+                  <th key={i} style={{ textAlign: "left", fontWeight: 500, color: C.dim, fontSize: 11, padding: "3px 14px 5px 0", borderBottom: `1px solid ${C.line}` }}>
+                    {c}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {w.rows.map((r, ri) => (
+                <tr key={ri}>
+                  {r.map((cell, ci) => (
+                    <td key={ci} style={{ padding: "4px 14px 4px 0", color: C.text2, borderBottom: `1px solid ${C.line}` }}>
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+  }
+}
+
+function Section({ section, cal, state, onOpen, onDecide }: { section: BriefSection; cal: Calendar; state: AppState; onOpen: (id: string, tab: ProjectTab) => void; onDecide: (id: string, d: "accept" | "dismiss") => void }) {
+  const w = section.widget ? resolveWidget(section.widget, state, cal) : null;
+  return (
+    <section style={{ display: "grid", gap: 8, paddingBottom: 18, marginBottom: 18, borderBottom: `1px solid ${C.line}` }}>
+      <div style={{ fontSize: 14, lineHeight: 1.65, color: C.text, maxWidth: 760 }}>
+        <Markdown text={section.text} />
+      </div>
+      {w && (
+        <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 14px", maxWidth: 760 }}>
+          <WidgetView w={w} cal={cal} state={state} onOpen={onOpen} onDecide={onDecide} />
+        </div>
+      )}
+    </section>
+  );
+}
 
 /**
- * Three zones, six cards, one headline. The composer finds every card from
- * facts; the curator (when a model is configured) picks which to show, where,
- * and why. Everything it left out folds into "more".
+ * The daily brief: a headline, a few paragraphs of need-to-know, and a widget
+ * under a paragraph wherever a visual earns its place. With a model the
+ * curator writes it from the composer's signals; without one the composer
+ * writes its own. Every widget renders from live facts. The composer's cards
+ * remain available underneath as "all signals".
  */
 export function GlancePage({
   state,
@@ -254,49 +415,42 @@ export function GlancePage({
 }) {
   const cal = useMemo(() => calendarOf(state), [state]);
   const glance = useMemo(() => composeGlancePage(state, cal), [state, cal]);
-  const resolved = useMemo(() => applyLayout(glance.blocks, state.layout), [glance.blocks, state.layout]);
-  const [showMore, setShowMore] = useState(false);
+  const own = useMemo(() => defaultBrief(state, cal), [state, cal]);
+  const [showAll, setShowAll] = useState(false);
   const [curating, setCurating] = useState(false);
-  const brief = glance.blocks.find((b) => b.kind === "brief");
-  const moved = brief ? findSection(sectionsOf(brief.run.output), "what moved") : undefined;
-  const curatedRun = resolved.curated ? state.runs.find((r) => r.id === resolved.curated?.runId) : undefined;
-  const stale = resolved.curated !== null && !glance.blocks.some((b) => resolved.curated?.placements.some((p) => p.blockId === b.id));
-  const shown = ZONES.reduce((n, z) => n + resolved.zones[z].length, 0);
+  const brief = state.brief;
+  // A curated brief whose every widget has gone stale reads as out of date; the composer's own takes over.
+  const live = brief && brief.sections.some((s) => !s.widget || resolveWidget(s.widget, state, cal)) ? brief : null;
+  const headline = live?.headline ?? own.headline;
+  const sections = live?.sections ?? own.sections;
+  const run = live ? state.runs.find((r) => r.id === live.runId) : undefined;
+  const curator = state.agents.find((a) => a.kind === "curator");
+  const waiting = state.proposals.filter((p) => p.state === "pending").length;
 
-  // A visit counts after a moment on the page; the next visit's "know" starts here.
+  // A visit counts after a moment on the page; the next visit's activity starts here.
   useEffect(() => {
     const t = setTimeout(onSeen, 4000);
     return () => clearTimeout(t);
   }, [onSeen]);
 
-  const headline = resolved.headline ?? brief?.run.summary ?? glance.narrative[0] ?? "Nothing needs you right now.";
-
   return (
     <div style={{ padding: "16px 20px 30px" }}>
       <div style={{ marginBottom: 18 }}>
-        <div style={{ fontSize: 16, fontWeight: 550, letterSpacing: "-0.015em", marginBottom: 6 }}>Morning, {userName}.</div>
-        <div style={{ fontSize: 14, color: C.text, lineHeight: 1.6, maxWidth: 760, marginBottom: 4 }}>{headline}</div>
-        {moved ? (
-          <div style={{ maxWidth: 760 }}>
-            <Markdown text={moved.body.split("\n").slice(0, 4).join("\n")} />
-          </div>
-        ) : (
-          <div style={{ fontSize: 13, lineHeight: 1.7, color: C.mut, maxWidth: 720 }}>{glance.narrative.slice(resolved.headline ? 0 : 1).join(" ")}</div>
-        )}
+        <div style={{ fontSize: 12, color: C.dim, marginBottom: 4 }}>Morning, {userName}. Your daily brief.</div>
+        <div style={{ fontSize: 18, fontWeight: 550, letterSpacing: "-0.015em", lineHeight: 1.35, maxWidth: 760 }}>{headline}</div>
         <div style={{ fontSize: 11, color: C.dim, marginTop: 8, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span>
-            {resolved.curated ? `Laid out by ${state.agents.find((a) => a.kind === "curator")?.name ?? "the curator"} ${relTime(resolved.curated.at, cal.asOf)}${stale ? " (facts have moved since)" : ""}` : "Composer's default order"}
-            {brief ? ` · this week's brief by ${brief.agentName}` : ""} · {glance.projectCount} projects · {shown} of {glance.blocks.length} cards
+            {live ? `Written by ${curator?.name ?? "the curator"} ${relTime(live.at, cal.asOf)}${live.model ? ` · ${live.model}` : ""}` : "Composed from live state"} · {glance.projectCount} projects · {glance.blocks.length} signal{glance.blocks.length === 1 ? "" : "s"}
           </span>
-          {curatedRun && (
+          {run && (
             <span style={{ display: "inline-flex", gap: 2, alignItems: "center" }}>
-              <Tip label="Good layout today">
-                <button type="button" aria-pressed={curatedRun.rating === 1} onClick={() => onRate(curatedRun.id, curatedRun.rating === 1 ? null : 1)} className="vf-ghost" style={{ ...ghostBtn, height: 22, padding: "0 6px", color: curatedRun.rating === 1 ? C.green : C.dim, borderColor: curatedRun.rating === 1 ? C.green : C.line2 }}>
+              <Tip label="Useful brief">
+                <button type="button" aria-pressed={run.rating === 1} onClick={() => onRate(run.id, run.rating === 1 ? null : 1)} className="vf-ghost" style={{ ...ghostBtn, height: 22, padding: "0 6px", color: run.rating === 1 ? C.green : C.dim, borderColor: run.rating === 1 ? C.green : C.line2 }}>
                   👍
                 </button>
               </Tip>
-              <Tip label="Wrong things up top">
-                <button type="button" aria-pressed={curatedRun.rating === -1} onClick={() => onRate(curatedRun.id, curatedRun.rating === -1 ? null : -1)} className="vf-ghost" style={{ ...ghostBtn, height: 22, padding: "0 6px", color: curatedRun.rating === -1 ? C.red : C.dim, borderColor: curatedRun.rating === -1 ? C.red : C.line2 }}>
+              <Tip label="Missed what mattered">
+                <button type="button" aria-pressed={run.rating === -1} onClick={() => onRate(run.id, run.rating === -1 ? null : -1)} className="vf-ghost" style={{ ...ghostBtn, height: 22, padding: "0 6px", color: run.rating === -1 ? C.red : C.dim, borderColor: run.rating === -1 ? C.red : C.line2 }}>
                   👎
                 </button>
               </Tip>
@@ -313,51 +467,36 @@ export function GlancePage({
               }}
               style={{ ...ghostBtn, height: 22, fontSize: 11, opacity: curating ? 0.6 : 1 }}
             >
-              {curating ? "Curating…" : resolved.curated ? "Re-curate" : "Curate with the model"}
+              {curating ? "Writing…" : live ? "Rewrite" : "Write with the model"}
             </button>
           )}
-          {brief && (
-            <button type="button" className="vf-ghost" onClick={onOpenAgents} style={{ ...ghostBtn, height: 22, fontSize: 11 }}>
-              Read the full brief
+          {waiting > 0 && (
+            <button type="button" className="vf-ghost" onClick={onOpenInbox} style={{ ...ghostBtn, height: 22, fontSize: 11, color: C.indigoHi }}>
+              {waiting} in the inbox ›
             </button>
           )}
         </div>
       </div>
 
-      {ZONES.map((z) => {
-        const cards = resolved.zones[z];
-        if (cards.length === 0) return null;
-        return (
-          <section key={z} style={{ marginBottom: 18 }}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8 }}>
-              <span style={{ fontSize: 12, fontWeight: 550, letterSpacing: "0.04em", textTransform: "uppercase", color: z === "decide" ? C.indigoHi : z === "watch" ? C.amber : C.mut }}>{ZONE_LABEL[z].title}</span>
-              <span style={{ fontSize: 11, color: C.dim }}>{ZONE_LABEL[z].sub}</span>
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-              {cards.map((placed) => (
-                <GlanceCard key={placed.block.id} placed={placed} cal={cal} state={state} onOpen={onOpen} onOpenAgents={onOpenAgents} onOpenInbox={onOpenInbox} onDecide={onDecide} />
-              ))}
-            </div>
-          </section>
-        );
-      })}
-
-      {shown === 0 && (
+      {sections.map((sec, i) => (
+        <Section key={i} section={sec} cal={cal} state={state} onOpen={onOpen} onDecide={onDecide} />
+      ))}
+      {sections.length === 0 && (
         <div style={{ padding: "28px 14px", textAlign: "center", color: C.dim, fontSize: 13, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12 }}>
-          Nothing needs you right now. Cards appear here as releases block, gates slip, CI fails, agents flag, or proposals arrive.
+          Nothing needs you right now. The brief fills as releases block, gates slip, CI fails, agents flag, or proposals arrive.
         </div>
       )}
 
-      {resolved.more.length > 0 && (
+      {glance.blocks.length > 0 && (
         <section>
-          <button type="button" onClick={() => setShowMore((v) => !v)} className="vf-row" style={{ ...reset, display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: C.dim, padding: "6px 8px", borderRadius: 6, marginBottom: 8 }}>
-            <Caret open={showMore} /> {resolved.more.length} more card{resolved.more.length === 1 ? "" : "s"}
-            {!showMore && <span style={{ color: C.dim2 }}> · {resolved.more.map((b) => b.tag).join(", ")}</span>}
+          <button type="button" onClick={() => setShowAll((v) => !v)} className="vf-row" style={{ ...reset, display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: C.dim, padding: "6px 8px", borderRadius: 6, marginBottom: 8 }}>
+            <Caret open={showAll} /> All {glance.blocks.length} signals
+            {!showAll && <span style={{ color: C.dim2 }}> · {glance.blocks.map((b) => b.tag).join(", ")}</span>}
           </button>
-          {showMore && (
+          {showAll && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-              {resolved.more.map((b) => (
-                <GlanceCard key={b.id} placed={{ block: b, why: null }} cal={cal} state={state} onOpen={onOpen} onOpenAgents={onOpenAgents} onOpenInbox={onOpenInbox} onDecide={onDecide} />
+              {glance.blocks.map((b) => (
+                <GlanceCard key={b.id} b={b} cal={cal} state={state} onOpen={onOpen} onOpenAgents={onOpenAgents} onOpenInbox={onOpenInbox} onDecide={onDecide} />
               ))}
             </div>
           )}

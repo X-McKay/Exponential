@@ -54,7 +54,7 @@ export interface Store {
   deleteRule: (id: string) => Promise<void>;
   /** The reader opened Glance: "since you last looked" starts now (applied on the next load, not this one). */
   markGlanceSeen: () => Promise<void>;
-  /** Ask the curator for a fresh layout now. */
+  /** Ask the curator for a fresh daily brief now. */
   curateGlance: () => Promise<void>;
   saveCalendar: (ev: CalendarEvent, isNew: boolean) => Promise<void>;
   deleteCalendar: (id: string) => Promise<void>;
@@ -443,7 +443,7 @@ export const useStore = (): Store => {
     try {
       const { run } = await api.curateGlance();
       if (run.state === "failed") setError(`${run.summary}: ${run.error ?? "unknown error"}`);
-      else notify(`Glance re-curated: ${run.summary}`, "good");
+      else notify(`Brief rewritten: ${run.summary}`, "good");
       await reload();
     } catch (e) {
       fail(e);

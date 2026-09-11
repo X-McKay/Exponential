@@ -17,8 +17,7 @@ import type { CriterionEval, ReleaseState } from "./derive.ts";
 import { attentionRuns, latestRunOfKind } from "./agents.ts";
 import { deriveUpcoming, recentEvents } from "./feed.ts";
 import type { FeedItem, Upcoming } from "./feed.ts";
-import { ZONES } from "./types.ts";
-import type { AgentRun, AppState, Build, Dim, GlanceLayout, GovStatus, Metric, Milestone, Placement, Project, ProjectTab, Proposal, PullRequest, Release, Zone } from "./types.ts";
+import type { AgentRun, AppState, BriefSection, Build, Dim, GovStatus, Metric, Milestone, Project, ProjectTab, Proposal, PullRequest, Release, Widget } from "./types.ts";
 
 export type Tone = "bad" | "warn" | "good" | "info";
 
@@ -473,91 +472,196 @@ export interface Glance {
   projectCount: number;
 }
 
-// ---- zones & layouts ----------------------------------------------------
+// ---- the daily brief ------------------------------------------------------
 
-/** Where a block belongs by its nature, when no curator has said otherwise. */
-export const zoneOf = (kind: BlockKind): Zone => {
-  switch (kind) {
-    case "decisions":
-    case "agent_flag":
-    case "ready_release":
-      return "decide";
-    case "blocked_release":
-    case "below_gate":
-    case "ci_failing":
-    case "tier1_gaps":
-    case "near_stretch":
-    case "value_trajectory":
-      return "watch";
-    case "brief":
-    case "upcoming":
-    case "activity":
-      return "know";
+/** Everything a widget needs, resolved from live state; null when what it points at is gone. */
+export type ResolvedWidget =
+  | { type: "metric"; project: Project; milestone: Milestone; metric: Metric }
+  | { type: "gates"; project: Project; milestone: Milestone }
+  | { type: "release"; project: Project; release: Release; state: ReleaseState; rows: CriterionRow[] }
+  | { type: "governance"; project: Project; counts: Record<GovStatus, number>; missing: string[] }
+  | { type: "value"; project: Project; dim: Dim; target: number; realized: number }
+  | { type: "proposals"; proposals: Proposal[] }
+  | { type: "ci"; project: Project; pr: PullRequest; build: Build | null }
+  | { type: "upcoming"; items: Upcoming[] }
+  | { type: "activity"; items: FeedItem[] }
+  | { type: "table"; columns: string[]; rows: string[][] };
+
+export const resolveWidget = (w: Widget, state: AppState, cal: Calendar = calendarOf(state)): ResolvedWidget | null => {
+  const project = (pid: string) => state.projects.find((p) => p.id === pid);
+  switch (w.type) {
+    case "metric": {
+      const p = project(w.proj);
+      const m = p?.milestones.find((x) => x.id === w.mid);
+      const x = m?.metrics.find((y) => y.id === w.xid);
+      return p && m && x ? { type: "metric", project: p, milestone: m, metric: x } : null;
+    }
+    case "gates": {
+      const p = project(w.proj);
+      const m = p?.milestones.find((x) => x.id === w.mid);
+      return p && m && m.metrics.length ? { type: "gates", project: p, milestone: m } : null;
+    }
+    case "release": {
+      const p = project(w.proj);
+      const r = (state.releases[w.proj] ?? []).find((x) => x.id === w.rid);
+      if (!p || !r) return null;
+      const st = releaseState(r, p, cal);
+      return { type: "release", project: p, release: r, state: st, rows: r.criteria.map((c, i) => ({ label: c.label, eval: st.evals[i] ?? { ok: false, pending: false, sub: "" } })) };
+    }
+    case "governance": {
+      const p = project(w.proj);
+      return p ? { type: "governance", project: p, counts: govCounts(p), missing: p.governance.filter((g) => g.status === "missing").map((g) => g.name) } : null;
+    }
+    case "value": {
+      const p = project(w.proj);
+      return p ? { type: "value", project: p, dim: w.dim, target: p.targets[w.dim], realized: realized(p, w.dim) } : null;
+    }
+    case "proposals": {
+      const ids = new Set(w.ids);
+      const list = state.proposals.filter((p) => ids.has(p.id));
+      return list.length ? { type: "proposals", proposals: list } : null;
+    }
+    case "ci": {
+      const p = project(w.proj);
+      const d = state.dev[w.proj];
+      const pr = d?.prs.find((x) => x.repo === w.repo && x.number === w.number);
+      if (!p || !d || !pr) return null;
+      const build = [...d.builds].filter((b) => b.repo === pr.repo && b.status === "fail").sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0] ?? null;
+      return { type: "ci", project: p, pr, build };
+    }
+    case "upcoming": {
+      const until = new Date(new Date(cal.asOf).getTime() + w.days * 86_400_000).toISOString().slice(0, 10);
+      const items = deriveUpcoming(state, cal, 12).filter((u) => u.at <= until);
+      return items.length ? { type: "upcoming", items } : null;
+    }
+    case "activity": {
+      const items = recentEvents(state.events, cal.asOf, w.hours)
+        .slice(0, 8)
+        .map((e): FeedItem => ({ at: e.at, type: e.type, proj: e.proj, tab: e.tab, text: e.text }));
+      return items.length ? { type: "activity", items } : null;
+    }
+    case "table":
+      return w.columns.length && w.rows.length ? { type: "table", columns: w.columns, rows: w.rows } : null;
   }
 };
 
-/** How many cards each zone shows before the rest fold into "more". */
-export const ZONE_CAP: Record<Zone, number> = { decide: 2, watch: 3, know: 2 };
+const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
-export interface Placed {
-  block: Block;
-  why: string | null;
-}
-
-export interface ResolvedLayout {
-  zones: Record<Zone, Placed[]>;
-  /** Blocks the layout did not place, in composer order. */
-  more: Block[];
-  headline: string | null;
-  /** Null when the composer's default order is showing. */
-  curated: GlanceLayout | null;
-}
-
-/** The composer's own layout: zone by kind, priority order, capped per zone. */
-export const defaultLayout = (blocks: Block[]): ResolvedLayout => {
-  const zones: Record<Zone, Placed[]> = { decide: [], watch: [], know: [] };
-  const more: Block[] = [];
-  for (const b of blocks) {
-    const z = zoneOf(b.kind);
-    if (zones[z].length < ZONE_CAP[z]) zones[z].push({ block: b, why: null });
-    else more.push(b);
+/** A widget spec from the model, typed and pointing at things that exist, or null. */
+export const parseWidget = (raw: unknown, state: AppState): Widget | null => {
+  if (typeof raw !== "object" || raw === null) return null;
+  const o = raw as Record<string, unknown>;
+  const proj = str(o.proj);
+  const mid = str(o.mid);
+  const xid = str(o.xid);
+  const rid = str(o.rid);
+  const repo = str(o.repo);
+  let w: Widget | null = null;
+  switch (o.type) {
+    case "metric":
+      w = proj && mid && xid ? { type: "metric", proj, mid, xid } : null;
+      break;
+    case "gates":
+      w = proj && mid ? { type: "gates", proj, mid } : null;
+      break;
+    case "release":
+      w = proj && rid ? { type: "release", proj, rid } : null;
+      break;
+    case "governance":
+      w = proj ? { type: "governance", proj } : null;
+      break;
+    case "value":
+      w = proj && (o.dim === "fte" || o.dim === "time") ? { type: "value", proj, dim: o.dim } : null;
+      break;
+    case "proposals":
+      w = Array.isArray(o.ids) ? { type: "proposals", ids: o.ids.filter((x): x is string => typeof x === "string").slice(0, 6) } : null;
+      break;
+    case "ci": {
+      const n = num(o.number);
+      w = proj && repo && n !== null ? { type: "ci", proj, repo, number: n } : null;
+      break;
+    }
+    case "upcoming":
+      w = { type: "upcoming", days: Math.max(1, Math.min(90, num(o.days) ?? 14)) };
+      break;
+    case "activity":
+      w = { type: "activity", hours: Math.max(1, Math.min(24 * 14, num(o.hours) ?? 48)) };
+      break;
+    case "table": {
+      const columns = Array.isArray(o.columns) ? o.columns.filter((c): c is string => typeof c === "string").slice(0, 6) : [];
+      const rows = Array.isArray(o.rows) ? o.rows.filter((r): r is unknown[] => Array.isArray(r)).map((r) => r.map((c) => String(c ?? "")).slice(0, columns.length)).slice(0, 12) : [];
+      w = columns.length >= 2 && rows.length ? { type: "table", columns, rows } : null;
+      break;
+    }
+    default:
+      w = null;
   }
-  return { zones, more, headline: null, curated: null };
+  return w && resolveWidget(w, state) ? w : null;
+};
+
+/** The ids a brief may point at, one line per project, so the model never has to guess. */
+export const factIndex = (state: AppState): string => {
+  const lines: string[] = [];
+  for (const p of state.projects) {
+    const ms = p.milestones.map((m) => `${m.id}${m.metrics.length ? ` (metrics: ${m.metrics.map((x) => `${x.id} "${x.label}"`).join(", ")})` : ""}`);
+    const rels = (state.releases[p.id] ?? []).map((r) => r.id);
+    const prs = (state.dev[p.id]?.prs ?? []).filter((x) => x.status === "open").map((x) => `${x.repo}#${x.number}${x.checks === "fail" ? " (checks failing)" : ""}`);
+    lines.push(`- proj "${p.id}" (${p.name}): milestones ${ms.join("; ") || "none"}; releases ${rels.join(", ") || "none"}; open PRs ${prs.join(", ") || "none"}`);
+  }
+  const pending = state.proposals.filter((p) => p.state === "pending");
+  lines.push(`- pending proposals: ${pending.map((p) => p.id).join(", ") || "none"}`);
+  return lines.join("\n");
+};
+
+/** Markdown for a widget, so judges and grounding checks see what the reader sees. */
+export const widgetMarkdown = (w: Widget): string => {
+  switch (w.type) {
+    case "table":
+      return [`| ${w.columns.join(" | ")} |`, `| ${w.columns.map(() => "---").join(" | ")} |`, ...w.rows.map((r) => `| ${r.join(" | ")} |`)].join("\n");
+    case "proposals":
+      return `[widget: proposals ${w.ids.join(", ")}]`;
+    case "metric":
+      return `[widget: metric ${w.proj}/${w.mid}/${w.xid}]`;
+    case "gates":
+      return `[widget: gates ${w.proj}/${w.mid}]`;
+    case "release":
+      return `[widget: release ${w.proj}/${w.rid}]`;
+    case "governance":
+      return `[widget: governance ${w.proj}]`;
+    case "value":
+      return `[widget: value ${w.proj} ${w.dim}]`;
+    case "ci":
+      return `[widget: ci ${w.proj} ${w.repo}#${w.number}]`;
+    case "upcoming":
+      return `[widget: upcoming ${w.days} days]`;
+    case "activity":
+      return `[widget: activity ${w.hours} hours]`;
+  }
 };
 
 /**
- * Resolve a curated layout against today's blocks: placements whose block is
- * gone are dropped, blocks it never mentioned fold into "more". Falls back to
- * the default when the layout places nothing that still exists.
+ * The composer's own brief, for a workspace without a model or while the
+ * curator has not run yet: one section per signal that matters, each with
+ * the widget that shows it.
  */
-export const applyLayout = (blocks: Block[], layout: GlanceLayout | null): ResolvedLayout => {
-  if (!layout) return defaultLayout(blocks);
-  const byId = new Map(blocks.map((b) => [b.id, b]));
-  const zones: Record<Zone, Placed[]> = { decide: [], watch: [], know: [] };
-  const used = new Set<string>();
-  for (const p of layout.placements) {
-    const block = byId.get(p.blockId);
-    if (!block || used.has(p.blockId)) continue;
-    used.add(p.blockId);
-    zones[p.zone].push({ block, why: p.why || null });
+export const defaultBrief = (state: AppState, cal: Calendar = calendarOf(state)): { headline: string; sections: BriefSection[] } => {
+  const s = detectSignals(state, cal);
+  const narrative = writeNarrativeFor(state, s);
+  const sections: BriefSection[] = [];
+  const pending = state.proposals.filter((p) => p.state === "pending");
+  if (pending.length) sections.push({ text: `**${pending.length} proposal${pending.length === 1 ? "" : "s"}** wait on you: ${[...new Set(pending.map((p) => state.agents.find((a) => a.id === p.agentId)?.name ?? p.agentId))].join(", ")} proposed changes you can apply here.`, widget: { type: "proposals", ids: pending.slice(0, 4).map((p) => p.id) } });
+  for (const { p, r, st } of s.blocked.slice(0, 2)) sections.push({ text: `**${r.id} ${r.name}** on ${p.name} is blocked: ${st.met} of ${st.total} go-live criteria met, target ${monthLabel(r.month, cal.todayYm)}.`, widget: { type: "release", proj: p.id, rid: r.id } });
+  for (const { p, m, gap, worst } of s.shortfalls.slice(0, 1)) sections.push({ text: `The closest fix: **${worst.label}** on ${m.name} (${p.name}) sits ${gap}pt${gap === 1 ? "" : "s"} under its base gate.`, widget: { type: "gates", proj: p.id, mid: m.id } });
+  for (const { pid, pr } of s.failPRs.slice(0, 1)) {
+    const p = state.projects.find((x) => x.id === pid);
+    if (p) sections.push({ text: `CI is red on **${pr.repo} #${pr.number}** (${p.name}).`, widget: { type: "ci", proj: p.id, repo: pr.repo, number: pr.number } });
   }
-  if (used.size === 0) return defaultLayout(blocks);
-  return { zones, more: blocks.filter((b) => !used.has(b.id)), headline: layout.headline || null, curated: layout };
-};
-
-/** Placements as the curator returned them, validated against the blocks that exist. */
-export const validPlacements = (raw: unknown, blocks: Pick<Block, "id">[]): Placement[] => {
-  if (!Array.isArray(raw)) return [];
-  const ids = new Set(blocks.map((b) => b.id));
-  const out: Placement[] = [];
-  for (const item of raw) {
-    if (typeof item !== "object" || item === null) continue;
-    const o = item as Record<string, unknown>;
-    const zone = ZONES.find((z) => z === o.zone);
-    if (!zone || typeof o.blockId !== "string" || !ids.has(o.blockId) || out.some((p) => p.blockId === o.blockId)) continue;
-    out.push({ zone, blockId: o.blockId, why: typeof o.why === "string" ? o.why.trim().slice(0, 200) : "" });
-  }
-  return out;
+  for (const p of s.t1gaps.slice(0, 1)) sections.push({ text: `**${p.name}** is Tier 1 with ${blockers(p)} governance item${blockers(p) === 1 ? "" : "s"} missing.`, widget: { type: "governance", proj: p.id } });
+  if (s.brief) sections.push({ text: `This week's brief by ${state.agents.find((a) => a.id === s.brief?.agentId)?.name ?? "Monday"}: ${s.brief.summary}`, widget: null });
+  if (s.upcoming.length) sections.push({ text: "Coming up.", widget: { type: "upcoming", days: 56 } });
+  if (s.recent.length) sections.push({ text: state.workspace.lastGlanceAt ? "Since you last looked." : "Since yesterday.", widget: { type: "activity", hours: 48 } });
+  return { headline: narrative[0] ?? "Nothing needs you right now.", sections: sections.slice(0, 7) };
 };
 
 /**

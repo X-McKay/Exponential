@@ -362,6 +362,22 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX layouts_by_user ON layouts(user_ini, at);
   `,
+  // The daily brief replaces the card layout: prose sections, each with at
+  // most one widget that points at facts by id. Still pointers and text,
+  // never composed state.
+  `
+  DROP TABLE layouts;
+  CREATE TABLE daily_briefs (
+    run_id TEXT PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE,
+    user_ini TEXT NOT NULL,
+    state_hash TEXT NOT NULL,
+    headline TEXT NOT NULL,
+    sections TEXT NOT NULL,
+    model TEXT,
+    at TEXT NOT NULL
+  );
+  CREATE INDEX daily_briefs_by_user ON daily_briefs(user_ini, at);
+  `,
 ];
 
 export const migrate = (db: Database): void => {

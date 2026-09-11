@@ -119,11 +119,11 @@ export const AGENTS: Agent[] = [
     id: "curator",
     name: "Curator",
     grad: "linear-gradient(135deg,#8B96F8,#39C5CF)",
-    purpose: "Lays out Glance for the reader: which of the composer's cards to show, where, and why they matter today",
+    purpose: "Writes the reader's daily brief from the signals the composer found, with a widget wherever a visual earns its place",
     kind: "curator",
     model: null,
     owner: "AM",
-    caps: ["Picks from found cards only", "Decide / watch / know", "One line of why", "Re-curates when facts move"],
+    caps: ["Facts from signals only", "Widgets by id", "Tables when warranted", "Rewrites when facts move"],
     schedule: "nightly",
     prompt: null,
   },
@@ -152,7 +152,7 @@ export const EVAL_CASES: EvalCase[] = [
   { id: "audie-ima-audit", agentId: "audie", proj: "ima", instruction: "Full audit ahead of R1 shadow mode.", expectations: ["Flags Tier 1 exposure with attention set", "Cites the recall gap (86% vs 88%)", "Names the pending security review and model risk assessment", "Proposes at least one concrete change"] },
   { id: "audie-sector-habits", agentId: "audie", proj: "sector", instruction: "Code-quality and delivery habits review.", expectations: ["Cites 58% coverage on sector-report-agents", "Mentions the flaky failing build", "Recommends a concrete CI or review practice"] },
   { id: "ask-workspace-blocked", agentId: "ask", proj: "ima", instruction: "Why is R1 blocked and what would unblock it fastest?", expectations: ["Lists the unmet R1 criteria", "Identifies the recall gate as the closest fix", "Links to the IMA roadmap or value page"] },
-  { id: "curator-morning", agentId: "curator", proj: "ima", instruction: "", expectations: ["Shows the blocked R1 Shadow mode release under watch or decide", "Shows the Tier 1 governance gaps card", "Every card's reason cites a fact from that card and nothing else", "Uses at most six cards with a headline under 120 characters"] },
+  { id: "curator-morning", agentId: "curator", proj: "ima", instruction: "", expectations: ["Covers the blocked R1 Shadow mode release with a release widget", "Covers the Tier 1 governance gaps", "Every number in the prose appears in the signals", "At most six sections and a one-sentence headline under 120 characters"] },
 ];
 
 interface SampleRun {

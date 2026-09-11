@@ -28,7 +28,7 @@ export interface RuleInput {
   /** Proposals the model returned vs those that survived validation. */
   proposalsReturned: number;
   proposalsKept: number;
-  /** Layout placements the curator returned vs those that named a real card. */
+  /** Widgets the curator returned vs those that pointed at facts that exist. */
   placements?: { returned: number; kept: number };
 }
 
@@ -49,7 +49,7 @@ export const ruleScores = (input: RuleInput, at: string): RunScore[] => {
     out.push({ runId: run.id, scorer: "rules", dimension: "proposals_valid", score: input.proposalsKept / input.proposalsReturned, note: `${input.proposalsKept} of ${input.proposalsReturned} proposals well-formed and pointing at real items`, at });
   }
   if (input.placements && input.placements.returned > 0) {
-    out.push({ runId: run.id, scorer: "rules", dimension: "layout_valid", score: input.placements.kept / input.placements.returned, note: `${input.placements.kept} of ${input.placements.returned} placements named a card the composer found`, at });
+    out.push({ runId: run.id, scorer: "rules", dimension: "widgets_valid", score: input.placements.kept / input.placements.returned, note: `${input.placements.kept} of ${input.placements.returned} widgets pointed at facts that exist`, at });
   }
   return out;
 };
@@ -66,7 +66,7 @@ const RUBRIC: Record<AgentKind, string> = {
   brief: "A weekly brief under 400 words for one person: what moved, what is blocked, decisions waiting on them, proposals pending; numbers exact; no padding.",
   tuner: "An evidence-based critique of an agent's recent runs and a concise, specific change to its extra instructions.",
   scout: "A factual comparison of models on the same benchmark with a recommendation only where the numbers justify it.",
-  curator: "A layout of at most six cards chosen from the candidates only, sorted into decide / watch / know by what the reader must act on, each with a one-line reason grounded in the card's facts, under a headline of at most 120 characters. Blocked releases and Tier 1 gaps must not be hidden.",
+  curator: "A daily brief of at most six short sections, most urgent first (decisions, then risks, then what moved), every number taken from the signals, with a widget wherever a visual says it better than prose and no section repeating another. A blocked release, a Tier 1 gap, and pending proposals must not be left out. Headline under 120 characters, one plain sentence.",
 };
 
 const JUDGE_SCHEMA = {

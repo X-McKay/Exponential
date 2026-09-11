@@ -5,7 +5,7 @@
 
 import type { Database } from "bun:sqlite";
 import { EVENT_WINDOW_DAYS, GSTATUS_LABEL, RUN_WINDOW_DAYS, deriveDevEvents } from "@valueflow/domain";
-import type { Agent, AgentRun, AppState, Build, CalendarEvent, Criterion, DevFacts, Event, GlanceLayout, GovernanceItem, Metric, MetricReading, Milestone, MilestoneStatus, Project, PromptVersion, Proposal, ProposalAction, PullRequest, Release, RiskTier, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
+import type { Agent, AgentRun, AppState, Build, CalendarEvent, Criterion, DevFacts, Event, DailyBrief, GovernanceItem, Metric, MetricReading, Milestone, MilestoneStatus, Project, PromptVersion, Proposal, ProposalAction, PullRequest, Release, RiskTier, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
 import type { AgentsInput, CalendarEventInput, GovernanceInput, GovernanceItemInput, MilestoneInput, ProjectInput, ReleaseInput, RuleInput, TargetsInput, WorkspaceInput } from "@valueflow/shared";
 
 export class NotFound extends Error {
@@ -305,7 +305,7 @@ export const loadState = (db: Database, now: Date = new Date()): AppState => {
     scores: loadScores(db, now),
     rules: loadRules(db),
     promptVersions: loadPromptVersions(db),
-    layout: loadLayout(db, loadWorkspace(db).user.ini),
+    brief: loadBrief(db, loadWorkspace(db).user.ini),
     events: loadEvents(db, now),
     calendar: loadCalendar(db),
   };
@@ -712,26 +712,26 @@ export const recordGlanceView = (db: Database, ini: string, at: string): void =>
   db.query("INSERT OR REPLACE INTO page_views (user_ini, page, at) VALUES (?, 'glance', ?)").run(ini, at);
 };
 
-interface LayoutRow {
+interface BriefRow {
   run_id: string;
   user_ini: string;
   state_hash: string;
   headline: string;
-  placements: string;
+  sections: string;
   model: string | null;
   at: string;
 }
 
-const toLayout = (r: LayoutRow): GlanceLayout => ({ runId: r.run_id, at: r.at, stateHash: r.state_hash, headline: r.headline, placements: JSON.parse(r.placements) as GlanceLayout["placements"], model: r.model });
+const toBrief = (r: BriefRow): DailyBrief => ({ runId: r.run_id, at: r.at, stateHash: r.state_hash, headline: r.headline, sections: JSON.parse(r.sections) as DailyBrief["sections"], model: r.model });
 
-/** The newest curated layout for a user, or null. */
-export const loadLayout = (db: Database, ini: string): GlanceLayout | null => {
-  const r = db.query<LayoutRow, [string]>("SELECT * FROM layouts WHERE user_ini = ? ORDER BY at DESC LIMIT 1").get(ini);
-  return r ? toLayout(r) : null;
+/** The newest daily brief for a user, or null. */
+export const loadBrief = (db: Database, ini: string): DailyBrief | null => {
+  const r = db.query<BriefRow, [string]>("SELECT * FROM daily_briefs WHERE user_ini = ? ORDER BY at DESC LIMIT 1").get(ini);
+  return r ? toBrief(r) : null;
 };
 
-export const insertLayout = (db: Database, ini: string, l: GlanceLayout): void => {
-  db.query("INSERT OR REPLACE INTO layouts (run_id, user_ini, state_hash, headline, placements, model, at) VALUES (?,?,?,?,?,?,?)").run(l.runId, ini, l.stateHash, l.headline, JSON.stringify(l.placements), l.model, l.at);
+export const insertBrief = (db: Database, ini: string, b: DailyBrief): void => {
+  db.query("INSERT OR REPLACE INTO daily_briefs (run_id, user_ini, state_hash, headline, sections, model, at) VALUES (?,?,?,?,?,?,?)").run(b.runId, ini, b.stateHash, b.headline, JSON.stringify(b.sections), b.model, b.at);
 };
 
 export const setWorkspace = (db: Database, w: WorkspaceInput): void => {

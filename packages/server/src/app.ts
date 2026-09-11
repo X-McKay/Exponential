@@ -56,7 +56,7 @@ import {
 import { nextRuleId } from "@valueflow/domain";
 import type { Rule } from "@valueflow/domain";
 import { askWorkspace } from "./chat.ts";
-import { curateGlance, layoutIsCurrent } from "./curator.ts";
+import { briefIsCurrent, curateGlance } from "./curator.ts";
 import { recordGlanceView } from "./repo.ts";
 import type { BriefDelivery } from "./brief.ts";
 import { promptVersion } from "./prompts.ts";
@@ -170,7 +170,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   const curateLater = (s: ReturnType<typeof loadState>) => {
     if (!llm || !autoCurate || curating) return;
     const curator = s.agents.find((a) => a.kind === "curator");
-    if (!curator || layoutIsCurrent(s)) return;
+    if (!curator || briefIsCurrent(s)) return;
     const hash = JSON.stringify([s.proposals.filter((p) => p.state === "pending").map((p) => p.id), s.events[0]?.ref ?? null, s.runs[0]?.id ?? null]);
     if (hash === lastCurationHash) return;
     lastCurationHash = hash;
@@ -223,7 +223,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     if (!curator) throw new HttpError(409, "no curator agent is installed");
     const run = await curateGlance(db, llm, curator, now());
     if (run.state !== "failed") judgeLater(run.id);
-    return json({ run, layout: state().layout });
+    return json({ run, brief: state().brief });
   });
 
   on("PUT", patterns.workspace, async (req) => {
