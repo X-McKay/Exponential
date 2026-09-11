@@ -440,7 +440,17 @@ export function App() {
               <h1 style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em", margin: 0 }}>Glance</h1>
               <span style={{ fontSize: 12, color: C.dim }}>{dayLabel(state.asOf)}</span>
             </Header>
-            <GlancePage state={state} userName={firstName} onOpen={openProject} onOpenAgents={() => go("agents", null)} onOpenInbox={() => go("inbox", null)} />
+            <GlancePage
+              state={state}
+              userName={firstName}
+              onOpen={openProject}
+              onOpenAgents={() => go("agents", null)}
+              onOpenInbox={() => go("inbox", null)}
+              onDecide={(id, d) => void store.decideProposal(id, d)}
+              onRate={(id, r) => void store.rateRun(id, r)}
+              onCurate={store.curateGlance}
+              onSeen={store.markGlanceSeen}
+            />
           </>
         ) : view.page === "inbox" ? (
           <>

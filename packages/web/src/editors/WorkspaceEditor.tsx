@@ -10,7 +10,7 @@ export function WorkspaceEditor({ workspace, onSave, onClose }: { workspace: Wor
   const [ini, setIni] = useState(workspace.user.ini);
   const valid = name.trim() !== "" && ini.trim() !== "";
   const submit = () => {
-    if (valid) onSave({ user: { name: name.trim(), ini: ini.trim().toUpperCase() } });
+    if (valid) onSave({ ...workspace, user: { name: name.trim(), ini: ini.trim().toUpperCase() } });
   };
   return (
     <Modal

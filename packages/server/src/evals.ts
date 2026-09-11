@@ -15,6 +15,7 @@ import type { Database } from "bun:sqlite";
 import { EVAL_CASES, JUDGE_DIMENSIONS, ungroundedTokens } from "@valueflow/domain";
 import type { AgentKind, AgentRun, EvalCase, RunScore } from "@valueflow/domain";
 import { runAgent } from "./agents.ts";
+import { curateGlance } from "./curator.ts";
 import { extractJson } from "./llm.ts";
 import type { Llm } from "./llm.ts";
 import { NotFound, loadRunContext, loadState, upsertScore } from "./repo.ts";
@@ -27,6 +28,8 @@ export interface RuleInput {
   /** Proposals the model returned vs those that survived validation. */
   proposalsReturned: number;
   proposalsKept: number;
+  /** Layout placements the curator returned vs those that named a real card. */
+  placements?: { returned: number; kept: number };
 }
 
 /** Deterministic scores for a finished run. */
@@ -45,6 +48,9 @@ export const ruleScores = (input: RuleInput, at: string): RunScore[] => {
   if (input.proposalsReturned > 0) {
     out.push({ runId: run.id, scorer: "rules", dimension: "proposals_valid", score: input.proposalsKept / input.proposalsReturned, note: `${input.proposalsKept} of ${input.proposalsReturned} proposals well-formed and pointing at real items`, at });
   }
+  if (input.placements && input.placements.returned > 0) {
+    out.push({ runId: run.id, scorer: "rules", dimension: "layout_valid", score: input.placements.kept / input.placements.returned, note: `${input.placements.kept} of ${input.placements.returned} placements named a card the composer found`, at });
+  }
   return out;
 };
 
@@ -60,6 +66,7 @@ const RUBRIC: Record<AgentKind, string> = {
   brief: "A weekly brief under 400 words for one person: what moved, what is blocked, decisions waiting on them, proposals pending; numbers exact; no padding.",
   tuner: "An evidence-based critique of an agent's recent runs and a concise, specific change to its extra instructions.",
   scout: "A factual comparison of models on the same benchmark with a recommendation only where the numbers justify it.",
+  curator: "A layout of at most six cards chosen from the candidates only, sorted into decide / watch / know by what the reader must act on, each with a one-line reason grounded in the card's facts, under a headline of at most 120 characters. Blocked releases and Tier 1 gaps must not be hidden.",
 };
 
 const JUDGE_SCHEMA = {
@@ -169,9 +176,14 @@ export const runBenchmark = async (db: Database, llm: Llm, now: Date, agentId?: 
   const out: AgentRun[] = [];
   onProgress?.(0, cases.length);
   for (const [i, c] of cases.entries()) {
-    const projects = loadState(db, now).projects;
-    if (!projects.some((p) => p.id === c.proj)) continue;
-    const run = await runAgent(db, llm, { agentId: c.agentId, proj: c.proj, instruction: c.instruction }, new Date(), { benchmark: c.id, ...(model ? { model } : {}) });
+    const st = loadState(db, now);
+    if (!st.projects.some((p) => p.id === c.proj)) continue;
+    const agent = st.agents.find((a) => a.id === c.agentId);
+    if (!agent) continue;
+    const run =
+      agent.kind === "curator"
+        ? await curateGlance(db, llm, model ? { ...agent, model } : agent, new Date(), { benchmark: c.id })
+        : await runAgent(db, llm, { agentId: c.agentId, proj: c.proj, instruction: c.instruction }, new Date(), { benchmark: c.id, ...(model ? { model } : {}) });
     if (run.state !== "failed") await judgeRun(db, llm, run.id, new Date()).catch(() => []);
     out.push(run);
     onProgress?.(i + 1, cases.length);

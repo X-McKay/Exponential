@@ -17,11 +17,14 @@ import type { CriterionEval, ReleaseState } from "./derive.ts";
 import { attentionRuns, latestRunOfKind } from "./agents.ts";
 import { deriveUpcoming, recentEvents } from "./feed.ts";
 import type { FeedItem, Upcoming } from "./feed.ts";
-import type { AgentRun, AppState, Build, Dim, GovStatus, Metric, Milestone, Project, ProjectTab, PullRequest, Release } from "./types.ts";
+import { ZONES } from "./types.ts";
+import type { AgentRun, AppState, Build, Dim, GlanceLayout, GovStatus, Metric, Milestone, Placement, Project, ProjectTab, Proposal, PullRequest, Release, Zone } from "./types.ts";
 
 export type Tone = "bad" | "warn" | "good" | "info";
 
 interface BlockBase {
+  /** Stable identity (kind plus the thing it is about) so a layout can point at it. */
+  id: string;
   /** Priority; higher sorts first. */
   priority: number;
   span: 1 | 2;
@@ -50,7 +53,8 @@ export type Block =
   | (BlockBase & { kind: "agent_flag"; run: AgentRun; agentName: string })
   | (BlockBase & { kind: "brief"; run: AgentRun; agentName: string })
   | (BlockBase & { kind: "upcoming"; items: Upcoming[]; more: number })
-  | (BlockBase & { kind: "activity"; items: FeedItem[]; more: number });
+  | (BlockBase & { kind: "activity"; items: FeedItem[]; more: number })
+  | (BlockBase & { kind: "decisions"; proposals: Proposal[]; more: number });
 
 export type BlockKind = Block["kind"];
 
@@ -162,7 +166,12 @@ export const detectSignals = (state: AppState, cal: Calendar = calendarOf(state)
   const ratio = (p: Project): number => (p.targets.fte > 0 ? realized(p, "fte") / p.targets.fte : 0);
   const bestValue = [...state.projects].sort((a, b) => ratio(b) - ratio(a))[0] ?? null;
 
-  const recent: FeedItem[] = recentEvents(state.events, cal.asOf).map((e) => ({ at: e.at, type: e.type, proj: e.proj, tab: e.tab, text: e.text }));
+  // "Know" starts where the reader left off; without a last visit, the trailing 48 hours.
+  const since = state.workspace.lastGlanceAt;
+  const window = since ? Math.max(48, Math.min(24 * 14, (new Date(cal.asOf).getTime() - new Date(since).getTime()) / 3_600_000)) : 48;
+  const recent: FeedItem[] = recentEvents(state.events, cal.asOf, window)
+    .filter((e) => !since || e.at > since || window === 48)
+    .map((e) => ({ at: e.at, type: e.type, proj: e.proj, tab: e.tab, text: e.text }));
 
   return {
     blocked,
@@ -238,6 +247,7 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
 
   for (const { p, r, st } of s.blocked) {
     blocks.push({
+      id: `blocked_release:${p.id}:${r.id}`,
       kind: "blocked_release",
       priority: 100,
       span: 2,
@@ -255,6 +265,7 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
 
   for (const { p, m, gap } of s.shortfalls.slice(0, 2)) {
     blocks.push({
+      id: `below_gate:${p.id}:${m.id}`,
       kind: "below_gate",
       priority: 90 - gap * 0.1,
       span: 1,
@@ -273,6 +284,7 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
   for (const { pid, pr } of s.failPRs.slice(0, 1)) {
     const fb = s.failBuilds.find((f) => f.pid === pid && (f.b.branch.includes(String(pr.number)) || f.b.repo === pr.repo));
     blocks.push({
+      id: `ci_failing:${pid}:${pr.repo}#${pr.number}`,
       kind: "ci_failing",
       priority: 80,
       span: 1,
@@ -290,6 +302,7 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
   for (const p of s.t1gaps) {
     const n = blockers(p);
     blocks.push({
+      id: `tier1_gaps:${p.id}`,
       kind: "tier1_gaps",
       priority: 75,
       span: 1,
@@ -307,6 +320,7 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
   if (s.brief) {
     const agent = state.agents.find((a) => a.id === s.brief?.agentId);
     blocks.push({
+      id: `brief:${s.brief.id}`,
       kind: "brief",
       priority: 110,
       span: 2,
@@ -324,6 +338,7 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
   for (const run of s.flags.slice(0, 1)) {
     const agent = state.agents.find((a) => a.id === run.agentId);
     blocks.push({
+      id: `agent_flag:${run.id}`,
       kind: "agent_flag",
       priority: 70,
       span: 1,
@@ -340,6 +355,7 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
 
   for (const { p, m, close } of s.nearStretch.slice(0, 1)) {
     blocks.push({
+      id: `near_stretch:${p.id}:${m.id}`,
       kind: "near_stretch",
       priority: 62,
       span: 1,
@@ -358,6 +374,7 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
   if (s.bestValue) {
     const p = s.bestValue;
     blocks.push({
+      id: `value_trajectory:${p.id}`,
       kind: "value_trajectory",
       priority: 55,
       span: 1,
@@ -376,6 +393,7 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
 
   for (const { p, r } of s.readyRel.slice(0, 1)) {
     blocks.push({
+      id: `ready_release:${p.id}:${r.id}`,
       kind: "ready_release",
       priority: 52,
       span: 1,
@@ -392,6 +410,7 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
   const up0 = s.upcoming[0];
   if (up0) {
     blocks.push({
+      id: "upcoming",
       kind: "upcoming",
       priority: 50,
       span: 1,
@@ -409,6 +428,7 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
   const rec0 = s.recent[0];
   if (rec0) {
     blocks.push({
+      id: "activity",
       kind: "activity",
       priority: 45,
       span: 2,
@@ -417,9 +437,28 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
       proj: rec0.proj,
       tab: rec0.tab,
       projName: null,
-      title: "Since yesterday",
+      title: state.workspace.lastGlanceAt ? `Since you last looked · ${s.recent.length} event${s.recent.length === 1 ? "" : "s"}` : "Since yesterday",
       items: s.recent.slice(0, 5),
       more: Math.max(0, s.recent.length - 5),
+    });
+  }
+
+  const pending = state.proposals.filter((p) => p.state === "pending");
+  const first = pending[0];
+  if (first) {
+    blocks.push({
+      id: "decisions",
+      kind: "decisions",
+      priority: 105,
+      span: 2,
+      tone: "info",
+      tag: "Waiting on you",
+      proj: first.proj ?? state.projects[0]?.id ?? "",
+      tab: "overview",
+      projName: null,
+      title: `${pending.length} proposal${pending.length === 1 ? "" : "s"} to accept or dismiss`,
+      proposals: pending.slice(0, 3),
+      more: Math.max(0, pending.length - 3),
     });
   }
 
@@ -433,6 +472,139 @@ export interface Glance {
   blocks: Block[];
   projectCount: number;
 }
+
+// ---- zones & layouts ----------------------------------------------------
+
+/** Where a block belongs by its nature, when no curator has said otherwise. */
+export const zoneOf = (kind: BlockKind): Zone => {
+  switch (kind) {
+    case "decisions":
+    case "agent_flag":
+    case "ready_release":
+      return "decide";
+    case "blocked_release":
+    case "below_gate":
+    case "ci_failing":
+    case "tier1_gaps":
+    case "near_stretch":
+    case "value_trajectory":
+      return "watch";
+    case "brief":
+    case "upcoming":
+    case "activity":
+      return "know";
+  }
+};
+
+/** How many cards each zone shows before the rest fold into "more". */
+export const ZONE_CAP: Record<Zone, number> = { decide: 2, watch: 3, know: 2 };
+
+export interface Placed {
+  block: Block;
+  why: string | null;
+}
+
+export interface ResolvedLayout {
+  zones: Record<Zone, Placed[]>;
+  /** Blocks the layout did not place, in composer order. */
+  more: Block[];
+  headline: string | null;
+  /** Null when the composer's default order is showing. */
+  curated: GlanceLayout | null;
+}
+
+/** The composer's own layout: zone by kind, priority order, capped per zone. */
+export const defaultLayout = (blocks: Block[]): ResolvedLayout => {
+  const zones: Record<Zone, Placed[]> = { decide: [], watch: [], know: [] };
+  const more: Block[] = [];
+  for (const b of blocks) {
+    const z = zoneOf(b.kind);
+    if (zones[z].length < ZONE_CAP[z]) zones[z].push({ block: b, why: null });
+    else more.push(b);
+  }
+  return { zones, more, headline: null, curated: null };
+};
+
+/**
+ * Resolve a curated layout against today's blocks: placements whose block is
+ * gone are dropped, blocks it never mentioned fold into "more". Falls back to
+ * the default when the layout places nothing that still exists.
+ */
+export const applyLayout = (blocks: Block[], layout: GlanceLayout | null): ResolvedLayout => {
+  if (!layout) return defaultLayout(blocks);
+  const byId = new Map(blocks.map((b) => [b.id, b]));
+  const zones: Record<Zone, Placed[]> = { decide: [], watch: [], know: [] };
+  const used = new Set<string>();
+  for (const p of layout.placements) {
+    const block = byId.get(p.blockId);
+    if (!block || used.has(p.blockId)) continue;
+    used.add(p.blockId);
+    zones[p.zone].push({ block, why: p.why || null });
+  }
+  if (used.size === 0) return defaultLayout(blocks);
+  return { zones, more: blocks.filter((b) => !used.has(b.id)), headline: layout.headline || null, curated: layout };
+};
+
+/** Placements as the curator returned them, validated against the blocks that exist. */
+export const validPlacements = (raw: unknown, blocks: Pick<Block, "id">[]): Placement[] => {
+  if (!Array.isArray(raw)) return [];
+  const ids = new Set(blocks.map((b) => b.id));
+  const out: Placement[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const o = item as Record<string, unknown>;
+    const zone = ZONES.find((z) => z === o.zone);
+    if (!zone || typeof o.blockId !== "string" || !ids.has(o.blockId) || out.some((p) => p.blockId === o.blockId)) continue;
+    out.push({ zone, blockId: o.blockId, why: typeof o.why === "string" ? o.why.trim().slice(0, 200) : "" });
+  }
+  return out;
+};
+
+/**
+ * A fingerprint of what the composer found, so a layout knows when facts moved
+ * under it. The activity card's title counts events since the reader's last
+ * visit, which changes on every visit without any fact moving, so only its id
+ * counts.
+ */
+export const blocksHash = (blocks: Pick<Block, "id" | "title" | "kind">[]): string => {
+  let h = 0x811c9dc5;
+  for (const ch of blocks.map((b) => (b.kind === "activity" ? b.id : `${b.id}|${b.title}`)).join("\n")) {
+    h ^= ch.charCodeAt(0);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+};
+
+/** One line per candidate block for the curator's briefing: id, kind, project, title, and the facts it carries. */
+export const describeBlock = (b: Block): string => {
+  const head = `${b.id} [${b.kind}${b.projName ? `, ${b.projName}` : ""}, ${b.tone}] ${b.title}`;
+  switch (b.kind) {
+    case "blocked_release":
+      return `${head} — unmet: ${b.rows.filter((r) => !r.eval.ok).map((r) => r.label).join("; ") || "none"}`;
+    case "below_gate":
+      return `${head} — ${b.metrics.map((x) => `${x.label} ${x.current}% vs base ${x.base}%`).join(", ")}`;
+    case "ci_failing":
+      return `${head} — ${b.pr.repo} #${b.pr.number}${b.build ? `; ${b.build.note}` : ""}`;
+    case "tier1_gaps":
+      return `${head} — missing: ${b.missing.join(", ")}`;
+    case "near_stretch":
+      return `${head} — ${b.metrics.map((x) => `${x.label} ${x.current}% vs stretch ${x.stretch}%`).join(", ")}`;
+    case "value_trajectory":
+      return `${head} — realized ${b.realized}% of ${b.target}%`;
+    case "ready_release":
+      return head;
+    case "agent_flag":
+      return `${head} — by ${b.agentName}`;
+    case "brief":
+      return `${head} — this week's brief by ${b.agentName}`;
+    case "upcoming":
+      return `${head} — ${b.items.map((u) => `${u.date} ${u.text}`).join("; ")}`;
+    case "activity":
+      return `${head} — ${b.items.map((i) => i.text).join("; ")}`;
+    case "decisions":
+      return `${head} — ${b.proposals.map((p) => `${p.id} from ${p.agentId}`).join(", ")}`;
+  }
+};
 
 /** The single entry point: full state in, ranked typed blocks out. */
 export const composeGlance = (state: AppState, cal: Calendar = calendarOf(state)): Block[] => rankBlocks(detectSignals(state, cal), state);

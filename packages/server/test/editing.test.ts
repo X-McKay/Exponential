@@ -147,10 +147,10 @@ describe("releases", () => {
 describe("workspace", () => {
   test("PUT changes the signed-in user shown everywhere", async () => {
     const app = testApp();
-    expect((await stateOf(app)).workspace).toEqual({ user: { name: "Al McKay", ini: "AM" } });
+    expect((await stateOf(app)).workspace).toEqual({ user: { name: "Al McKay", ini: "AM" }, lastGlanceAt: null });
     const { status, body } = await app.send<Workspace>("PUT", routes.workspace(), { user: { name: "Priya Nair", ini: "PN" } });
     expect(status).toBe(200);
-    expect(body).toEqual({ user: { name: "Priya Nair", ini: "PN" } });
+    expect(body).toEqual({ user: { name: "Priya Nair", ini: "PN" }, lastGlanceAt: null });
     expect((await stateOf(app)).workspace.user.name).toBe("Priya Nair");
     expect((await app.send("PUT", routes.workspace(), { user: { name: "", ini: "TOOLONG" } })).status).toBe(400);
   });

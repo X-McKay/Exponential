@@ -83,6 +83,7 @@ Settings come from the environment. Bun loads `.env` from its working directory;
 | `EVAL_JUDGE_MODEL` | unset (same as `LLM_MODEL`) | A different model for the judge, so agents are not graded by themselves. |
 | `LLM_MODELS` | unset | Comma-separated candidate models the scout benchmarks against the current one. An entry may be `name@https://other-host/v1` to reach a second endpoint (same API key). |
 | `BRIEF_WEBHOOK_URL` | unset (in-app only) | Also POST the weekly brief as JSON (`{ text, title, summary, body, runId, to }`) to Slack, Teams, Zapier, or your own endpoint. |
+| `GLANCE_CURATE` | on | `off` keeps Glance in the composer's default order instead of re-curating in the background when the cards change. |
 | `NODE_ENV` | unset | `production` serves the built bundle instead of bundling on the fly. `bun run start` sets it. |
 
 ### Changing dependencies
@@ -171,6 +172,12 @@ An agent is a definition (kind, model, owner, schedule); a run is a fact. A run 
 
 **Setting up a project from documents.** *Set up from documents…* on Portfolio hands a setup agent a name, a brief, pasted snippets, and uploaded Word, PowerPoint, or text files (a dependency-free zip reader pulls the text out of `.docx` and `.pptx`; PDFs are reported as unsupported). The agent drafts every field of the project record — stage, risk tier, committee approval, targets, team, repositories, milestones with gate metrics, governance items with evidence-based statuses, releases with criteria — each with a rationale, its source document, and a confidence. The review step lets you untick, edit, or ask the agent to change things (rows you edited survive a refinement), then creates everything in one transaction.
 
+### Glance: composed from facts, laid out by a curator
+
+Glance has three zones and a cap: **Decide** (proposals waiting, agent flags, releases ready to ship), **Watch** (blocked releases, metrics under a gate, failing CI, Tier 1 gaps, stretch within reach, the value trajectory), and **Know** (this week's brief, activity since you last looked, what is coming). A deterministic composer finds every card from facts, each with a stable id. With a model configured, the **Curator** agent lays the page out: it receives the candidate cards and the reader's context (name, items they own, proposals pending, last visit) and returns, under a JSON schema whose block ids are an enum of what exists, at most six placements with a zone and a one-line reason, plus a headline. It cannot invent a card or a number. The layout is stored as pointers to block ids, so a day-old layout still renders this morning's figures, and it is a run like any other: rule-scored for validity (`layout_valid`), judged, rated with the thumbs on the page, and benchmarked (`curator-morning` expects the blocked release and the Tier 1 gaps to be shown). Cards the curator left out fold into *more*. Without a model, or when a layout no longer matches any current card, the composer's own order and zone caps show. The server re-curates in the background when the cards change (a fingerprint of their ids and titles, ignoring the visit-dependent activity count), never per page load; *Re-curate* asks for a fresh layout now.
+
+The proposals card accepts and dismisses inline. "Since you last looked" starts at the reader's last visit, recorded after a few seconds on the page (`POST /api/glance/seen`).
+
 ### Glance as a composition contract
 
 `composeGlance(state) → Block[]` in `packages/domain/src/glance.ts` runs three replaceable stages behind one data contract: `detectSignals` (deterministic detectors), `rankBlocks` (priority ranker), and `writeNarrative` (the briefing sentences). Blocks are typed variants (`blocked_release`, `below_gate`, `ci_failing`, `tier1_gaps`, `agent_flag`, `near_stretch`, `value_trajectory`, `ready_release`, `upcoming`, `activity`) carrying data only; the web app renders each kind with an exhaustive switch. An LLM can later replace the ranker or the narrative writer without touching the renderer.
@@ -239,6 +246,8 @@ To start from a clean slate rather than the sample portfolio, delete the three s
 | POST | `/api/runs/:id/judge` | |
 | POST | `/api/evals/benchmark` | `{ agentId? }` → 202; poll `GET /api/evals/benchmark` (`{ running, kind, done, total }`) |
 | POST | `/api/evals/scout` | `{ agentId?, models? }` → 202; same status endpoint |
+| POST | `/api/glance/seen` | records the reader's visit |
+| POST | `/api/glance/curate` | `{ run, layout }` from the curator now |
 | POST | `/api/agents/:aid/prompt` | `{ prompt: string \| null }` records a prompt version |
 | GET / POST | `/api/rules` | `RuleInput` |
 | PUT / DELETE | `/api/rules/:id` | `RuleInput` |

@@ -1,4 +1,4 @@
-import { PROJECT_KINDS, agentScorecard, promptVersion } from "@valueflow/domain";
+import { EVAL_CASES, agentScorecard, promptVersion } from "@valueflow/domain";
 import type { Agent, AgentRun, AgentScorecard, LlmInfo, PromptVersion, Proposal, RunScore } from "@valueflow/domain";
 import { AgentQuality } from "./AgentQuality.tsx";
 import { Caret, Tip, ghostBtn, reset } from "./primitives.tsx";
@@ -102,7 +102,7 @@ export function QualityTable({
             const latest = c.benchmarks[0];
             const previous = c.benchmarks[1];
             const delta = latest && previous && latest.overall !== null && previous.overall !== null ? latest.overall - previous.overall : null;
-            const benchmarkable = PROJECT_KINDS.includes(a.kind) && a.kind !== "rules";
+            const benchmarkable = EVAL_CASES.some((ec) => ec.agentId === a.id);
             const running = busy === a.id || busy === "all" || busy === `scout:${a.id}` || busy === "scout:all";
             return (
               <FragmentRow key={a.id}>

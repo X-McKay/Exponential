@@ -52,6 +52,10 @@ export interface Store {
   setAgentPrompt: (agentId: string, prompt: string | null) => Promise<void>;
   saveRule: (rule: Rule | null, input: RuleInput) => Promise<void>;
   deleteRule: (id: string) => Promise<void>;
+  /** The reader opened Glance: "since you last looked" starts now (applied on the next load, not this one). */
+  markGlanceSeen: () => Promise<void>;
+  /** Ask the curator for a fresh layout now. */
+  curateGlance: () => Promise<void>;
   saveCalendar: (ev: CalendarEvent, isNew: boolean) => Promise<void>;
   deleteCalendar: (id: string) => Promise<void>;
   saveWorkspace: (w: Workspace) => Promise<void>;
@@ -428,6 +432,23 @@ export const useStore = (): Store => {
     },
     [fail],
   );
+  const markGlanceSeen = useCallback(async () => {
+    try {
+      await api.glanceSeen();
+    } catch {
+      /* a missed view is not worth an error toast */
+    }
+  }, []);
+  const curateGlance = useCallback(async () => {
+    try {
+      const { run } = await api.curateGlance();
+      if (run.state === "failed") setError(`${run.summary}: ${run.error ?? "unknown error"}`);
+      else notify(`Glance re-curated: ${run.summary}`, "good");
+      await reload();
+    } catch (e) {
+      fail(e);
+    }
+  }, [fail, notify, reload]);
   const deleteRule = useCallback(
     (id: string) =>
       commit(
@@ -496,6 +517,8 @@ export const useStore = (): Store => {
       setAgentPrompt,
       saveRule,
       deleteRule,
+      markGlanceSeen,
+      curateGlance,
       saveCalendar,
       deleteCalendar,
       saveWorkspace,
@@ -531,6 +554,8 @@ export const useStore = (): Store => {
       setAgentPrompt,
       saveRule,
       deleteRule,
+      markGlanceSeen,
+      curateGlance,
       saveCalendar,
       deleteCalendar,
       saveWorkspace,

@@ -199,8 +199,8 @@ export interface DevFacts {
 
 // ---- agents -------------------------------------------------------------
 
-export type AgentKind = "deck" | "comms" | "ideation" | "audit" | "chat" | "rules" | "brief" | "tuner" | "scout";
-export const AGENT_KINDS: readonly AgentKind[] = ["deck", "comms", "ideation", "audit", "chat", "rules", "brief", "tuner", "scout"];
+export type AgentKind = "deck" | "comms" | "ideation" | "audit" | "chat" | "rules" | "brief" | "tuner" | "scout" | "curator";
+export const AGENT_KINDS: readonly AgentKind[] = ["deck", "comms", "ideation", "audit", "chat", "rules", "brief", "tuner", "scout", "curator"];
 /** Kinds briefed with one project at a time; the rest work over the whole workspace. */
 export const PROJECT_KINDS: readonly AgentKind[] = ["deck", "comms", "ideation", "audit", "chat", "rules"];
 /** Derived from runs: working while a run is in flight, scheduled when a schedule is set, otherwise idle. */
@@ -444,6 +444,34 @@ export interface WorkspaceUser {
 
 export interface Workspace {
   user: WorkspaceUser;
+  /** When the signed-in user last opened Glance; "since you last looked" starts here. */
+  lastGlanceAt: string | null;
+}
+
+/** Where a card sits on Glance: what needs a decision, what to keep an eye on, what happened. */
+export type Zone = "decide" | "watch" | "know";
+export const ZONES: readonly Zone[] = ["decide", "watch", "know"];
+
+export interface Placement {
+  zone: Zone;
+  blockId: string;
+  /** One line from the curator on why this matters to the reader today. */
+  why: string;
+}
+
+/**
+ * A curated Glance: which of the composer's blocks to show, where, and why.
+ * The model chose from blocks the composer found; it holds pointers, never
+ * values, so a day-old layout still renders this morning's numbers.
+ */
+export interface GlanceLayout {
+  runId: string;
+  at: string;
+  /** Hash of the candidate blocks the layout was made from; a different hash means facts moved. */
+  stateHash: string;
+  headline: string;
+  placements: Placement[];
+  model: string | null;
 }
 
 // ---- aggregate ----------------------------------------------------------
@@ -470,6 +498,8 @@ export interface AppState {
   rules: Rule[];
   /** Prompt changes people and the tuner made, newest first. */
   promptVersions: PromptVersion[];
+  /** The latest curated Glance for the signed-in user, or null for the composer's default order. */
+  layout: GlanceLayout | null;
   /** Newest first, trailing EVENT_WINDOW_DAYS. */
   events: Event[];
   calendar: CalendarEvent[];

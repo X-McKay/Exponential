@@ -19,6 +19,7 @@ const PLACEHOLDER: Record<Agent["kind"], string> = {
   brief: "",
   tuner: "",
   scout: "",
+  curator: "",
 };
 
 /** Start a run: pick the project (and optionally where the result should link) and give the agent an instruction. */

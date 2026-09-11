@@ -39,7 +39,7 @@ export const trajectory = (metric: Pick<Metric, "current">, seed: number, n = RE
 export const isSeeded = (db: Database): boolean =>
   (db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM projects").get()?.n ?? 0) > 0;
 
-export const fixtureState = (asOf = SEED_ASOF): AppState => ({ asOf, syncSource: null, workspace: WORKSPACE, projects: PROJECTS, releases: RELEASES, dev: DEV(asOf), agents: AGENTS, runs: RUNS(asOf), llm: null, proposals: [], scores: [], rules: RULES(asOf), promptVersions: [], events: seedEvents(asOf), calendar: CALENDAR(asOf) });
+export const fixtureState = (asOf = SEED_ASOF): AppState => ({ asOf, syncSource: null, workspace: WORKSPACE, projects: PROJECTS, releases: RELEASES, dev: DEV(asOf), agents: AGENTS, runs: RUNS(asOf), llm: null, proposals: [], scores: [], rules: RULES(asOf), promptVersions: [], layout: null, events: seedEvents(asOf), calendar: CALENDAR(asOf) });
 
 export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_NOW): void => {
   // Planned months are relative to the fixtures' own "today"; keep them the same distance from `now`.
@@ -120,7 +120,7 @@ export const ensureAgents = (db: Database): string[] => {
   const have = new Set(db.query<{ kind: string }, []>("SELECT kind FROM agents").all().map((r) => r.kind));
   const added: string[] = [];
   for (const a of AGENTS) {
-    if (have.has(a.kind) || !["chat", "rules", "brief", "tuner", "scout"].includes(a.kind)) continue;
+    if (have.has(a.kind) || !["chat", "rules", "brief", "tuner", "scout", "curator"].includes(a.kind)) continue;
     const sort = db.query<{ s: number }, []>("SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM agents").get()?.s ?? 0;
     db.query("INSERT INTO agents (id, sort, name, grad, purpose, kind, model, owner, caps, schedule, prompt) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run(a.id, sort, a.name, a.grad, a.purpose, a.kind, a.model, a.owner, JSON.stringify(a.caps), a.schedule, a.prompt);
     added.push(a.id);

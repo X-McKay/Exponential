@@ -109,7 +109,7 @@ describe("runAgent", () => {
     const later = new Date(SEED_NOW.getTime() + 30 * 3_600_000);
     const first = await runDue(db, llm, later);
     // Nightly: Audie and Sentry per project. Weekly, never run: Monday once, Coach once per agent with enough measured runs; Scout skips with a single model.
-    expect(first.map((r) => `${r.agentId}/${r.proj ?? "workspace"}`)).toEqual(["audie/onboarding", "audie/ima", "audie/sector", "sentry/onboarding", "sentry/ima", "sentry/sector", "monday/workspace", "coach/workspace", "coach/workspace", "coach/workspace"]);
+    expect(first.map((r) => `${r.agentId}/${r.proj ?? "workspace"}`)).toEqual(["audie/onboarding", "audie/ima", "audie/sector", "sentry/onboarding", "sentry/ima", "sentry/sector", "monday/workspace", "coach/workspace", "coach/workspace", "coach/workspace", "curator/workspace"]);
     expect(first.filter((r) => r.agentId === "coach").map((r) => r.instruction)).toEqual(["Tune Slider", "Tune Nova", "Tune Audie"]);
     expect(await runDue(db, llm, later)).toEqual([]);
   });

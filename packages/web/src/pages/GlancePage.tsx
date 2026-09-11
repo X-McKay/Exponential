@@ -1,9 +1,9 @@
-import { useMemo } from "react";
-import { calendarOf, composeGlancePage, monthLabel, relTime, shortAge } from "@valueflow/domain";
-import type { AppState, Block, Calendar, ProjectTab } from "@valueflow/domain";
+import { useEffect, useMemo, useState } from "react";
+import { ZONES, applyLayout, calendarOf, composeGlancePage, describeAction, monthLabel, relTime, shortAge } from "@valueflow/domain";
+import type { AppState, Block, Calendar, Placed, ProjectTab, Zone } from "@valueflow/domain";
 import { Bullet, GovStack, Spark } from "../charts/small.tsx";
 import { Markdown } from "../editors/RunAgent.tsx";
-import { Chip, ghostBtn, reset } from "../ui/primitives.tsx";
+import { Btn, Caret, Chip, Tip, ghostBtn, reset } from "../ui/primitives.tsx";
 import { C, FEED_COLOR, toneBorder, toneToChip } from "../theme.ts";
 
 const BRIEF_HEADINGS = ["what moved", "what is blocked", "decisions waiting", "proposals pending", "where to look"];
@@ -32,8 +32,36 @@ function More({ n }: { n: number }) {
 }
 
 /** Exhaustive renderer for every Glance card variant. */
-function Body({ b, cal, pending }: { b: Block; cal: Calendar; pending: number }) {
+function Body({ b, cal, pending, state, onDecide }: { b: Block; cal: Calendar; pending: number; state: AppState; onDecide: (id: string, d: "accept" | "dismiss") => void }) {
   switch (b.kind) {
+    case "decisions":
+      return (
+        <div style={{ marginTop: 4 }}>
+          {b.proposals.map((p) => (
+            <div key={p.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "5px 0", borderTop: `1px solid ${C.line}` }}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 12.5, color: C.text2, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{describeAction(p.action, state, p.proj)}</span>
+                <span style={{ fontSize: 11, color: C.dim }}>
+                  {state.agents.find((a) => a.id === p.agentId)?.name ?? p.agentId}
+                  {p.proj ? ` · ${state.projects.find((x) => x.id === p.proj)?.name ?? p.proj}` : ""}
+                </span>
+              </span>
+              <span
+                style={{ display: "inline-flex", gap: 4, flexShrink: 0 }}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+                role="presentation"
+              >
+                <Btn onClick={() => onDecide(p.id, "dismiss")}>Dismiss</Btn>
+                <Btn tone="primary" onClick={() => onDecide(p.id, "accept")}>
+                  Accept
+                </Btn>
+              </span>
+            </div>
+          ))}
+          <More n={b.more} />
+        </div>
+      );
     case "blocked_release":
       return (
         <div style={{ marginTop: 4 }}>
@@ -147,11 +175,18 @@ function Body({ b, cal, pending }: { b: Block; cal: Calendar; pending: number })
   }
 }
 
-function GlanceCard({ b, cal, pending, onOpen, onOpenAgents }: { b: Block; cal: Calendar; pending: number; onOpen: (id: string, tab: ProjectTab) => void; onOpenAgents: () => void }) {
+function GlanceCard({ placed, cal, state, onOpen, onOpenAgents, onOpenInbox, onDecide }: { placed: Placed; cal: Calendar; state: AppState; onOpen: (id: string, tab: ProjectTab) => void; onOpenAgents: () => void; onOpenInbox: () => void; onDecide: (id: string, d: "accept" | "dismiss") => void }) {
+  const b = placed.block;
+  const pending = b.kind === "agent_flag" ? state.proposals.filter((p) => p.runId === b.run.id && p.state === "pending").length : 0;
+  const open = () => (b.kind === "decisions" ? onOpenInbox() : b.kind === "brief" || (b.kind === "agent_flag" && !b.run.proj) ? onOpenAgents() : onOpen(b.proj, b.tab));
   return (
-    <button
-      type="button"
-      onClick={() => (b.kind === "brief" || (b.kind === "agent_flag" && !b.run.proj) ? onOpenAgents() : onOpen(b.proj, b.tab))}
+    <div
+      role="link"
+      tabIndex={0}
+      onClick={open}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") open();
+      }}
       className="vf-card vf-pop"
       style={{
         ...reset,
@@ -176,61 +211,158 @@ function GlanceCard({ b, cal, pending, onOpen, onOpenAgents }: { b: Block; cal: 
         <span style={{ color: C.dim, fontSize: 11 }}>›</span>
       </div>
       <div style={{ fontSize: 14, fontWeight: 500, color: C.text, lineHeight: 1.4, letterSpacing: "-0.01em", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{b.title}</div>
+      {placed.why && <div style={{ fontSize: 12, color: C.indigoSoft, lineHeight: 1.5 }}>{placed.why}</div>}
       <div style={{ maxHeight: 148, overflow: "hidden", position: "relative", flex: 1 }}>
-        <Body b={b} cal={cal} pending={pending} />
+        <Body b={b} cal={cal} pending={pending} state={state} onDecide={onDecide} />
         <span aria-hidden style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 22, background: `linear-gradient(to bottom, transparent, ${C.panel})`, pointerEvents: "none" }} />
       </div>
-    </button>
+    </div>
   );
 }
 
-export function GlancePage({ state, userName, onOpen, onOpenAgents, onOpenInbox }: { state: AppState; userName: string; onOpen: (id: string, tab: ProjectTab) => void; onOpenAgents: () => void; onOpenInbox: () => void }) {
+const ZONE_LABEL: Record<Zone, { title: string; sub: string }> = {
+  decide: { title: "Decide", sub: "waiting on you" },
+  watch: { title: "Watch", sub: "risks and gates" },
+  know: { title: "Know", sub: "what moved, what is coming" },
+};
+
+/**
+ * Three zones, six cards, one headline. The composer finds every card from
+ * facts; the curator (when a model is configured) picks which to show, where,
+ * and why. Everything it left out folds into "more".
+ */
+export function GlancePage({
+  state,
+  userName,
+  onOpen,
+  onOpenAgents,
+  onOpenInbox,
+  onDecide,
+  onRate,
+  onCurate,
+  onSeen,
+}: {
+  state: AppState;
+  userName: string;
+  onOpen: (id: string, tab: ProjectTab) => void;
+  onOpenAgents: () => void;
+  onOpenInbox: () => void;
+  onDecide: (id: string, d: "accept" | "dismiss") => void;
+  onRate: (runId: string, rating: 1 | -1 | null) => void;
+  onCurate: () => Promise<void>;
+  onSeen: () => void;
+}) {
   const cal = useMemo(() => calendarOf(state), [state]);
   const glance = useMemo(() => composeGlancePage(state, cal), [state, cal]);
+  const resolved = useMemo(() => applyLayout(glance.blocks, state.layout), [glance.blocks, state.layout]);
+  const [showMore, setShowMore] = useState(false);
+  const [curating, setCurating] = useState(false);
   const brief = glance.blocks.find((b) => b.kind === "brief");
   const moved = brief ? findSection(sectionsOf(brief.run.output), "what moved") : undefined;
-  const waiting = state.proposals.filter((p) => p.state === "pending").length;
+  const curatedRun = resolved.curated ? state.runs.find((r) => r.id === resolved.curated?.runId) : undefined;
+  const stale = resolved.curated !== null && !glance.blocks.some((b) => resolved.curated?.placements.some((p) => p.blockId === b.id));
+  const shown = ZONES.reduce((n, z) => n + resolved.zones[z].length, 0);
+
+  // A visit counts after a moment on the page; the next visit's "know" starts here.
+  useEffect(() => {
+    const t = setTimeout(onSeen, 4000);
+    return () => clearTimeout(t);
+  }, [onSeen]);
+
+  const headline = resolved.headline ?? brief?.run.summary ?? glance.narrative[0] ?? "Nothing needs you right now.";
+
   return (
     <div style={{ padding: "16px 20px 30px" }}>
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 16, fontWeight: 550, letterSpacing: "-0.015em", marginBottom: 6 }}>Morning, {userName} — {brief ? "here's your week" : "here's where things stand"}.</div>
-        {brief && <div style={{ fontSize: 13.5, color: C.text, lineHeight: 1.6, maxWidth: 760, marginBottom: 4 }}>{brief.run.summary}</div>}
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 16, fontWeight: 550, letterSpacing: "-0.015em", marginBottom: 6 }}>Morning, {userName}.</div>
+        <div style={{ fontSize: 14, color: C.text, lineHeight: 1.6, maxWidth: 760, marginBottom: 4 }}>{headline}</div>
         {moved ? (
           <div style={{ maxWidth: 760 }}>
-            <Markdown text={moved.body.split("\n").slice(0, 5).join("\n")} />
+            <Markdown text={moved.body.split("\n").slice(0, 4).join("\n")} />
           </div>
         ) : (
-          <div style={{ fontSize: 13, lineHeight: 1.7, color: C.mut, maxWidth: 720 }}>{glance.narrative.join(" ")}</div>
+          <div style={{ fontSize: 13, lineHeight: 1.7, color: C.mut, maxWidth: 720 }}>{glance.narrative.slice(resolved.headline ? 0 : 1).join(" ")}</div>
         )}
         <div style={{ fontSize: 11, color: C.dim, marginTop: 8, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span>
-            {brief ? `From this week's brief by ${brief.agentName}, ${relTime(brief.run.startedAt, cal.asOf)} · ` : ""}
-            composed from live state across {glance.projectCount} projects · cards appear, resize, and retire as conditions change
+            {resolved.curated ? `Laid out by ${state.agents.find((a) => a.kind === "curator")?.name ?? "the curator"} ${relTime(resolved.curated.at, cal.asOf)}${stale ? " (facts have moved since)" : ""}` : "Composer's default order"}
+            {brief ? ` · this week's brief by ${brief.agentName}` : ""} · {glance.projectCount} projects · {shown} of {glance.blocks.length} cards
           </span>
+          {curatedRun && (
+            <span style={{ display: "inline-flex", gap: 2, alignItems: "center" }}>
+              <Tip label="Good layout today">
+                <button type="button" aria-pressed={curatedRun.rating === 1} onClick={() => onRate(curatedRun.id, curatedRun.rating === 1 ? null : 1)} className="vf-ghost" style={{ ...ghostBtn, height: 22, padding: "0 6px", color: curatedRun.rating === 1 ? C.green : C.dim, borderColor: curatedRun.rating === 1 ? C.green : C.line2 }}>
+                  👍
+                </button>
+              </Tip>
+              <Tip label="Wrong things up top">
+                <button type="button" aria-pressed={curatedRun.rating === -1} onClick={() => onRate(curatedRun.id, curatedRun.rating === -1 ? null : -1)} className="vf-ghost" style={{ ...ghostBtn, height: 22, padding: "0 6px", color: curatedRun.rating === -1 ? C.red : C.dim, borderColor: curatedRun.rating === -1 ? C.red : C.line2 }}>
+                  👎
+                </button>
+              </Tip>
+            </span>
+          )}
+          {state.llm && (
+            <button
+              type="button"
+              className="vf-ghost"
+              disabled={curating}
+              onClick={() => {
+                setCurating(true);
+                void onCurate().finally(() => setCurating(false));
+              }}
+              style={{ ...ghostBtn, height: 22, fontSize: 11, opacity: curating ? 0.6 : 1 }}
+            >
+              {curating ? "Curating…" : resolved.curated ? "Re-curate" : "Curate with the model"}
+            </button>
+          )}
           {brief && (
             <button type="button" className="vf-ghost" onClick={onOpenAgents} style={{ ...ghostBtn, height: 22, fontSize: 11 }}>
               Read the full brief
             </button>
           )}
-          {waiting > 0 && (
-            <button type="button" className="vf-ghost" onClick={onOpenInbox} style={{ ...ghostBtn, height: 22, fontSize: 11, color: C.indigoHi }}>
-              {waiting} proposal{waiting === 1 ? "" : "s"} waiting on you ›
-            </button>
-          )}
         </div>
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-        {glance.blocks.map((b) => (
-          <GlanceCard
-            key={`${b.kind}:${b.proj}:${b.title}`}
-            b={b}
-            cal={cal}
-            pending={b.kind === "agent_flag" ? state.proposals.filter((p) => p.runId === b.run.id && p.state === "pending").length : 0}
-            onOpen={onOpen}
-            onOpenAgents={onOpenAgents}
-          />
-        ))}
-      </div>
+
+      {ZONES.map((z) => {
+        const cards = resolved.zones[z];
+        if (cards.length === 0) return null;
+        return (
+          <section key={z} style={{ marginBottom: 18 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: 12, fontWeight: 550, letterSpacing: "0.04em", textTransform: "uppercase", color: z === "decide" ? C.indigoHi : z === "watch" ? C.amber : C.mut }}>{ZONE_LABEL[z].title}</span>
+              <span style={{ fontSize: 11, color: C.dim }}>{ZONE_LABEL[z].sub}</span>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+              {cards.map((placed) => (
+                <GlanceCard key={placed.block.id} placed={placed} cal={cal} state={state} onOpen={onOpen} onOpenAgents={onOpenAgents} onOpenInbox={onOpenInbox} onDecide={onDecide} />
+              ))}
+            </div>
+          </section>
+        );
+      })}
+
+      {shown === 0 && (
+        <div style={{ padding: "28px 14px", textAlign: "center", color: C.dim, fontSize: 13, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12 }}>
+          Nothing needs you right now. Cards appear here as releases block, gates slip, CI fails, agents flag, or proposals arrive.
+        </div>
+      )}
+
+      {resolved.more.length > 0 && (
+        <section>
+          <button type="button" onClick={() => setShowMore((v) => !v)} className="vf-row" style={{ ...reset, display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: C.dim, padding: "6px 8px", borderRadius: 6, marginBottom: 8 }}>
+            <Caret open={showMore} /> {resolved.more.length} more card{resolved.more.length === 1 ? "" : "s"}
+            {!showMore && <span style={{ color: C.dim2 }}> · {resolved.more.map((b) => b.tag).join(", ")}</span>}
+          </button>
+          {showMore && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+              {resolved.more.map((b) => (
+                <GlanceCard key={b.id} placed={{ block: b, why: null }} cal={cal} state={state} onOpen={onOpen} onOpenAgents={onOpenAgents} onOpenInbox={onOpenInbox} onDecide={onDecide} />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }

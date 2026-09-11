@@ -1,6 +1,6 @@
 // ================= typed API client =================
 
-import type { Agent, AgentRun, CalendarEvent, DevFacts, GovernanceItem, ImpactPair, Metric, MetricReading, Milestone, Project, ProjectTab, Proposal, Release, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
+import type { Agent, AgentRun, CalendarEvent, DevFacts, GlanceLayout, GovernanceItem, ImpactPair, Metric, MetricReading, Milestone, Project, ProjectTab, Proposal, Release, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import type {
   AgentsInput,
@@ -96,6 +96,8 @@ export const api = {
   scout: (body: ScoutInput) => request<JobStatus>("POST", routes.scout(), body),
   setAgentPrompt: (aid: string, prompt: string | null) => request<Agent>("POST", routes.agentPrompt(aid), { prompt }),
   rules: () => request<Rule[]>("GET", routes.rules()),
+  glanceSeen: () => request<Workspace>("POST", routes.glanceSeen()),
+  curateGlance: () => request<{ run: AgentRun; layout: GlanceLayout | null }>("POST", routes.glanceCurate()),
   createRule: (body: RuleInput) => request<Rule>("POST", routes.rules(), body),
   updateRule: (id: string, body: RuleInput) => request<Rule>("PUT", routes.rule(id), body),
   deleteRule: (id: string) => request<Ok>("DELETE", routes.rule(id)),

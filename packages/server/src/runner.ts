@@ -11,6 +11,7 @@ import type { RunAgentInput } from "@valueflow/shared";
 import { runAgent, rulesFor } from "./agents.ts";
 import { runBrief } from "./brief.ts";
 import type { BriefDelivery } from "./brief.ts";
+import { curateGlance } from "./curator.ts";
 import type { Llm } from "./llm.ts";
 import { NotFound, loadState } from "./repo.ts";
 import { scoutModels } from "./scout.ts";
@@ -43,6 +44,8 @@ export const runAny = async (db: Database, llm: Llm, input: RunAgentInput, now: 
     }
     case "scout":
       return [await scoutModels(db, llm, agent, now, { agentId: input.target })];
+    case "curator":
+      return [await curateGlance(db, llm, agent, now)];
   }
 };
 
@@ -75,6 +78,9 @@ export const runDue = async (db: Database, llm: Llm, now: Date, options: RunnerO
       }
       case "scout":
         if (llm.describe().models.length >= 2) out.push(await scoutModels(db, llm, agent, now, {}));
+        break;
+      case "curator":
+        out.push(await curateGlance(db, llm, agent, now));
         break;
     }
   }

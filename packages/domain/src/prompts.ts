@@ -55,6 +55,11 @@ export const ROLE: Record<AgentKind, { brief: string; task: string; tab: Project
     task: "Report the comparison and recommend only when the numbers justify it.",
     tab: "overview",
   },
+  curator: {
+    brief: "You lay out a person's morning page from the cards the composer found; you never invent a card.",
+    task: "Choose at most six cards, put each in decide / watch / know, order them by what the reader must act on first, and say in one line why each matters to them today. Write a headline under 120 characters.",
+    tab: "overview",
+  },
 };
 
 /** FNV-1a over the text that shapes a prompt; changes whenever the prompt does. */

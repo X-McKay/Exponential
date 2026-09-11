@@ -329,6 +329,39 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE proposals_v2 RENAME TO proposals;
   CREATE INDEX proposals_by_state ON proposals(state, created_at);
   `,
+  // Generative Glance: the curator's layouts are facts that point at composer
+  // blocks by id (never composed content, which stays derived); a person's
+  // last page visit starts "since you last looked". The agents table drops
+  // its kind CHECK: the API validates kinds, and a new kind should not need a
+  // table rebuild.
+  `
+  CREATE TABLE agents_v4 (
+    id TEXT PRIMARY KEY, sort INTEGER NOT NULL, name TEXT NOT NULL, grad TEXT NOT NULL, purpose TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    model TEXT, owner TEXT NOT NULL, caps TEXT NOT NULL,
+    schedule TEXT CHECK (schedule IS NULL OR schedule IN ('nightly','weekly')),
+    prompt TEXT
+  );
+  INSERT INTO agents_v4 SELECT id, sort, name, grad, purpose, kind, model, owner, caps, schedule, prompt FROM agents;
+  DROP TABLE agents;
+  ALTER TABLE agents_v4 RENAME TO agents;
+  CREATE TABLE page_views (
+    user_ini TEXT NOT NULL,
+    page TEXT NOT NULL,
+    at TEXT NOT NULL,
+    PRIMARY KEY (user_ini, page)
+  );
+  CREATE TABLE layouts (
+    run_id TEXT PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE,
+    user_ini TEXT NOT NULL,
+    state_hash TEXT NOT NULL,
+    headline TEXT NOT NULL,
+    placements TEXT NOT NULL,
+    model TEXT,
+    at TEXT NOT NULL
+  );
+  CREATE INDEX layouts_by_user ON layouts(user_ini, at);
+  `,
 ];
 
 export const migrate = (db: Database): void => {

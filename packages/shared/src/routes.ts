@@ -8,6 +8,8 @@ const enc = encodeURIComponent;
 export const routes = {
   state: () => "/api/state",
   glance: () => "/api/glance",
+  glanceSeen: () => "/api/glance/seen",
+  glanceCurate: () => "/api/glance/curate",
   workspace: () => "/api/workspace",
   projects: () => "/api/projects",
   project: (pid: string) => `/api/projects/${enc(pid)}`,
@@ -45,6 +47,8 @@ export const routes = {
 export const patterns = {
   state: "/api/state",
   glance: "/api/glance",
+  glanceSeen: "/api/glance/seen",
+  glanceCurate: "/api/glance/curate",
   workspace: "/api/workspace",
   projects: "/api/projects",
   project: "/api/projects/:pid",

@@ -56,6 +56,8 @@ import {
 import { nextRuleId } from "@valueflow/domain";
 import type { Rule } from "@valueflow/domain";
 import { askWorkspace } from "./chat.ts";
+import { curateGlance, layoutIsCurrent } from "./curator.ts";
+import { recordGlanceView } from "./repo.ts";
 import type { BriefDelivery } from "./brief.ts";
 import { promptVersion } from "./prompts.ts";
 import { deleteRule, insertRule, loadRules, updateRule } from "./repo.ts";
@@ -136,6 +138,8 @@ export interface AppOptions {
   autoJudge?: boolean;
   /** Where the weekly brief goes besides the app; null keeps it in-app only. */
   deliverBrief?: BriefDelivery | null;
+  /** Re-curate Glance in the background whenever the composer's cards change (default off; the server turns it on with a model). */
+  autoCurate?: boolean;
 }
 
 export interface JobStatus {
@@ -159,6 +163,27 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     }, 0);
   };
   const deliverBrief = options.deliverBrief ?? null;
+  const autoCurate = options.autoCurate ?? false;
+  let curating = false;
+  let lastCurationHash: string | null = null;
+  /** One curation at a time, never twice for the same facts (a failed attempt is not retried until facts move). */
+  const curateLater = (s: ReturnType<typeof loadState>) => {
+    if (!llm || !autoCurate || curating) return;
+    const curator = s.agents.find((a) => a.kind === "curator");
+    if (!curator || layoutIsCurrent(s)) return;
+    const hash = JSON.stringify([s.proposals.filter((p) => p.state === "pending").map((p) => p.id), s.events[0]?.ref ?? null, s.runs[0]?.id ?? null]);
+    if (hash === lastCurationHash) return;
+    lastCurationHash = hash;
+    curating = true;
+    const model = llm;
+    setTimeout(() => {
+      curateGlance(db, model, curator, now())
+        .catch((e: unknown) => console.error("curation failed", e instanceof Error ? e.message : e))
+        .finally(() => {
+          curating = false;
+        });
+    }, 0);
+  };
   let benchmarkStatus: JobStatus = { running: false, kind: null, done: 0, total: 0, startedAt: null };
   /** Long evaluation jobs run one at a time in the background; the status is polled. */
   const startJob = (kind: "benchmark" | "scout", job: (progress: (done: number, total: number) => void) => Promise<unknown>): JobStatus => {
@@ -182,8 +207,24 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   };
   const p = (params: Params, k: string): string => params[k] ?? "";
 
-  on("GET", patterns.state, () => json(state()));
+  on("GET", patterns.state, () => {
+    const s = state();
+    curateLater(s);
+    return json(s);
+  });
   on("GET", patterns.glance, () => json(composeGlancePage(state())));
+  on("POST", patterns.glanceSeen, () => {
+    recordGlanceView(db, loadWorkspace(db).user.ini, now().toISOString());
+    return json(loadWorkspace(db));
+  });
+  on("POST", patterns.glanceCurate, async () => {
+    if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
+    const curator = state().agents.find((a) => a.kind === "curator");
+    if (!curator) throw new HttpError(409, "no curator agent is installed");
+    const run = await curateGlance(db, llm, curator, now());
+    if (run.state !== "failed") judgeLater(run.id);
+    return json({ run, layout: state().layout });
+  });
 
   on("PUT", patterns.workspace, async (req) => {
     setWorkspace(db, await parseBody(req, WorkspaceInputSchema));

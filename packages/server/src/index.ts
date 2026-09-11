@@ -29,7 +29,8 @@ const source = sourceFromEnv(process.env);
 const llm = llmFromEnv(process.env);
 /** `BRIEF_WEBHOOK_URL` also posts the weekly brief as JSON ({ text, title, summary, body }) to Slack, Teams, Zapier, or your own endpoint. */
 const deliverBrief = process.env.BRIEF_WEBHOOK_URL ? webhookDelivery(process.env.BRIEF_WEBHOOK_URL) : null;
-const app = createApp(db, { now, source, llm, autoJudge: process.env.EVAL_JUDGE !== "off", deliverBrief });
+/** `GLANCE_CURATE=off` keeps Glance in the composer's default order instead of re-curating when facts move. */
+const app = createApp(db, { now, source, llm, autoJudge: process.env.EVAL_JUDGE !== "off", deliverBrief, autoCurate: process.env.GLANCE_CURATE !== "off" });
 if (llm) {
   llm
     .model()
