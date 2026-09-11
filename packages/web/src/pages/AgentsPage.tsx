@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { AGENT_KIND_LABEL, AGENT_STATUS_LABEL, RUN_STATE_ICON, agentStats, pendingProposals, relTime, runsOf } from "@valueflow/domain";
+import { AGENT_KIND_LABEL, AGENT_STATUS_LABEL, RUN_STATE_ICON, STEP_LABEL, agentStats, pendingProposals, relTime, runsOf } from "@valueflow/domain";
 import type { Agent, AgentRun, LlmInfo, Project, ProjectTab, PromptVersion, Proposal, Rule, RunScore } from "@valueflow/domain";
 import type { RuleInput, RunAgentInput } from "@valueflow/shared";
 import { RunAgentEditor, RunViewer } from "../editors/RunAgent.tsx";
+import type { LiveRun } from "../state/live.ts";
+import { elapsed, useTicker } from "../ui/RunLive.tsx";
 import type { AgentsSection } from "../router.ts";
 import { AGENTS_SECTIONS } from "../router.ts";
 import { QualityTable } from "../ui/QualityTable.tsx";
@@ -34,6 +36,8 @@ function AgentAvatar({ a, size = 26 }: { a: Agent; size?: number }) {
 }
 
 const shortProjectName = (p: Project | undefined): string => (p ? p.name.split(" ").slice(0, 2).join(" ") : "");
+/** A run still "working" after this long with no live events was started by another process, or before run logs existed. */
+const isStale = (startedAt: string): boolean => Date.now() - new Date(startedAt).getTime() > 10 * 60_000;
 const SECTION_LABEL: Record<AgentsSection, string> = { agents: "Agents", rules: "Standing rules", quality: "Quality" };
 
 export function AgentsPage({
@@ -50,6 +54,7 @@ export function AgentsPage({
   currentProject,
   section,
   busy,
+  live,
   onSection,
   onOpen,
   onOpenInbox,
@@ -78,6 +83,7 @@ export function AgentsPage({
   section: AgentsSection;
   /** The background job in flight, if any: "benchmark" | "scout". */
   busy: "benchmark" | "scout" | null;
+  live: Record<string, LiveRun>;
   onSection: (s: AgentsSection) => void;
   onOpen: (id: string, tab: ProjectTab) => void;
   onOpenInbox: () => void;
@@ -93,6 +99,8 @@ export function AgentsPage({
   onDeleteRule: (id: string) => void;
 }) {
   const inbox = pendingProposals({ proposals });
+  const anyWorking = runs.some((r) => r.state === "working" || r.state === "queued");
+  useTicker(anyWorking);
   const [started, setStarted] = useState<string | null>(null);
   const [detail, setDetail] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(agents.find((a) => a.id === "audie")?.id ?? agents[0]?.id ?? null);
@@ -128,7 +136,17 @@ export function AgentsPage({
         <Kpi
           label="Active now"
           value={workingAgents.length}
-          sub={workingAgents.length ? `${workingAgents.map((a) => a.name).join(", ")} ${workingAgents.length === 1 ? "is" : "are"} working` : "all idle"}
+          sub={
+            workingAgents.length
+              ? workingAgents
+                  .map((a) => {
+                    const r = runs.find((x) => x.agentId === a.id && (x.state === "working" || x.state === "queued"));
+                    const last = r ? live[r.id]?.steps.at(-1) : undefined;
+                    return `${a.name}: ${last ? STEP_LABEL[last.step].toLowerCase() : r && isStale(r.startedAt) ? "no live log" : "starting"}`;
+                  })
+                  .join(" · ")
+              : "all idle"
+          }
           color={workingAgents.length ? C.indigoHi : C.dim}
         />
         <Kpi label="Attention flags · 30d" value={attention} sub={auditors.length ? `from ${auditors.join(", ")}` : "none raised"} color={attention ? C.amber : C.dim} />
@@ -267,6 +285,9 @@ export function AgentsPage({
                       {mine.map((r, i) => {
                         const o = scores.find((sc) => sc.runId === r.id && sc.scorer === "judge" && sc.dimension === "overall");
                         const pendingHere = proposals.filter((p) => p.runId === r.id && p.state === "pending").length;
+                        const working = r.state === "working" || r.state === "queued";
+                        const lastStep = working ? live[r.id]?.steps.at(-1) : undefined;
+                        const streamed = working ? (live[r.id]?.text.length ?? 0) : 0;
                         return (
                           <ListRow
                             key={r.id}
@@ -279,7 +300,15 @@ export function AgentsPage({
                             }
                             title={
                               <span style={{ color: r.state === "attention" ? C.text : r.state === "failed" ? C.redHi : C.text2 }}>
-                                {r.summary}
+                                {working ? (
+                                  <span className={lastStep || !isStale(r.startedAt) ? "vf-working" : undefined} style={{ display: "inline-block", borderRadius: 4, padding: "0 4px", margin: "0 -4px" }}>
+                                    {lastStep ? STEP_LABEL[lastStep.step] : isStale(r.startedAt) ? "Still marked working, no live log" : "Starting"}
+                                    {lastStep?.step === "request" && streamed > 0 ? ` · ${streamed.toLocaleString()} characters streamed` : lastStep?.detail ? ` · ${lastStep.detail}` : "…"}
+                                    <span style={{ color: C.dim }}> · {isStale(r.startedAt) && !lastStep ? `started ${relTime(r.startedAt, asOf)}` : elapsed(r.startedAt)}</span>
+                                  </span>
+                                ) : (
+                                  r.summary
+                                )}
                                 {pendingHere > 0 && (
                                   <span style={{ marginLeft: 8 }}>
                                     <Chip tone="accent">{pendingHere} to review</Chip>
@@ -391,6 +420,7 @@ export function AgentsPage({
           scores={scores.filter((s) => s.runId === viewing.id)}
           state={{ projects, agents, rules }}
           canJudge={llm !== null}
+          live={live[viewing.id]}
           onDecide={onDecide}
           onRate={onRate}
           onJudge={onJudge}

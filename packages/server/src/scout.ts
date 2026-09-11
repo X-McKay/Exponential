@@ -11,6 +11,7 @@ import { EVAL_CASES, PROJECT_KINDS, modelComparison, nextProposalId, nextRunId }
 import type { Agent, AgentRun, ModelRow, Proposal } from "@valueflow/domain";
 import { runBenchmark } from "./evals.ts";
 import type { Llm } from "./llm.ts";
+import { trace } from "./live.ts";
 import { promptVersion } from "./prompts.ts";
 import { insertProposal, insertRun, loadState, updateRun } from "./repo.ts";
 
@@ -98,9 +99,13 @@ export const scoutModels = async (db: Database, llm: Llm, scout: Agent, now: Dat
     ratingNote: null,
   };
   insertRun(db, run, `candidates: ${candidates.join(", ")}`);
+  const t = trace(db, run);
+  t.step("briefing", `${candidates.length} candidate model${candidates.length === 1 ? "" : "s"}, ${targets.length} agent${targets.length === 1 ? "" : "s"} with benchmark cases`);
   if (candidates.length < 2) {
     const done: AgentRun = { ...run, state: "done", finishedAt: new Date().toISOString(), summary: "Only one model is available; nothing to compare", output: `The endpoint offers ${candidates[0] ?? "no model"}. Add candidates with LLM_MODELS (comma-separated; use name@https://host/v1 for a second endpoint) and the scout will benchmark them against the current model.`, latencyMs: Date.now() - started };
     updateRun(db, done);
+    t.step("done", "only one model available; nothing to compare");
+    t.finished("done");
     return done;
   }
   try {
@@ -114,10 +119,12 @@ export const scoutModels = async (db: Database, llm: Llm, scout: Agent, now: Dat
     }
     let done = 0;
     options.onProgress?.(0, jobs.length);
+    t.step("request", `${jobs.length} benchmark batch${jobs.length === 1 ? "" : "es"} to run: ${jobs.map((j) => `${j.agent.name} on ${j.model}`).join(", ") || "none, all measured already"}`);
     for (const job of jobs) {
       await runBenchmark(db, llm, new Date(), job.agent.id, undefined, job.model);
       done += 1;
       options.onProgress?.(done, jobs.length);
+      t.step("reply", `${job.agent.name} on ${job.model} benchmarked (${done} of ${jobs.length})`);
     }
     const state = loadState(db, now);
     const verdicts: Verdict[] = targets.map((a) => {
@@ -134,6 +141,7 @@ export const scoutModels = async (db: Database, llm: Llm, scout: Agent, now: Dat
       latencyMs: Date.now() - started,
     };
     updateRun(db, finished);
+    t.step("parsed", finished.summary);
     let existing = loadState(db, now).proposals;
     for (const v of switches) {
       const model = v.recommend?.model ?? "";
@@ -141,10 +149,15 @@ export const scoutModels = async (db: Database, llm: Llm, scout: Agent, now: Dat
       insertProposal(db, proposal);
       existing = [...existing, proposal];
     }
+    t.step("proposals", switches.length ? `${switches.length} model switch${switches.length === 1 ? "" : "es"} proposed` : "no switch justified");
+    t.step("done", `compared in ${((finished.latencyMs ?? 0) / 1000).toFixed(0)}s`);
+    t.finished("done");
     return finished;
   } catch (e) {
     const failed: AgentRun = { ...run, state: "failed", finishedAt: new Date().toISOString(), summary: `${scout.name} could not finish the comparison`, error: e instanceof Error ? e.message : String(e), latencyMs: Date.now() - started };
     updateRun(db, failed);
+    t.step("failed", failed.error ?? "unknown error");
+    t.finished("failed");
     return failed;
   }
 };

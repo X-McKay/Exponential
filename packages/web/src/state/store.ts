@@ -10,6 +10,8 @@ import type { Agent, AgentRun, AppState, CalendarEvent, GovernanceItem, ImpactPa
 import type { ProjectInput, RuleInput, RunAgentInput } from "@valueflow/shared";
 import { api } from "../api/client.ts";
 import type { JobStatus } from "../api/client.ts";
+import { applyLive, subscribeLive } from "./live.ts";
+import type { LiveRun } from "./live.ts";
 import type { Notice } from "../ui/primitives.tsx";
 
 export interface Store {
@@ -18,6 +20,8 @@ export interface Store {
   clearError: () => void;
   /** The background benchmark or scout job, while one runs. */
   job: JobStatus | null;
+  /** What every run is doing right now, by run id; entries leave once the run has landed in state. */
+  live: Record<string, LiveRun>;
   /** Toasts: job and run completions, applied proposals. */
   notices: Notice[];
   notify: (text: string, tone?: Notice["tone"]) => void;
@@ -61,6 +65,29 @@ export interface Store {
   saveWorkspace: (w: Workspace) => Promise<void>;
 }
 
+/** A working run the server has not named yet. */
+const emptyRun = (agentId: string, proj: string | null): AgentRun => ({
+  id: `pending-${Date.now()}`,
+  agentId,
+  proj,
+  tab: "overview",
+  state: "working",
+  startedAt: new Date().toISOString(),
+  finishedAt: null,
+  instruction: null,
+  summary: "Starting…",
+  output: "",
+  model: null,
+  error: null,
+  promptVersion: null,
+  latencyMs: null,
+  promptTokens: null,
+  completionTokens: null,
+  benchmark: null,
+  rating: null,
+  ratingNote: null,
+});
+
 const updateProject = (s: AppState, pid: string, fn: (p: Project) => Project): AppState => ({
   ...s,
   projects: s.projects.map((p) => (p.id === pid ? fn(p) : p)),
@@ -73,6 +100,7 @@ export const useStore = (): Store => {
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<JobStatus | null>(null);
   const [notices, setNotices] = useState<Notice[]>([]);
+  const [live, setLive] = useState<Record<string, LiveRun>>({});
   const noticeSeq = useRef(0);
   const polling = useRef(false);
   const pending = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -115,6 +143,35 @@ export const useStore = (): Store => {
     await reload();
     if (last) notify(last.kind === "scout" ? `Scout finished: ${last.done} model run${last.done === 1 ? "" : "s"} benchmarked. See the Quality tab and the inbox.` : `Benchmark finished: ${last.done} of ${last.total} cases judged.`, "good");
   }, [notify, reload]);
+
+  // The live channel: runs announce themselves, so even scheduled ones show up as they happen.
+  useEffect(() => {
+    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+    const close = subscribeLive((m) => {
+      setLive((cur) => applyLive(cur, m));
+      if (m.kind === "started") {
+        // A placeholder from runAgent becomes the real run as soon as the server names it.
+        setState((s) => {
+          if (!s) return s;
+          const placeholder = s.runs.find((r) => r.id.startsWith("pending-") && r.agentId === m.run.agentId && (r.proj ?? null) === (m.run.proj ?? null));
+          const known = s.runs.some((r) => r.id === m.run.id);
+          if (known) return s;
+          const stub: AgentRun = { ...(placeholder ?? emptyRun(m.run.agentId, m.run.proj)), ...m.run, state: "working" };
+          return { ...s, runs: [stub, ...s.runs.filter((r) => r !== placeholder)] };
+        });
+      }
+      if (m.kind === "finished") {
+        if (reloadTimer) clearTimeout(reloadTimer);
+        reloadTimer = setTimeout(() => {
+          void reload().then(() => setLive((cur) => Object.fromEntries(Object.entries(cur).filter(([, r]) => r.state === "working" || r.state === "queued"))));
+        }, 600);
+      }
+    });
+    return () => {
+      close();
+      if (reloadTimer) clearTimeout(reloadTimer);
+    };
+  }, [reload]);
 
   useEffect(() => {
     void reload();
@@ -293,27 +350,7 @@ export const useStore = (): Store => {
   );
   const runAgent = useCallback(
     async (input: RunAgentInput) => {
-      const placeholder: AgentRun = {
-        id: `pending-${Date.now()}`,
-        agentId: input.agentId,
-        proj: input.proj ?? null,
-        tab: input.tab ?? "value",
-        state: "working",
-        startedAt: new Date().toISOString(),
-        finishedAt: null,
-        instruction: input.instruction ?? null,
-        summary: "Working…",
-        output: "",
-        model: null,
-        error: null,
-        promptVersion: null,
-        latencyMs: null,
-        promptTokens: null,
-        completionTokens: null,
-        benchmark: null,
-        rating: null,
-        ratingNote: null,
-      };
+      const placeholder: AgentRun = { ...emptyRun(input.agentId, input.proj ?? null), id: `pending-${Date.now()}`, tab: input.tab ?? "value", instruction: input.instruction ?? null };
       setState((s) => (s ? { ...s, runs: [placeholder, ...s.runs] } : s));
       try {
         const run = await api.runAgent(input);
@@ -491,6 +528,7 @@ export const useStore = (): Store => {
       error,
       clearError,
       job,
+      live,
       notices,
       notify,
       dismissNotice,
@@ -528,6 +566,7 @@ export const useStore = (): Store => {
       error,
       clearError,
       job,
+      live,
       notices,
       notify,
       dismissNotice,

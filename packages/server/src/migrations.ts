@@ -378,6 +378,18 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX daily_briefs_by_user ON daily_briefs(user_ini, at);
   `,
+  // Run logs: every step a run took, as facts, so a person can see what an
+  // agent did and how long each part took, live and afterwards.
+  `
+  CREATE TABLE run_events (
+    run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL,
+    at TEXT NOT NULL,
+    step TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    PRIMARY KEY (run_id, seq)
+  );
+  `,
 ];
 
 export const migrate = (db: Database): void => {

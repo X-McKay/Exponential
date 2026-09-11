@@ -27,6 +27,7 @@ import type { RunAgentInput } from "@valueflow/shared";
 import { extractJson } from "./llm.ts";
 import type { ChatMessage, Llm } from "./llm.ts";
 import { ruleScores } from "./evals.ts";
+import { replyDetail, trace } from "./live.ts";
 import { PROPOSAL_SHAPES, ROLE, promptVersion, proposalShapeLines, resultSchema } from "./prompts.ts";
 import { acceptProposal } from "./proposals.ts";
 import { Conflict, NotFound, findProject, insertProposal, insertRun, loadState, updateRun, upsertScore } from "./repo.ts";
@@ -211,13 +212,21 @@ export const runAgent = async (db: Database, llm: Llm, input: RunAgentInput, now
     ratingNote: null,
   };
   insertRun(db, run, briefing);
+  const t = trace(db, run);
+  t.step("briefing", `${project.name}: ${briefing.length.toLocaleString()} characters${rules.length ? `, ${rules.length} standing rule${rules.length === 1 ? "" : "s"}` : ""}${input.instruction ? ", with an instruction" : ""}`);
   const schema = resultSchema(rules.length > 0);
   try {
-    let res = await llm.chat(messages, { jsonSchema: schema, maxTokens: 4000, model });
+    t.step("request", `${model ?? llm.describe().model ?? "default model"}, JSON schema, up to 4000 tokens`);
+    let asked = Date.now();
+    let res = await llm.chat(messages, { jsonSchema: schema, maxTokens: 4000, model, onToken: t.token });
+    t.step("reply", replyDetail(res.usage, Date.now() - asked, res.truncated));
     if (res.truncated) {
       // The reply hit the budget mid-JSON. Ask once more, tersely, with more room.
+      t.step("retry", "asking for a complete, shorter reply with a 6000-token budget");
       const terse: ChatMessage[] = [...messages, { role: "assistant", content: res.content.slice(0, 400) }, { role: "user", content: "That reply was cut off before the JSON closed. Reply again, complete and valid, keeping the body under 500 words and at most 4 proposals." }];
-      res = await llm.chat(terse, { jsonSchema: schema, maxTokens: 6000, model });
+      asked = Date.now();
+      res = await llm.chat(terse, { jsonSchema: schema, maxTokens: 6000, model, onToken: t.token });
+      t.step("reply", replyDetail(res.usage, Date.now() - asked, res.truncated));
     }
     let result: AgentResult;
     try {
@@ -225,6 +234,8 @@ export const runAgent = async (db: Database, llm: Llm, input: RunAgentInput, now
     } catch (e) {
       throw new Error(`${e instanceof Error ? e.message : String(e)} (reply began: ${JSON.stringify(res.content.slice(0, 200))})`, { cause: e });
     }
+    t.step("parsed", `${result.summary}${result.attention ? " · flagged for attention" : ""}`);
+    t.step("proposals", result.proposalsReturned ? `kept ${result.proposals.length} of ${result.proposalsReturned} returned${result.proposalsReturned > result.proposals.length ? " (the rest named things that do not exist, repeated a status, or were unasked for)" : ""}` : "none returned");
     const finished: AgentRun = {
       ...run,
       state: result.attention ? "attention" : "done",
@@ -248,17 +259,24 @@ export const runAgent = async (db: Database, llm: Llm, input: RunAgentInput, now
       if (rule?.auto) {
         try {
           acceptProposal(db, proposal, new Date());
+          t.step("applied", `${rule.id} has earned autonomy: ${proposal.id} applied at once`);
         } catch (e) {
           console.error(`rule ${rule.id}: could not apply ${proposal.id}`, e instanceof Error ? e.message : e);
         }
       }
     }
-    for (const s of ruleScores({ run: finished, briefing, proposalsReturned: result.proposalsReturned, proposalsKept: result.proposals.length }, finished.finishedAt ?? now.toISOString())) upsertScore(db, s);
+    const scores = ruleScores({ run: finished, briefing, proposalsReturned: result.proposalsReturned, proposalsKept: result.proposals.length }, finished.finishedAt ?? now.toISOString());
+    for (const s of scores) upsertScore(db, s);
+    t.step("scored", scores.map((s) => `${s.dimension.replace("_", " ")} ${Math.round(s.score * 100)}%`).join(" · "));
+    t.step("done", `${finished.state === "attention" ? "flagged for attention" : "finished"} in ${((finished.latencyMs ?? 0) / 1000).toFixed(1)}s`);
+    t.finished(finished.state);
     return finished;
   } catch (e) {
     const failed: AgentRun = { ...run, state: "failed", finishedAt: new Date().toISOString(), summary: `${agent.name} run failed`, error: e instanceof Error ? e.message : String(e), latencyMs: Date.now() - started };
     updateRun(db, failed);
     for (const s of ruleScores({ run: failed, briefing, proposalsReturned: 0, proposalsKept: 0 }, failed.finishedAt ?? now.toISOString())) upsertScore(db, s);
+    t.step("failed", failed.error ?? "unknown error");
+    t.finished("failed");
     return failed;
   }
 };

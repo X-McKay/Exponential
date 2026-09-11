@@ -18,6 +18,7 @@ import { runAgent } from "./agents.ts";
 import { curateGlance } from "./curator.ts";
 import { extractJson } from "./llm.ts";
 import type { Llm } from "./llm.ts";
+import { traceExisting } from "./live.ts";
 import { NotFound, loadRunContext, loadState, upsertScore } from "./repo.ts";
 
 // ---- rules -------------------------------------------------------------------
@@ -152,6 +153,8 @@ export const judgeRun = async (db: Database, llm: Llm, runId: string, now: Date)
   const agent = state.agents.find((a) => a.id === run.agentId);
   const briefing = loadRunContext(db, runId) ?? "";
   const expectations = run.benchmark ? (EVAL_CASES.find((c) => c.id === run.benchmark)?.expectations ?? []) : [];
+  const t = traceExisting(db, runId);
+  t.step("judge", `${llm.describe().judgeModel ?? llm.describe().model ?? "default model"} grading against the ${agent?.kind ?? "chat"} rubric${expectations.length ? ` and ${expectations.length} expectation${expectations.length === 1 ? "" : "s"}` : ""}`);
   const res = await llm.chat(judgeMessages(agent?.kind ?? "chat", run, briefing, expectations), { jsonSchema: JUDGE_SCHEMA, maxTokens: 1500, temperature: 0, model: llm.describe().judgeModel });
   const j = parseJudgement(res.content);
   const at = new Date().toISOString();
@@ -163,6 +166,7 @@ export const judgeRun = async (db: Database, llm: Llm, runId: string, now: Date)
     scores.push({ runId, scorer: "judge", dimension: "expectations", score: expectations.length ? met / expectations.length : 0, note: j.expectations.map((e) => `${e.met ? "✓" : "✗"} ${e.expectation} — ${e.why}`).join("\n"), at });
   }
   for (const s of scores) upsertScore(db, s);
+  t.step("judged", `overall ${Math.round(overall * 100)}% · groundedness ${j.groundedness}/10, completeness ${j.completeness}/10, actionability ${j.actionability}/10, clarity ${j.clarity}/10${j.unsupported.length ? ` · unsupported: ${j.unsupported.slice(0, 3).join("; ")}` : ""}`);
   return scores;
 };
 

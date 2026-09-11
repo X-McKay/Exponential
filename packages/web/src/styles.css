@@ -457,6 +457,55 @@ kbd.vf-kbd {
   }
 }
 
+/* ---- live runs ------------------------------------------------------- */
+
+@keyframes vfSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.vf-spin {
+  animation: vfSpin 0.9s linear infinite;
+}
+.vf-step {
+  animation: vfPop 0.18s ease both;
+}
+@keyframes vfBlink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+.vf-caret {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--vf-indigo-hi);
+  border-radius: 1px;
+  animation: vfBlink 1s steps(2) infinite;
+}
+.vf-stream {
+  animation: vfFade 0.2s ease both;
+}
+@keyframes vfShimmerBar {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.vf-working {
+  background: linear-gradient(90deg, transparent 0%, var(--vf-accent-soft) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: vfShimmerBar 2.2s linear infinite;
+}
+
 /* ---- responsive helpers (inline styles cannot carry media queries) ----- */
 
 .vf-kpis {

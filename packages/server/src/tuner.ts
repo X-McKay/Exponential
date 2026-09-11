@@ -14,6 +14,7 @@ import { clip } from "./agents.ts";
 import { ruleScores } from "./evals.ts";
 import { extractJson } from "./llm.ts";
 import type { ChatMessage, Llm } from "./llm.ts";
+import { replyDetail, trace } from "./live.ts";
 import { ROLE, promptVersion } from "./prompts.ts";
 import { NotFound, insertProposal, insertRun, loadState, updateRun, upsertScore } from "./repo.ts";
 
@@ -114,13 +115,20 @@ export const tuneAgent = async (db: Database, llm: Llm, tuner: Agent, targetId: 
     ratingNote: null,
   };
   insertRun(db, run, messages[1]?.content ?? "");
+  const t = trace(db, run);
+  t.step("briefing", `${target.name}: ${measured} measured run${measured === 1 ? "" : "s"}, scorecard, prompt history, weakest runs with critiques`);
   if (measured < TUNER_MIN_RUNS) {
     const done: AgentRun = { ...run, state: "done", finishedAt: new Date().toISOString(), summary: `${target.name}: not enough measured runs to tune (${measured} of ${TUNER_MIN_RUNS})`, output: `${target.name} has ${measured} finished run${measured === 1 ? "" : "s"} in the window. The tuner needs at least ${TUNER_MIN_RUNS}, with judge scores, before it will propose a change. Run the benchmark or let the agent work for a while.`, latencyMs: Date.now() - started };
     updateRun(db, done);
+    t.step("done", `not enough measured runs (${measured} of ${TUNER_MIN_RUNS}); no model call`);
+    t.finished("done");
     return done;
   }
   try {
-    const res = await llm.chat(messages, { jsonSchema: TUNE_SCHEMA, maxTokens: 2500, temperature: 0.2, model: tuner.model });
+    t.step("request", `${tuner.model ?? llm.describe().model ?? "default model"}, JSON schema`);
+    const asked = Date.now();
+    const res = await llm.chat(messages, { jsonSchema: TUNE_SCHEMA, maxTokens: 2500, temperature: 0.2, model: tuner.model, onToken: t.token });
+    t.step("reply", replyDetail(res.usage, Date.now() - asked, res.truncated));
     const raw = extractJson(res.content);
     const o = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
     const analysis = typeof o.analysis === "string" ? o.analysis.trim() : "";
@@ -131,15 +139,23 @@ export const tuneAgent = async (db: Database, llm: Llm, tuner: Agent, targetId: 
     const body = `${analysis}${proposes ? `\n\n## Proposed extra instructions for ${target.name}\n${prompt}\n\n${change}` : "\n\nNo prompt change proposed."}`;
     const finished: AgentRun = { ...run, state: "done", finishedAt: new Date().toISOString(), summary: clip(proposes ? `${target.name}: ${change || "prompt change proposed"}` : `${target.name}: no change justified`, 140), output: body, model: res.model, latencyMs: Date.now() - started, promptTokens: res.usage?.prompt ?? null, completionTokens: res.usage?.completion ?? null };
     updateRun(db, finished);
+    t.step("parsed", finished.summary);
     if (proposes) {
       const proposal: Proposal = { id: nextProposalId(loadState(db, now).proposals), runId: run.id, agentId: tuner.id, proj: null, ruleId: null, action: { type: "agent_prompt", agentId: target.id, prompt }, rationale: change || `Proposed by ${tuner.name} from ${measured} measured runs.`, state: "pending", createdAt: finished.finishedAt ?? now.toISOString(), decidedAt: null };
       insertProposal(db, proposal);
-    }
-    for (const s of ruleScores({ run: finished, briefing: messages[1]?.content ?? "", proposalsReturned: proposes ? 1 : 0, proposalsKept: proposes ? 1 : 0 }, finished.finishedAt ?? now.toISOString())) upsertScore(db, s);
+      t.step("proposals", `${proposal.id}: new instructions for ${target.name} (${prompt.split(/\s+/).length} words)`);
+    } else t.step("proposals", "no change justified");
+    const scores = ruleScores({ run: finished, briefing: messages[1]?.content ?? "", proposalsReturned: proposes ? 1 : 0, proposalsKept: proposes ? 1 : 0 }, finished.finishedAt ?? now.toISOString());
+    for (const s of scores) upsertScore(db, s);
+    t.step("scored", scores.map((s) => `${s.dimension.replace("_", " ")} ${Math.round(s.score * 100)}%`).join(" · "));
+    t.step("done", `finished in ${((finished.latencyMs ?? 0) / 1000).toFixed(1)}s`);
+    t.finished("done");
     return finished;
   } catch (e) {
     const failed: AgentRun = { ...run, state: "failed", finishedAt: new Date().toISOString(), summary: `${tuner.name} could not study ${target.name}`, error: e instanceof Error ? e.message : String(e), latencyMs: Date.now() - started };
     updateRun(db, failed);
+    t.step("failed", failed.error ?? "unknown error");
+    t.finished("failed");
     return failed;
   }
 };

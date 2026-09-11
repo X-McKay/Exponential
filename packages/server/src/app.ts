@@ -57,6 +57,8 @@ import { nextRuleId } from "@valueflow/domain";
 import type { Rule } from "@valueflow/domain";
 import { askWorkspace } from "./chat.ts";
 import { briefIsCurrent, curateGlance } from "./curator.ts";
+import { liveResponse } from "./live.ts";
+import { loadRunEvents } from "./repo.ts";
 import { recordGlanceView } from "./repo.ts";
 import type { BriefDelivery } from "./brief.ts";
 import { promptVersion } from "./prompts.ts";
@@ -424,6 +426,8 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     judgeLater(reply.runId);
     return json(reply);
   });
+  on("GET", patterns.runEvents, (_req, params) => json(loadRunEvents(db, p(params, "id"))));
+  on("GET", patterns.live, () => liveResponse());
   on("POST", patterns.runRate, async (req, params) => {
     const body = await parseBody(req, RateRunInputSchema);
     rateRun(db, p(params, "id"), body.rating, body.note ?? null);

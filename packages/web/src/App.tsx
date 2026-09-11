@@ -243,6 +243,7 @@ export function App() {
           onProposals={store.addProposals}
           onDecide={(id, d) => void store.decideProposal(id, d)}
           onClose={() => setChat(false)}
+          live={store.live}
         />
       )}
       {state.llm && !chat && (
@@ -482,6 +483,7 @@ export function App() {
               currentProject={view.projectId ?? lastProject}
               section={view.section}
               busy={store.job?.kind ?? null}
+              live={store.live}
               onSection={(s) => go("agents", null, "overview", s)}
               onOpen={openProject}
               onOpenInbox={() => go("inbox", null)}

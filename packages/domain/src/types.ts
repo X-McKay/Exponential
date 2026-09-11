@@ -275,6 +275,19 @@ export interface AgentRun {
   ratingNote: string | null;
 }
 
+/** What a run is doing, in order; each step is recorded as a fact and streamed live. */
+export type RunStep = "briefing" | "request" | "reply" | "retry" | "parsed" | "proposals" | "applied" | "scored" | "delivered" | "judge" | "judged" | "done" | "failed";
+export const RUN_STEPS: readonly RunStep[] = ["briefing", "request", "reply", "retry", "parsed", "proposals", "applied", "scored", "delivered", "judge", "judged", "done", "failed"];
+
+/** One line in a run's log: when it happened, which step, and a short detail. */
+export interface RunEvent {
+  runId: string;
+  seq: number;
+  at: string;
+  step: RunStep;
+  detail: string;
+}
+
 /** One measured dimension of one run: deterministic rules or the LLM judge. */
 export interface RunScore {
   runId: string;

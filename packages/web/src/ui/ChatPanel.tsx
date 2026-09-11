@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import type { AppState, Project, ProjectTab, Proposal } from "@valueflow/domain";
 import { api } from "../api/client.ts";
 import { Markdown } from "../editors/RunAgent.tsx";
+import { partialField } from "../state/live.ts";
+import type { LiveRun } from "../state/live.ts";
 import { ProposalList } from "./Proposals.tsx";
+import { StepTimeline } from "./RunLive.tsx";
 import { Btn, Kbd, Tip, ghostBtn, inpStyle, reset } from "./primitives.tsx";
 import { C } from "../theme.ts";
 
@@ -38,9 +41,12 @@ export function ChatPanel({
   onProposals,
   onDecide,
   onClose,
+  live,
 }: {
   state: AppState;
   currentProject: string | null;
+  /** Live runs, so the answer shows as it streams. */
+  live: Record<string, LiveRun>;
   onOpen: (pid: string, tab: ProjectTab) => void;
   /** New proposals arrived: merge them into the store. */
   onProposals: (proposals: Proposal[]) => void;
@@ -159,11 +165,26 @@ export function ChatPanel({
             )}
           </div>
         ))}
-        {busy && (
-          <div className="vf-pulse" style={{ fontSize: 12, color: C.indigoHi }}>
-            Reading the workspace…
-          </div>
-        )}
+        {busy &&
+          (() => {
+            const askIds = new Set(state.agents.filter((a) => a.kind === "chat").map((a) => a.id));
+            const run = Object.values(live)
+              .filter((r) => askIds.has(r.agentId) && r.state === "working")
+              .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))[0];
+            const answer = run ? partialField(run.text, "answer") : null;
+            return (
+              <div style={{ background: C.panel, border: `1px solid ${C.accentLine}`, borderRadius: 10, padding: "10px 12px" }}>
+                {answer ? (
+                  <div className="vf-stream">
+                    <Markdown text={answer} />
+                    <span className="vf-caret" aria-hidden />
+                  </div>
+                ) : (
+                  <StepTimeline steps={run?.steps ?? []} startedAt={run?.startedAt ?? new Date().toISOString()} working />
+                )}
+              </div>
+            );
+          })()}
       </div>
       <div style={{ padding: "10px 14px 12px", borderTop: `1px solid ${C.line}` }}>
         <textarea

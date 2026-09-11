@@ -1,6 +1,6 @@
 // ================= typed API client =================
 
-import type { Agent, AgentRun, CalendarEvent, DevFacts, DailyBrief, GovernanceItem, ImpactPair, Metric, MetricReading, Milestone, Project, ProjectTab, Proposal, Release, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
+import type { Agent, AgentRun, CalendarEvent, DevFacts, DailyBrief, GovernanceItem, RunEvent, ImpactPair, Metric, MetricReading, Milestone, Project, ProjectTab, Proposal, Release, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import type {
   AgentsInput,
@@ -91,6 +91,7 @@ export const api = {
   chat: (body: ChatInput) => request<{ answer: string; links: { label: string; proj: string; tab: ProjectTab }[]; proposals: Proposal[]; runId: string; model: string }>("POST", routes.chat(), body),
   rateRun: (id: string, body: RateRunInput) => request<AgentRun>("POST", routes.runRate(id), body),
   judgeRun: (id: string) => request<RunScore[]>("POST", routes.runJudge(id)),
+  runEvents: (id: string) => request<RunEvent[]>("GET", routes.runEvents(id)),
   benchmark: (agentId?: string) => request<JobStatus>("POST", routes.benchmark(), agentId ? { agentId } : {}),
   benchmarkStatus: () => request<JobStatus>("GET", routes.benchmark()),
   scout: (body: ScoutInput) => request<JobStatus>("POST", routes.scout(), body),

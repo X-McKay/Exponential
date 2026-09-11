@@ -24,6 +24,8 @@ export interface ChatOptions {
   timeoutMs?: number;
   /** Model for this call instead of the default; "name@base-url" routes to another endpoint. */
   model?: string | null;
+  /** Receive content as the model produces it; the call then streams (SSE) instead of waiting for the whole reply. */
+  onToken?: ((text: string) => void) | undefined;
 }
 
 export interface ChatResult {
@@ -77,6 +79,56 @@ interface ChatResponse {
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
+interface ChunkResponse {
+  model?: string;
+  choices?: { delta?: { content?: string | null }; finish_reason?: string | null }[];
+  usage?: { prompt_tokens?: number; completion_tokens?: number } | null;
+}
+
+/** Fold an OpenAI-style SSE stream into one ChatResponse, handing each content delta to `onToken`. */
+export const readStream = async (res: Response, onToken: (text: string) => void): Promise<ChatResponse> => {
+  const reader = res.body?.getReader();
+  if (!reader) throw new LlmError(500, "LLM streamed no body");
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+  let model: string | undefined;
+  let finish: string | null | undefined;
+  let usage: ChatResponse["usage"];
+  const handle = (line: string) => {
+    if (!line.startsWith("data:")) return;
+    const data = line.slice(5).trim();
+    if (!data || data === "[DONE]") return;
+    let chunk: ChunkResponse;
+    try {
+      chunk = JSON.parse(data) as ChunkResponse;
+    } catch {
+      return;
+    }
+    model = chunk.model ?? model;
+    if (chunk.usage) usage = chunk.usage;
+    const choice = chunk.choices?.[0];
+    if (choice?.delta?.content) {
+      content += choice.delta.content;
+      onToken(choice.delta.content);
+    }
+    if (choice?.finish_reason) finish = choice.finish_reason;
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let nl = buffer.indexOf("\n");
+    while (nl >= 0) {
+      handle(buffer.slice(0, nl).trimEnd());
+      buffer = buffer.slice(nl + 1);
+      nl = buffer.indexOf("\n");
+    }
+  }
+  if (buffer.trim()) handle(buffer.trim());
+  return { ...(model ? { model } : {}), choices: [{ message: { content }, finish_reason: finish ?? null }], ...(usage ? { usage } : {}) };
+};
+
 export const createLlm = (options: LlmOptions): Llm => {
   const base = options.baseUrl.replace(/\/$/, "");
   const doFetch = options.fetch ?? fetch;
@@ -110,6 +162,10 @@ export const createLlm = (options: LlmOptions): Llm => {
     };
     if (o.jsonSchema) payload.response_format = { type: "json_schema", json_schema: { name: o.jsonSchema.name, schema: o.jsonSchema.schema, strict: true } };
     if (!options.thinking) payload.chat_template_kwargs = { enable_thinking: false };
+    if (o.onToken) {
+      payload.stream = true;
+      payload.stream_options = { include_usage: true };
+    }
     const res = await doFetch(`${spec.base}/chat/completions`, {
       method: "POST",
       headers: headers(),
@@ -117,7 +173,7 @@ export const createLlm = (options: LlmOptions): Llm => {
       signal: AbortSignal.timeout(o.timeoutMs ?? 120_000),
     });
     if (!res.ok) throw new LlmError(res.status, `LLM ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    const body = (await res.json()) as ChatResponse;
+    const body = o.onToken ? await readStream(res, o.onToken) : ((await res.json()) as ChatResponse);
     const content = body.choices[0]?.message.content ?? "";
     return {
       content: content.trim(),

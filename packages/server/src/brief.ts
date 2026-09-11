@@ -13,6 +13,7 @@ import { workspaceBriefing } from "./chat.ts";
 import { ruleScores } from "./evals.ts";
 import { extractJson } from "./llm.ts";
 import type { ChatMessage, Llm } from "./llm.ts";
+import { replyDetail, trace } from "./live.ts";
 import { promptVersion } from "./prompts.ts";
 import { insertRun, loadState, updateRun, upsertScore } from "./repo.ts";
 
@@ -123,8 +124,13 @@ export const runBrief = async (db: Database, llm: Llm, agent: Agent, now: Date, 
     ratingNote: null,
   };
   insertRun(db, run, briefing);
+  const t = trace(db, run);
+  t.step("briefing", `the whole workspace for ${state.workspace.user.name}: ${briefing.length.toLocaleString()} characters`);
   try {
-    const res = await llm.chat(messages, { jsonSchema: BRIEF_SCHEMA, maxTokens: 2500, temperature: 0.2, model: agent.model });
+    t.step("request", `${agent.model ?? llm.describe().model ?? "default model"}, JSON schema`);
+    const asked = Date.now();
+    const res = await llm.chat(messages, { jsonSchema: BRIEF_SCHEMA, maxTokens: 2500, temperature: 0.2, model: agent.model, onToken: t.token });
+    t.step("reply", replyDetail(res.usage, Date.now() - asked, res.truncated));
     const raw = extractJson(res.content);
     const o = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
     if (typeof o.summary !== "string" || typeof o.body !== "string" || !o.body.trim()) throw new Error("reply is missing summary or body");
@@ -134,6 +140,7 @@ export const runBrief = async (db: Database, llm: Llm, agent: Agent, now: Date, 
       .map((l) => `- ${String(l.label)} — ${state.projects.find((p) => p.id === l.proj)?.name ?? ""} (${String(l.tab)})`);
     const body = `${o.body.trim()}${links.length ? `\n\n## Where to look\n${links.join("\n")}` : ""}`;
     const finished: AgentRun = { ...run, state: "done", finishedAt: new Date().toISOString(), summary: clip(o.summary.trim(), 140), output: body, model: res.model, latencyMs: Date.now() - started, promptTokens: res.usage?.prompt ?? null, completionTokens: res.usage?.completion ?? null };
+    t.step("parsed", `${finished.summary} · ${links.length} link${links.length === 1 ? "" : "s"}`);
     let delivered: string | null = null;
     if (options.deliver) {
       const title = `Your week — ${cal.asOf.slice(0, 10)}`;
@@ -144,13 +151,20 @@ export const runBrief = async (db: Database, llm: Llm, agent: Agent, now: Date, 
         delivered = `Delivery failed: ${e instanceof Error ? e.message : String(e)}`;
       }
     }
+    if (delivered) t.step("delivered", delivered);
     const stored: AgentRun = { ...finished, output: delivered ? `${body}\n\n_${delivered}_` : body };
     updateRun(db, stored);
-    for (const s of ruleScores({ run: stored, briefing, proposalsReturned: 0, proposalsKept: 0 }, stored.finishedAt ?? now.toISOString())) upsertScore(db, s);
+    const scores = ruleScores({ run: stored, briefing, proposalsReturned: 0, proposalsKept: 0 }, stored.finishedAt ?? now.toISOString());
+    for (const s of scores) upsertScore(db, s);
+    t.step("scored", scores.map((s) => `${s.dimension} ${Math.round(s.score * 100)}%`).join(" · "));
+    t.step("done", `written in ${((stored.latencyMs ?? 0) / 1000).toFixed(1)}s`);
+    t.finished("done");
     return stored;
   } catch (e) {
     const failed: AgentRun = { ...run, state: "failed", finishedAt: new Date().toISOString(), summary: "The brief could not be written", error: e instanceof Error ? e.message : String(e), latencyMs: Date.now() - started };
     updateRun(db, failed);
+    t.step("failed", failed.error ?? "unknown error");
+    t.finished("failed");
     return failed;
   }
 };

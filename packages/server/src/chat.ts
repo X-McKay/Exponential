@@ -32,6 +32,7 @@ import { promptVersion, shapesWith } from "./prompts.ts";
 import { ruleScores } from "./evals.ts";
 import { extractJson } from "./llm.ts";
 import type { ChatMessage, Llm } from "./llm.ts";
+import { replyDetail, trace } from "./live.ts";
 import { NotFound, insertProposal, insertRun, loadState, updateRun, upsertScore } from "./repo.ts";
 
 /** One paragraph per project plus what is moving across the workspace. */
@@ -159,8 +160,13 @@ export const askWorkspace = async (db: Database, llm: Llm, input: ChatInput, now
     ratingNote: null,
   };
   insertRun(db, run, messages[0]?.content ?? "");
+  const t = trace(db, run);
+  t.step("briefing", `${state.projects.length} projects${focusProj ? `, ${state.projects.find((p) => p.id === focusProj)?.name ?? focusProj} in full` : ""}, ${input.messages.length} turn${input.messages.length === 1 ? "" : "s"} of conversation`);
   try {
-    const res = await llm.chat(messages, { jsonSchema: ANSWER_SCHEMA, maxTokens: 2000, temperature: 0.2, model: ask.model });
+    t.step("request", `${ask.model ?? llm.describe().model ?? "default model"}, JSON schema`);
+    const asked = Date.now();
+    const res = await llm.chat(messages, { jsonSchema: ANSWER_SCHEMA, maxTokens: 2000, temperature: 0.2, model: ask.model, onToken: t.token });
+    t.step("reply", replyDetail(res.usage, Date.now() - asked, res.truncated));
     const raw = extractJson(res.content);
     const o = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
     const answer = typeof o.answer === "string" ? o.answer.trim() : "";
@@ -183,6 +189,7 @@ export const askWorkspace = async (db: Database, llm: Llm, input: ChatInput, now
       completionTokens: res.usage?.completion ?? null,
     };
     updateRun(db, finished);
+    t.step("parsed", `${links.length} link${links.length === 1 ? "" : "s"}, ${rawProposals.length} proposal${rawProposals.length === 1 ? "" : "s"} returned`);
     const proposals: Proposal[] = [];
     let existing = state.proposals;
     for (const item of rawProposals.slice(0, 4)) {
@@ -200,11 +207,18 @@ export const askWorkspace = async (db: Database, llm: Llm, input: ChatInput, now
       existing = [...existing, proposal];
       proposals.push(proposal);
     }
-    for (const s of ruleScores({ run: finished, briefing: messages[0]?.content ?? "", proposalsReturned: rawProposals.length, proposalsKept: proposals.length }, finished.finishedAt ?? now.toISOString())) upsertScore(db, s);
+    if (rawProposals.length) t.step("proposals", `kept ${proposals.length} of ${rawProposals.length}`);
+    const scores = ruleScores({ run: finished, briefing: messages[0]?.content ?? "", proposalsReturned: rawProposals.length, proposalsKept: proposals.length }, finished.finishedAt ?? now.toISOString());
+    for (const s of scores) upsertScore(db, s);
+    t.step("scored", scores.map((s) => `${s.dimension.replace("_", " ")} ${Math.round(s.score * 100)}%`).join(" · "));
+    t.step("done", `answered in ${((finished.latencyMs ?? 0) / 1000).toFixed(1)}s`);
+    t.finished("done");
     return { answer, links, proposals, runId: run.id, model: res.model };
   } catch (e) {
     const failed: AgentRun = { ...run, state: "failed", finishedAt: new Date().toISOString(), summary: "Ask could not answer", error: e instanceof Error ? e.message : String(e), latencyMs: Date.now() - started };
     updateRun(db, failed);
+    t.step("failed", failed.error ?? "unknown error");
+    t.finished("failed");
     throw e;
   }
 };

@@ -5,7 +5,7 @@
 
 import type { Database } from "bun:sqlite";
 import { EVENT_WINDOW_DAYS, GSTATUS_LABEL, RUN_WINDOW_DAYS, deriveDevEvents } from "@valueflow/domain";
-import type { Agent, AgentRun, AppState, Build, CalendarEvent, Criterion, DevFacts, Event, DailyBrief, GovernanceItem, Metric, MetricReading, Milestone, MilestoneStatus, Project, PromptVersion, Proposal, ProposalAction, PullRequest, Release, RiskTier, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
+import type { Agent, AgentRun, AppState, Build, CalendarEvent, Criterion, DevFacts, Event, DailyBrief, GovernanceItem, RunEvent, Metric, MetricReading, Milestone, MilestoneStatus, Project, PromptVersion, Proposal, ProposalAction, PullRequest, Release, RiskTier, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
 import type { AgentsInput, CalendarEventInput, GovernanceInput, GovernanceItemInput, MilestoneInput, ProjectInput, ReleaseInput, RuleInput, TargetsInput, WorkspaceInput } from "@valueflow/shared";
 
 export class NotFound extends Error {
@@ -466,6 +466,19 @@ export const insertRun = (db: Database, r: AgentRun, context: string | null = nu
     r.ratingNote,
     context,
   );
+};
+
+export const loadRunEvents = (db: Database, runId: string): RunEvent[] =>
+  db
+    .query<{ run_id: string; seq: number; at: string; step: RunEvent["step"]; detail: string }, [string]>("SELECT run_id, seq, at, step, detail FROM run_events WHERE run_id = ? ORDER BY seq")
+    .all(runId)
+    .map((r) => ({ runId: r.run_id, seq: r.seq, at: r.at, step: r.step, detail: r.detail }));
+
+/** Append one step to a run's log; returns it with its sequence number. */
+export const insertRunEvent = (db: Database, runId: string, step: RunEvent["step"], detail: string, at: string): RunEvent => {
+  const seq = (db.query<{ n: number }, [string]>("SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM run_events WHERE run_id = ?").get(runId)?.n ?? 1) as number;
+  db.query("INSERT INTO run_events (run_id, seq, at, step, detail) VALUES (?,?,?,?,?)").run(runId, seq, at, step, detail);
+  return { runId, seq, at, step, detail };
 };
 
 export const rateRun = (db: Database, runId: string, rating: 1 | -1 | null, note: string | null): void => {

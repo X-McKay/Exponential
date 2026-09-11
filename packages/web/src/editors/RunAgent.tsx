@@ -3,6 +3,8 @@ import { AGENT_KIND_LABEL, JUDGE_DIMENSIONS, PROJECT_KINDS, PROJECT_TABS, RUN_ST
 import type { Agent, AgentRun, AppState, Project, ProjectTab, Proposal, RunScore } from "@valueflow/domain";
 import type { RunAgentInput } from "@valueflow/shared";
 import { ProposalList } from "../ui/Proposals.tsx";
+import { LiveOutput, RunLog, StepTimeline, elapsed, useTicker } from "../ui/RunLive.tsx";
+import type { LiveRun } from "../state/live.ts";
 import { Btn, Chip, Lbl, Modal, Tip, ghostBtn, inpStyle } from "../ui/primitives.tsx";
 import { C, RUN_COLOR } from "../theme.ts";
 
@@ -238,6 +240,7 @@ export function RunViewer({
   scores,
   state,
   canJudge,
+  live,
   onDecide,
   onRate,
   onJudge,
@@ -251,12 +254,16 @@ export function RunViewer({
   scores: RunScore[];
   state: Pick<AppState, "projects" | "agents"> & Partial<Pick<AppState, "rules">>;
   canJudge: boolean;
+  /** What the run is doing right now, while it runs. */
+  live?: LiveRun | undefined;
   onDecide: (id: string, decision: "accept" | "dismiss") => void;
   onRate: (id: string, rating: 1 | -1 | null, note?: string) => void;
   onJudge: (id: string) => Promise<void>;
   onClose: () => void;
 }) {
   const [judging, setJudging] = useState(false);
+  const working = run.state === "working" || run.state === "queued";
+  useTicker(working);
   const [note, setNote] = useState(run.ratingNote ?? "");
   const tone = run.state === "attention" ? "warn" : run.state === "failed" ? "bad" : run.state === "done" ? "good" : "accent";
   const rules = scores.filter((s) => s.scorer === "rules");
@@ -273,9 +280,14 @@ export function RunViewer({
         <span style={{ fontSize: 12, color: C.dim }}>
           {relTime(run.startedAt, asOf)}
           {run.model ? ` · ${run.model}` : ""}
-          {run.finishedAt ? ` · ${Math.max(1, Math.round((new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime()) / 1000))}s` : ""}
+          {run.finishedAt ? ` · ${Math.max(1, Math.round((new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime()) / 1000))}s` : working ? ` · ${elapsed(run.startedAt)} so far` : ""}
         </span>
       </div>
+      {working && (
+        <div className="vf-working" style={{ border: `1px solid ${C.accentLine}`, borderRadius: 8, padding: "10px 12px", marginBottom: 12 }}>
+          <StepTimeline steps={live?.steps ?? []} startedAt={run.startedAt} working />
+        </div>
+      )}
       {run.instruction && (
         <div style={{ fontSize: 12, color: C.mut, background: C.inset, border: `1px solid ${C.line}`, borderRadius: 8, padding: "8px 10px", marginBottom: 12 }}>
           <span style={{ color: C.dim }}>Instruction · </span>
@@ -369,8 +381,9 @@ export function RunViewer({
       ) : run.output ? (
         <Markdown text={run.output} />
       ) : (
-        <div style={{ fontSize: 12, color: C.dim }}>Still working…</div>
+        <LiveOutput text={live?.text ?? ""} field={agent?.kind === "chat" ? "answer" : agent?.kind === "tuner" ? "analysis" : "body"} />
       )}
+      {!working && !run.id.startsWith("pending-") && <RunLog runId={run.id} startedAt={run.startedAt} live={live?.steps} />}
     </Modal>
   );
 }

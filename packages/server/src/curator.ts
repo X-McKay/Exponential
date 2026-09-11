@@ -17,6 +17,7 @@ import { clip } from "./agents.ts";
 import { ruleScores } from "./evals.ts";
 import { extractJson } from "./llm.ts";
 import type { ChatMessage, Llm } from "./llm.ts";
+import { replyDetail, trace } from "./live.ts";
 import { promptVersion } from "./prompts.ts";
 import { insertBrief, insertRun, loadState, updateRun, upsertScore } from "./repo.ts";
 
@@ -161,13 +162,20 @@ export const curateGlance = async (db: Database, llm: Llm, agent: Agent, now: Da
     ratingNote: null,
   };
   insertRun(db, run, briefing);
+  const t = trace(db, run);
+  t.step("briefing", `${blocks.length} signal${blocks.length === 1 ? "" : "s"} from the composer, the reader's context, and the id index`);
   if (blocks.length === 0) {
     const done: AgentRun = { ...run, state: "done", finishedAt: new Date().toISOString(), summary: "Nothing to brief: the composer found no signals", output: "The workspace has no signals today, so Glance shows the empty state.", latencyMs: Date.now() - started };
     updateRun(db, done);
+    t.step("done", "no signals; no model call");
+    t.finished("done");
     return done;
   }
   try {
-    const res = await llm.chat(messages, { jsonSchema: BRIEF_SCHEMA, maxTokens: 2500, temperature: 0.2, model: agent.model });
+    t.step("request", `${agent.model ?? llm.describe().model ?? "default model"}, JSON schema with widget shapes`);
+    const asked = Date.now();
+    const res = await llm.chat(messages, { jsonSchema: BRIEF_SCHEMA, maxTokens: 2500, temperature: 0.2, model: agent.model, onToken: t.token });
+    t.step("reply", replyDetail(res.usage, Date.now() - asked, res.truncated));
     const raw = extractJson(res.content);
     const o = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
     const headline = typeof o.headline === "string" ? sentenceCase(clip(o.headline.trim(), 140), state.projects.flatMap((p) => [p.name, p.key])) : "";
@@ -204,15 +212,23 @@ export const curateGlance = async (db: Database, llm: Llm, agent: Agent, now: Da
       .join("\n\n");
     const finished: AgentRun = { ...run, state: "done", finishedAt: new Date().toISOString(), summary: headline, output: body, model: res.model, latencyMs: Date.now() - started, promptTokens: res.usage?.prompt ?? null, completionTokens: res.usage?.completion ?? null };
     updateRun(db, finished);
+    t.step("parsed", `${sections.length} item${sections.length === 1 ? "" : "s"}, ${widgetsKept} widget${widgetsKept === 1 ? "" : "s"} kept of ${widgetsReturned}`);
     if (!options.benchmark) {
       const brief: DailyBrief = { runId: run.id, at: finished.finishedAt ?? now.toISOString(), stateHash: blocksHash(blocks), headline, sections, model: res.model };
       insertBrief(db, state.workspace.user.ini, brief);
+      t.step("delivered", "stored as today's brief for Glance");
     }
-    for (const s of ruleScores({ run: finished, briefing, proposalsReturned: 0, proposalsKept: 0, placements: { returned: widgetsReturned, kept: widgetsKept } }, finished.finishedAt ?? now.toISOString())) upsertScore(db, s);
+    const scores = ruleScores({ run: finished, briefing, proposalsReturned: 0, proposalsKept: 0, placements: { returned: widgetsReturned, kept: widgetsKept } }, finished.finishedAt ?? now.toISOString());
+    for (const s of scores) upsertScore(db, s);
+    t.step("scored", scores.map((s) => `${s.dimension.replace("_", " ")} ${Math.round(s.score * 100)}%`).join(" · "));
+    t.step("done", `written in ${((finished.latencyMs ?? 0) / 1000).toFixed(1)}s`);
+    t.finished("done");
     return finished;
   } catch (e) {
     const failed: AgentRun = { ...run, state: "failed", finishedAt: new Date().toISOString(), summary: `${agent.name} could not write the brief`, error: e instanceof Error ? e.message : String(e), latencyMs: Date.now() - started };
     updateRun(db, failed);
+    t.step("failed", failed.error ?? "unknown error");
+    t.finished("failed");
     return failed;
   }
 };
