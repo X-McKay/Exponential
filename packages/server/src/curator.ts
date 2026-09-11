@@ -29,13 +29,18 @@ export const MAX_SECTIONS = 6;
  */
 export const sentenceCase = (headline: string, keep: string[] = []): string => {
   const words = headline.split(/\s+/);
-  const capitalised = words.filter((w) => /^[A-Z][a-z]/.test(w)).length;
-  if (words.length < 3 || capitalised / words.length < 0.6) return headline;
-  const keepSet = new Set(keep.flatMap((k) => k.split(/\s+/)).map((k) => k.toLowerCase()));
+  // Judge the style on plain words only: ids, acronyms, and numbers are capitalised either way.
+  const plain = words.slice(1).filter((w) => /^[A-Za-z][a-z]/.test(w) && !/[A-Z]{2,}|\d/.test(w));
+  const capitalised = plain.filter((w) => /^[A-Z]/.test(w)).length;
+  if (plain.length < 2 || capitalised / plain.length < 0.6) return headline;
+  // Project names keep their own casing ("Sector report generation", "IMA").
+  const casing = new Map(keep.flatMap((k) => k.split(/\s+/)).map((k) => [k.toLowerCase(), k]));
   return words
     .map((w, i) => {
-      if (i === 0 || /[A-Z]{2,}|\d/.test(w) || keepSet.has(w.replace(/[^\w]/g, "").toLowerCase())) return w;
-      return w.toLowerCase();
+      if (i === 0 || /[A-Z]{2,}|\d/.test(w)) return w;
+      const core = w.replace(/[^\w]/g, "");
+      const own = casing.get(core.toLowerCase());
+      return own ? w.replace(core, own) : w.toLowerCase();
     })
     .join(" ");
 };
