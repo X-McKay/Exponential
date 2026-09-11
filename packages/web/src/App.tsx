@@ -8,6 +8,7 @@ import { ProjectEditor } from "./editors/ProjectEditor.tsx";
 import { SetupWizard } from "./editors/SetupWizard.tsx";
 import { WorkspaceEditor } from "./editors/WorkspaceEditor.tsx";
 import { CmdK } from "./palette/CmdK.tsx";
+import { ChatPanel } from "./ui/ChatPanel.tsx";
 import { AgentsPage } from "./pages/AgentsPage.tsx";
 import { DataPage } from "./pages/DataPage.tsx";
 import { DevPage } from "./pages/DevPage.tsx";
@@ -146,6 +147,7 @@ export function App() {
   const [openMs, setOpenMs] = useState<string | null>(null);
   const [dim, setDim] = useState<Dim>("fte");
   const [palette, setPalette] = useState(false);
+  const [chat, setChat] = useState(false);
   const narrow = useNarrow();
   const [lastProject, setLastProject] = useState<string | null>(null);
   const [editor, setEditor] = useState<{ kind: "project"; pid: string | null } | { kind: "setup" } | { kind: "agents" } | { kind: "workspace" } | null>(null);
@@ -172,7 +174,11 @@ export function App() {
   const keyboard = useMemo(
     () => ({
       togglePalette: () => setPalette((v) => !v),
-      closeAll: () => setPalette(false),
+      toggleChat: () => setChat((v) => !v),
+      closeAll: () => {
+        setPalette(false);
+        setChat(false);
+      },
       goPage: (page: "glance" | "portfolio" | "agents" | "data") => go(page, null),
       goTab: (tab: ProjectTab) => {
         const pid = view.projectId ?? lastProject ?? projects[0]?.id;
@@ -202,6 +208,46 @@ export function App() {
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: C.bg, color: C.text, fontFamily: FONT, fontSize: 14 }}>
       {palette && <CmdK projects={projects} go={go} onClose={() => setPalette(false)} />}
+      {chat && state.llm && (
+        <ChatPanel
+          state={state}
+          currentProject={view.projectId ?? lastProject}
+          onOpen={openProject}
+          onProposals={store.addProposals}
+          onDecide={(id, d) => void store.decideProposal(id, d)}
+          onClose={() => setChat(false)}
+        />
+      )}
+      {state.llm && !chat && (
+        <Tip label="Ask the workspace" keys={["⌘", "J"]}>
+          <button
+            type="button"
+            onClick={() => setChat(true)}
+            aria-label="Ask the workspace"
+            style={{
+              ...reset,
+              position: "fixed",
+              right: 18,
+              bottom: 18,
+              zIndex: 55,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              height: 36,
+              padding: "0 14px 0 10px",
+              borderRadius: 18,
+              background: "#13151C",
+              border: `1px solid ${C.line2}`,
+              color: C.text,
+              fontSize: 13,
+              boxShadow: "0 8px 24px rgba(0,0,0,.45)",
+            }}
+          >
+            <span style={{ width: 18, height: 18, borderRadius: 5, background: "linear-gradient(135deg,#EEEFF1,#8A8F98)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 600, color: "#08090A" }}>A</span>
+            Ask
+          </button>
+        </Tip>
+      )}
       {editor?.kind === "project" && (
         <ProjectEditor
           project={editor.pid ? (projects.find((p) => p.id === editor.pid) ?? null) : null}
@@ -318,6 +364,7 @@ export function App() {
               agents={state.agents}
               runs={state.runs}
               proposals={state.proposals}
+              scores={state.scores}
               projects={projects}
               asOf={state.asOf}
               llm={state.llm}
@@ -326,6 +373,9 @@ export function App() {
               onEdit={() => setEditor({ kind: "agents" })}
               onRun={(input) => void store.runAgent(input)}
               onDecide={(id, d) => void store.decideProposal(id, d)}
+              onRate={(id, r, n) => void store.rateRun(id, r, n)}
+              onJudge={store.judgeRun}
+              onBenchmark={store.runBenchmark}
             />
           </>
         ) : view.page === "portfolio" ? (

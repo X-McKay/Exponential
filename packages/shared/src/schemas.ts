@@ -151,6 +151,21 @@ export type SetupCreateInput = z.infer<typeof SetupCreateInputSchema>;
 
 export const SetupRefineInputSchema = z.object({ feedback: short(2000) });
 
+export const ChatMessageSchema = z.object({ role: z.enum(["user", "assistant"]), content: z.string().trim().min(1).max(8000) });
+export const ChatInputSchema = z.object({
+  /** The conversation so far, oldest first; the last message is the question. */
+  messages: z.array(ChatMessageSchema).min(1).max(16),
+  /** Project the user is looking at, for a fuller briefing. */
+  proj: id.nullable().default(null),
+});
+export type ChatInput = z.infer<typeof ChatInputSchema>;
+
+export const RateRunInputSchema = z.object({ rating: z.union([z.literal(1), z.literal(-1)]).nullable(), note: z.string().trim().max(500).optional() });
+export type RateRunInput = z.infer<typeof RateRunInputSchema>;
+
+export const BenchmarkInputSchema = z.object({ agentId: id.optional() });
+export type BenchmarkInput = z.infer<typeof BenchmarkInputSchema>;
+
 export const RunAgentInputSchema = z.object({
   agentId: id,
   proj: id,

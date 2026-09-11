@@ -14,6 +14,9 @@ import {
   ProjectInputSchema,
   ReadingInputSchema,
   ReleaseInputSchema,
+  BenchmarkInputSchema,
+  ChatInputSchema,
+  RateRunInputSchema,
   RunAgentInputSchema,
   SetupCreateInputSchema,
   SetupRefineInputSchema,
@@ -47,10 +50,12 @@ import {
   upsertRelease,
 } from "./repo.ts";
 import { runAgent } from "./agents.ts";
+import { askWorkspace } from "./chat.ts";
+import { judgeRun, runBenchmark } from "./evals.ts";
 import { extractSource } from "./extract.ts";
 import type { ExtractedSource } from "./extract.ts";
 import { ProposalRejected, acceptProposal, dismissProposal, findProposal } from "./proposals.ts";
-import { loadSetupDraft } from "./repo.ts";
+import { loadSetupDraft, rateRun } from "./repo.ts";
 import { analyzeSetup, createFromSetup, refineSetup } from "./setup.ts";
 import type { RepoSource } from "./connectors/index.ts";
 import type { Llm } from "./llm.ts";
@@ -117,12 +122,23 @@ export interface AppOptions {
   source?: RepoSource | null;
   /** The model agents run against; null disables runs. */
   llm?: Llm | null;
+  /** Grade every finished run with the LLM judge in the background (default on when a model is configured). */
+  autoJudge?: boolean;
 }
 
 export const createApp = (db: Database, options: AppOptions = {}): App => {
   const now = options.now ?? (() => new Date());
   const source = options.source ?? null;
   const llm = options.llm ?? null;
+  const autoJudge = options.autoJudge ?? true;
+  const judgeLater = (runId: string) => {
+    if (!llm || !autoJudge) return;
+    const model = llm;
+    setTimeout(() => {
+      judgeRun(db, model, runId, now()).catch((e: unknown) => console.error(`judge ${runId} failed`, e instanceof Error ? e.message : e));
+    }, 0);
+  };
+  let benchmarkStatus: { running: boolean; done: number; total: number; startedAt: string | null } = { running: false, done: 0, total: 0, startedAt: null };
   const state = () => ({ ...loadState(db, now()), syncSource: source?.name ?? null, llm: llm ? llm.describe() : null });
   const routes: Route[] = [];
   const on = (method: Method, pattern: string, handler: Handler): void => {
@@ -280,7 +296,42 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
     const body = await parseBody(req, RunAgentInputSchema.omit({ agentId: true }));
     const run = await runAgent(db, llm, { ...body, agentId: p(params, "aid") }, now());
+    if (run.state !== "failed") judgeLater(run.id);
     return json(run, 201);
+  });
+  on("POST", patterns.chat, async (req) => {
+    if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
+    const body = await parseBody(req, ChatInputSchema);
+    const reply = await askWorkspace(db, llm, body, now());
+    judgeLater(reply.runId);
+    return json(reply);
+  });
+  on("POST", patterns.runRate, async (req, params) => {
+    const body = await parseBody(req, RateRunInputSchema);
+    rateRun(db, p(params, "id"), body.rating, body.note ?? null);
+    return json(state().runs.find((r) => r.id === p(params, "id")) ?? null);
+  });
+  on("POST", patterns.runJudge, async (_req, params) => {
+    if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
+    return json(await judgeRun(db, llm, p(params, "id"), now()));
+  });
+  on("GET", patterns.benchmark, () => json(benchmarkStatus));
+  on("POST", patterns.benchmark, async (req) => {
+    if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
+    if (benchmarkStatus.running) throw new HttpError(409, "a benchmark is already running");
+    const body = await parseBody(req, BenchmarkInputSchema);
+    const model = llm;
+    benchmarkStatus = { running: true, done: 0, total: 0, startedAt: now().toISOString() };
+    setTimeout(() => {
+      runBenchmark(db, model, now(), body.agentId, (done, total) => {
+        benchmarkStatus = { ...benchmarkStatus, done, total };
+      })
+        .catch((e: unknown) => console.error("benchmark failed", e instanceof Error ? e.message : e))
+        .finally(() => {
+          benchmarkStatus = { ...benchmarkStatus, running: false };
+        });
+    }, 0);
+    return json(benchmarkStatus, 202);
   });
   on("POST", patterns.calendar, async (req) => {
     const body = await parseBody(req, CalendarEventInputSchema);

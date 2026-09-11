@@ -88,6 +88,7 @@ const inEditable = (t: EventTarget | null): boolean => {
 
 export interface KeyboardHandlers {
   togglePalette: () => void;
+  toggleChat: () => void;
   closeAll: () => void;
   goPage: (page: Exclude<Page, "project">) => void;
   goTab: (tab: ProjectTab) => void;
@@ -110,6 +111,12 @@ export const useKeyboard = (h: KeyboardHandlers): boolean => {
         e.preventDefault();
         disarm();
         h.togglePalette();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        disarm();
+        h.toggleChat();
         return;
       }
       if (e.key === "Escape") {

@@ -1,6 +1,6 @@
 // ================= typed API client =================
 
-import type { Agent, AgentRun, CalendarEvent, DevFacts, GovernanceItem, ImpactPair, Metric, MetricReading, Milestone, Project, Proposal, Release, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
+import type { Agent, AgentRun, CalendarEvent, DevFacts, GovernanceItem, ImpactPair, Metric, MetricReading, Milestone, Project, ProjectTab, Proposal, Release, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import type {
   AgentsInput,
@@ -12,6 +12,8 @@ import type {
   ProjectInput,
   ReadingInput,
   ReleaseInput,
+  ChatInput,
+  RateRunInput,
   RunAgentInput,
   SetupCreateInput,
   TargetsInput,
@@ -76,6 +78,11 @@ export const api = {
   syncProject: (pid: string) => request<{ run: SyncRun; facts: DevFacts | null }>("POST", routes.sync(pid)),
   syncStatus: () => request<{ source: string | null; projects: Record<string, SyncRun | null> }>("GET", routes.syncStatus()),
   setAgents: (body: AgentsInput) => request<Agent[]>("PUT", routes.agents(), body),
+  chat: (body: ChatInput) => request<{ answer: string; links: { label: string; proj: string; tab: ProjectTab }[]; proposals: Proposal[]; runId: string; model: string }>("POST", routes.chat(), body),
+  rateRun: (id: string, body: RateRunInput) => request<AgentRun>("POST", routes.runRate(id), body),
+  judgeRun: (id: string) => request<RunScore[]>("POST", routes.runJudge(id)),
+  benchmark: (agentId?: string) => request<{ running: boolean; done: number; total: number }>("POST", routes.benchmark(), agentId ? { agentId } : {}),
+  benchmarkStatus: () => request<{ running: boolean; done: number; total: number; startedAt: string | null }>("GET", routes.benchmark()),
   setupAnalyze: (form: FormData) => request<SetupDraft>("POST", routes.setup(), form),
   setupRefine: (id: string, feedback: string) => request<SetupDraft>("POST", routes.setupRefine(id), { feedback }),
   setupCreate: (id: string, body: SetupCreateInput) => request<Project>("POST", routes.setupCreate(id), body),

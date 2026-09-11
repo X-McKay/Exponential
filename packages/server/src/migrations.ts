@@ -236,17 +236,55 @@ const MIGRATIONS: readonly string[] = [
     model TEXT
   );
   `,
+  // Evals: runs record what they cost and which prompt they used; scores hold
+  // rule checks, judge verdicts, and human ratings. The agents table is rebuilt
+  // to admit the conversational kind (SQLite cannot alter a CHECK constraint).
+  `
+  ALTER TABLE agent_runs ADD COLUMN prompt_version TEXT;
+  ALTER TABLE agent_runs ADD COLUMN latency_ms INTEGER;
+  ALTER TABLE agent_runs ADD COLUMN prompt_tokens INTEGER;
+  ALTER TABLE agent_runs ADD COLUMN completion_tokens INTEGER;
+  ALTER TABLE agent_runs ADD COLUMN benchmark TEXT;
+  ALTER TABLE agent_runs ADD COLUMN rating INTEGER;
+  ALTER TABLE agent_runs ADD COLUMN rating_note TEXT;
+  ALTER TABLE agent_runs ADD COLUMN context TEXT;
+  CREATE TABLE run_scores (
+    run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+    scorer TEXT NOT NULL CHECK (scorer IN ('rules','judge')),
+    dimension TEXT NOT NULL,
+    score REAL NOT NULL,
+    note TEXT NOT NULL,
+    at TEXT NOT NULL,
+    PRIMARY KEY (run_id, scorer, dimension)
+  );
+  CREATE TABLE agents_v2 (
+    id TEXT PRIMARY KEY, sort INTEGER NOT NULL, name TEXT NOT NULL, grad TEXT NOT NULL, purpose TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('deck','comms','ideation','audit','chat')),
+    model TEXT, owner TEXT NOT NULL, caps TEXT NOT NULL, schedule TEXT CHECK (schedule IS NULL OR schedule = 'nightly')
+  );
+  INSERT INTO agents_v2 SELECT id, sort, name, grad, purpose, kind, model, owner, caps, schedule FROM agents;
+  DROP TABLE agents;
+  ALTER TABLE agents_v2 RENAME TO agents;
+  `,
 ];
 
 export const migrate = (db: Database): void => {
   db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
   const applied = new Set(db.query<{ version: number }, []>("SELECT version FROM schema_migrations").all().map((r) => r.version));
-  db.transaction(() => {
-    MIGRATIONS.forEach((sql, i) => {
-      const version = i + 1;
-      if (applied.has(version)) return;
-      db.exec(sql);
-      db.query("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(version, new Date().toISOString());
-    });
-  })();
+  // Foreign keys are off while tables are rebuilt so a DROP never cascades into child rows; the check afterwards proves nothing dangled.
+  db.exec("PRAGMA foreign_keys = OFF");
+  try {
+    db.transaction(() => {
+      MIGRATIONS.forEach((sql, i) => {
+        const version = i + 1;
+        if (applied.has(version)) return;
+        db.exec(sql);
+        db.query("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(version, new Date().toISOString());
+      });
+      const dangling = db.query<{ table: string }, []>("PRAGMA foreign_key_check").all();
+      if (dangling.length) throw new Error(`migration left dangling foreign keys in ${[...new Set(dangling.map((d) => d.table))].join(", ")}`);
+    })();
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
 };

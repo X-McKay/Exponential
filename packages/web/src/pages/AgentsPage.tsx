@@ -1,11 +1,10 @@
 import { useState } from "react";
-import { AGENT_KIND_LABEL, AGENT_STATUS_LABEL, RUN_STATE_ICON, agentStats, relTime, runsOf } from "@valueflow/domain";
-import { pendingProposals } from "@valueflow/domain";
-import type { Agent, AgentRun, LlmInfo, Project, ProjectTab, Proposal } from "@valueflow/domain";
+import { AGENT_KIND_LABEL, AGENT_STATUS_LABEL, JUDGE_DIMENSIONS, RUN_STATE_ICON, agentScorecard, agentStats, pendingProposals, relTime, runsOf } from "@valueflow/domain";
+import type { Agent, AgentRun, AgentScorecard, LlmInfo, Project, ProjectTab, Proposal, RunScore } from "@valueflow/domain";
 import type { RunAgentInput } from "@valueflow/shared";
 import { RunAgentEditor, RunViewer } from "../editors/RunAgent.tsx";
 import { ProposalList } from "../ui/Proposals.tsx";
-import { Avatar, Caret, Chip, Kpi, SectionCard, Tip, ghostBtn, reset } from "../ui/primitives.tsx";
+import { Avatar, Caret, Chip, Kbd, Kpi, SectionCard, Tip, ghostBtn, reset } from "../ui/primitives.tsx";
 import { AGENT_STATUS, C, RUN_COLOR } from "../theme.ts";
 
 function AgentAvatar({ a, size = 26 }: { a: Agent; size?: number }) {
@@ -33,10 +32,85 @@ function AgentAvatar({ a, size = 26 }: { a: Agent; size?: number }) {
 
 const shortProjectName = (p: Project | undefined): string => (p ? p.name.split(" ").slice(0, 2).join(" ") : "");
 
+const pct = (v: number | null): string => (v === null ? "—" : `${Math.round(v * 100)}%`);
+const scoreColor = (v: number | null): string => (v === null ? C.dim : v >= 0.8 ? C.green : v >= 0.6 ? C.amber : C.red);
+
+/** One agent's measured quality: rules, judge, people, and the latest benchmark against the previous one. */
+function Scorecard({ agent, card, running, canBenchmark, onBenchmark }: { agent: Agent; card: AgentScorecard; running: boolean; canBenchmark: boolean; onBenchmark: (agentId: string) => void }) {
+  const latest = card.benchmarks[0];
+  const previous = card.benchmarks[1];
+  const delta = latest && previous && latest.overall !== null && previous.overall !== null ? latest.overall - previous.overall : null;
+  const cell = (label: string, v: number | null, tip: string) => (
+    <Tip key={label} label={tip}>
+      <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-start", minWidth: 72 }}>
+        <span style={{ fontSize: 10.5, color: C.dim, letterSpacing: "0.04em", textTransform: "uppercase" }}>{label}</span>
+        <span style={{ fontSize: 14, fontWeight: 550, color: scoreColor(v) }}>{pct(v)}</span>
+      </span>
+    </Tip>
+  );
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14, padding: "10px 0", borderTop: `1px solid ${C.line}` }}>
+      <span style={{ width: 96, flexShrink: 0 }}>
+        <span style={{ fontSize: 13, fontWeight: 500, color: C.text, display: "block" }}>{agent.name}</span>
+        <span style={{ fontSize: 11, color: C.dim }}>
+          {card.runs} run{card.runs === 1 ? "" : "s"} · {card.failed} failed
+        </span>
+      </span>
+      {cell("format", card.rules.format, "Rules: reply parsed with summary and body")}
+      {cell("grounded", card.rules.grounding, "Rules: share of cited numbers and ids that exist in the briefing")}
+      {cell("proposals ok", card.rules.proposalsValid, "Rules: share of proposals that were well-formed and pointed at real items")}
+      {JUDGE_DIMENSIONS.map((d) => cell(d, card.judge[d], `Judge (LLM, rubric per kind): ${d}, mean over ${card.judge.judged} judged run${card.judge.judged === 1 ? "" : "s"}`))}
+      {cell("judge", card.judge.overall, "Judge overall: groundedness weighted double")}
+      <Tip label="Proposal acceptance rate: accepted / decided">
+        <span style={{ display: "inline-flex", flexDirection: "column", minWidth: 72 }}>
+          <span style={{ fontSize: 10.5, color: C.dim, letterSpacing: "0.04em", textTransform: "uppercase" }}>accepted</span>
+          <span style={{ fontSize: 14, fontWeight: 550, color: scoreColor(card.proposals.acceptanceRate) }}>
+            {pct(card.proposals.acceptanceRate)} <span style={{ fontSize: 11, color: C.dim, fontWeight: 400 }}>of {card.proposals.total}</span>
+          </span>
+        </span>
+      </Tip>
+      <Tip label="Human ratings on runs">
+        <span style={{ display: "inline-flex", flexDirection: "column", minWidth: 60 }}>
+          <span style={{ fontSize: 10.5, color: C.dim, letterSpacing: "0.04em", textTransform: "uppercase" }}>rated</span>
+          <span style={{ fontSize: 13, color: C.mut }}>
+            <span style={{ color: C.green }}>👍 {card.ratings.up}</span> <span style={{ color: C.red }}>👎 {card.ratings.down}</span>
+          </span>
+        </span>
+      </Tip>
+      <Tip label="Median latency and mean tokens per finished run">
+        <span style={{ display: "inline-flex", flexDirection: "column", minWidth: 72 }}>
+          <span style={{ fontSize: 10.5, color: C.dim, letterSpacing: "0.04em", textTransform: "uppercase" }}>cost</span>
+          <span style={{ fontSize: 13, color: C.mut }}>
+            {card.latencyMedianMs === null ? "—" : `${(card.latencyMedianMs / 1000).toFixed(0)}s`}
+            {card.tokensMean === null ? "" : ` · ${Math.round(card.tokensMean / 100) / 10}k tok`}
+          </span>
+        </span>
+      </Tip>
+      <span style={{ flex: 1 }} />
+      <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+        {latest ? (
+          <Tip label={`Latest benchmark ${latest.day}: ${latest.n} cases, prompt ${latest.promptVersion ?? "?"}, ${latest.model ?? "?"}${previous ? ` · previous ${previous.day} prompt ${previous.promptVersion ?? "?"}` : ""}`}>
+            <span style={{ fontSize: 12, color: C.mut }}>
+              benchmark <span style={{ color: scoreColor(latest.overall), fontWeight: 550 }}>{pct(latest.overall)}</span> · expectations <span style={{ color: scoreColor(latest.expectations), fontWeight: 550 }}>{pct(latest.expectations)}</span>
+              {delta !== null && <span style={{ color: delta >= 0 ? C.green : C.red }}> {delta >= 0 ? "▲" : "▼"} {Math.abs(Math.round(delta * 100))} pts vs previous</span>}
+            </span>
+          </Tip>
+        ) : (
+          <span style={{ fontSize: 12, color: C.dim }}>no benchmark yet</span>
+        )}
+        <button type="button" className="vf-ghost" disabled={running || !canBenchmark} onClick={() => onBenchmark(agent.id)} style={{ ...ghostBtn, height: 24, opacity: running || !canBenchmark ? 0.5 : 1 }}>
+          {running ? "Running…" : "Run benchmark"}
+        </button>
+      </span>
+    </div>
+  );
+}
+
 export function AgentsPage({
   agents,
   runs,
   proposals,
+  scores,
   projects,
   asOf,
   llm,
@@ -45,10 +119,14 @@ export function AgentsPage({
   onEdit,
   onRun,
   onDecide,
+  onRate,
+  onJudge,
+  onBenchmark,
 }: {
   agents: Agent[];
   runs: AgentRun[];
   proposals: Proposal[];
+  scores: RunScore[];
   projects: Project[];
   asOf: string;
   llm: LlmInfo | null;
@@ -57,8 +135,17 @@ export function AgentsPage({
   onEdit: () => void;
   onRun: (input: RunAgentInput) => void;
   onDecide: (id: string, decision: "accept" | "dismiss") => void;
+  onRate: (id: string, rating: 1 | -1 | null, note?: string) => void;
+  onJudge: (id: string) => Promise<void>;
+  onBenchmark: (agentId?: string) => Promise<void>;
 }) {
   const inbox = pendingProposals({ proposals });
+  const [benchmarking, setBenchmarking] = useState<string | null>(null);
+  const cards = new Map(agents.map((a) => [a.id, agentScorecard(a, runs, scores, proposals, asOf)]));
+  const bench = (agentId?: string) => {
+    setBenchmarking(agentId ?? "all");
+    void onBenchmark(agentId).finally(() => setBenchmarking(null));
+  };
   const [open, setOpen] = useState<string | null>(agents.find((a) => a.id === "audie")?.id ?? agents[0]?.id ?? null);
   const [running, setRunning] = useState<Agent | null>(null);
   const [viewing, setViewing] = useState<AgentRun | null>(null);
@@ -160,11 +247,17 @@ export function AgentsPage({
                     <span style={{ flex: 1 }} />
                     <span style={{ fontSize: 11, color: C.dim }}>Owner</span>
                     <Avatar ini={a.owner} size={18} />
-                    <Tip label={llm ? `Brief ${a.name} with a project's live state` : "Set LLM_BASE_URL to enable runs"}>
-                      <button type="button" className="vf-ghost" disabled={!llm} onClick={() => setRunning(a)} style={{ ...ghostBtn, color: C.indigoHi, opacity: llm ? 1 : 0.5, marginLeft: 6 }}>
-                        Run…
-                      </button>
-                    </Tip>
+                    {a.kind === "chat" ? (
+                      <span style={{ fontSize: 11, color: C.dim, marginLeft: 6 }}>
+                        runs from the Ask panel · <Kbd>⌘</Kbd> <Kbd>J</Kbd>
+                      </span>
+                    ) : (
+                      <Tip label={llm ? `Brief ${a.name} with a project's live state` : "Set LLM_BASE_URL to enable runs"}>
+                        <button type="button" className="vf-ghost" disabled={!llm} onClick={() => setRunning(a)} style={{ ...ghostBtn, color: C.indigoHi, opacity: llm ? 1 : 0.5, marginLeft: 6 }}>
+                          Run…
+                        </button>
+                      </Tip>
+                    )}
                   </div>
                   <div style={{ background: "#0B0C0E", border: `1px solid ${C.line}`, borderRadius: 8, padding: "2px 12px" }}>
                     {mine.length === 0 && <div style={{ fontSize: 12, color: C.dim, padding: "10px 2px" }}>No runs yet.</div>}
@@ -179,6 +272,15 @@ export function AgentsPage({
                         <span className={r.state === "working" || r.state === "queued" ? "vf-pulse" : undefined} style={{ fontSize: 11, color: RUN_COLOR[r.state], width: 12, flexShrink: 0 }}>
                           {RUN_STATE_ICON[r.state]}
                         </span>
+                        {(() => {
+                          const o = scores.find((sc) => sc.runId === r.id && sc.scorer === "judge" && sc.dimension === "overall");
+                          return o ? (
+                            <Tip label={`judge overall ${pct(o.score)}`}>
+                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: scoreColor(o.score), flexShrink: 0, alignSelf: "center" }} />
+                            </Tip>
+                          ) : null;
+                        })()}
+                        {r.benchmark && <Chip>bench</Chip>}
                         <span style={{ flex: 1, fontSize: 13, color: r.state === "attention" ? C.text : r.state === "failed" ? "#F08A84" : "#C6CAD6", lineHeight: 1.5, minWidth: 0 }}>
                           {r.summary}
                           {proposals.some((p) => p.runId === r.id && p.state === "pending") && (
@@ -210,6 +312,24 @@ export function AgentsPage({
         })}
       </SectionCard>
 
+      <SectionCard
+        title="Quality"
+        pad="0 14px 4px"
+        right={
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 11, color: C.dim }}>30-day window · rules on every run · judge on finished runs · benchmark on a fixed case set</span>
+            <button type="button" className="vf-ghost" disabled={benchmarking !== null || !llm} onClick={() => bench()} style={{ ...ghostBtn, height: 24, color: C.indigoHi, opacity: benchmarking !== null || !llm ? 0.5 : 1 }}>
+              {benchmarking === "all" ? "Running all…" : "Run full benchmark"}
+            </button>
+          </span>
+        }
+      >
+        {agents.map((a) => {
+          const card = cards.get(a.id);
+          return card ? <Scorecard key={a.id} agent={a} card={card} running={benchmarking === a.id || benchmarking === "all"} canBenchmark={llm !== null} onBenchmark={bench} /> : null;
+        })}
+      </SectionCard>
+
       <div style={{ fontSize: 12, color: C.dim, lineHeight: 1.6, maxWidth: 680 }}>
         Every run briefs the agent with the project's live state — targets, gates, governance, releases, synced development activity, and recent events — and
         stores the result. Runs flagged for attention surface on Glance. Audie runs nightly when a model is configured.
@@ -234,8 +354,12 @@ export function AgentsPage({
           project={byId.get(viewing.proj)}
           asOf={asOf}
           proposals={proposals.filter((p) => p.runId === viewing.id)}
+          scores={scores.filter((s) => s.runId === viewing.id)}
           state={{ projects, agents }}
+          canJudge={llm !== null}
           onDecide={onDecide}
+          onRate={onRate}
+          onJudge={onJudge}
           onClose={() => setViewing(null)}
         />
       )}

@@ -5,7 +5,7 @@
 // reloads from the server and surfaces the error.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Agent, AgentRun, AppState, CalendarEvent, GovernanceItem, ImpactPair, Milestone, Project, Release, Workspace } from "@valueflow/domain";
+import type { Agent, AgentRun, AppState, CalendarEvent, GovernanceItem, ImpactPair, Milestone, Project, Proposal, Release, Workspace } from "@valueflow/domain";
 import type { ProjectInput, RunAgentInput } from "@valueflow/shared";
 import { api } from "../api/client.ts";
 
@@ -31,6 +31,12 @@ export interface Store {
   runAgent: (input: RunAgentInput) => Promise<void>;
   /** Apply or discard an agent's proposal; accepting reloads state so every derivation follows. */
   decideProposal: (id: string, decision: "accept" | "dismiss") => Promise<void>;
+  /** Proposals that arrived outside the store (a chat turn); reloads so the run and scores show too. */
+  addProposals: (proposals: Proposal[]) => void;
+  rateRun: (id: string, rating: 1 | -1 | null, note?: string) => Promise<void>;
+  judgeRun: (id: string) => Promise<void>;
+  /** Start a benchmark; resolves when the server has finished it (polls). */
+  runBenchmark: (agentId?: string) => Promise<void>;
   saveCalendar: (ev: CalendarEvent, isNew: boolean) => Promise<void>;
   deleteCalendar: (id: string) => Promise<void>;
   saveWorkspace: (w: Workspace) => Promise<void>;
@@ -239,6 +245,13 @@ export const useStore = (): Store => {
         output: "",
         model: null,
         error: null,
+        promptVersion: null,
+        latencyMs: null,
+        promptTokens: null,
+        completionTokens: null,
+        benchmark: null,
+        rating: null,
+        ratingNote: null,
       };
       setState((s) => (s ? { ...s, runs: [placeholder, ...s.runs] } : s));
       try {
@@ -263,6 +276,55 @@ export const useStore = (): Store => {
         } else {
           await api.dismissProposal(id);
         }
+      } catch (e) {
+        fail(e);
+      }
+    },
+    [fail, reload],
+  );
+
+  const addProposals = useCallback(
+    (proposals: Proposal[]) => {
+      setState((s) => (s ? { ...s, proposals: [...proposals, ...s.proposals.filter((p) => !proposals.some((n) => n.id === p.id))] } : s));
+      void reload();
+    },
+    [reload],
+  );
+
+  const rateRun = useCallback(
+    async (id: string, rating: 1 | -1 | null, note?: string) => {
+      setState((s) => (s ? { ...s, runs: s.runs.map((r) => (r.id === id ? { ...r, rating, ratingNote: note ?? r.ratingNote } : r)) } : s));
+      try {
+        await api.rateRun(id, { rating, ...(note !== undefined ? { note } : {}) });
+      } catch (e) {
+        fail(e);
+      }
+    },
+    [fail],
+  );
+
+  const judgeRun = useCallback(
+    async (id: string) => {
+      try {
+        const scores = await api.judgeRun(id);
+        setState((s) => (s ? { ...s, scores: [...s.scores.filter((x) => !(x.runId === id && x.scorer === "judge")), ...scores] } : s));
+      } catch (e) {
+        fail(e);
+      }
+    },
+    [fail],
+  );
+
+  const runBenchmark = useCallback(
+    async (agentId?: string) => {
+      try {
+        await api.benchmark(agentId);
+        for (let i = 0; i < 600; i++) {
+          await new Promise((r) => setTimeout(r, 3000));
+          const st = await api.benchmarkStatus();
+          if (!st.running) break;
+        }
+        await reload();
       } catch (e) {
         fail(e);
       }
@@ -317,6 +379,10 @@ export const useStore = (): Store => {
       saveAgents,
       runAgent,
       decideProposal,
+      addProposals,
+      rateRun,
+      judgeRun,
+      runBenchmark,
       saveCalendar,
       deleteCalendar,
       saveWorkspace,
@@ -340,6 +406,10 @@ export const useStore = (): Store => {
       saveAgents,
       runAgent,
       decideProposal,
+      addProposals,
+      rateRun,
+      judgeRun,
+      runBenchmark,
       saveCalendar,
       deleteCalendar,
       saveWorkspace,

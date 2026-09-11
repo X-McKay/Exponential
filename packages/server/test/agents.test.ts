@@ -18,7 +18,7 @@ const fakeLlm = (reply: (messages: ChatMessage[]) => string | Error): Llm => ({
   model: () => Promise.resolve("fake-model"),
   chat: (messages) => {
     const r = reply(messages);
-    return r instanceof Error ? Promise.reject(r) : Promise.resolve({ content: r, model: "fake-model", usage: { prompt: 10, completion: 5 } });
+    return r instanceof Error ? Promise.reject(r) : Promise.resolve({ content: r, model: "fake-model", usage: { prompt: 10, completion: 5 }, truncated: false });
   },
   describe: () => ({ baseUrl: "http://fake", model: "fake-model" }),
 });
@@ -125,7 +125,7 @@ describe("llm client", () => {
       },
     });
     const r = await llm.chat([{ role: "user", content: "hi" }], { jsonSchema: { name: "t", schema: { type: "object" } } });
-    expect(r).toEqual({ content: '{"ok":true}', model: "m1", usage: { prompt: 3, completion: 2 } });
+    expect(r).toEqual({ content: '{"ok":true}', model: "m1", usage: { prompt: 3, completion: 2 }, truncated: false });
     expect(calls[0]?.url).toBe("http://llm.test/v1/models");
     const body = calls[1]?.body as Record<string, unknown>;
     expect(body.model).toBe("m1");

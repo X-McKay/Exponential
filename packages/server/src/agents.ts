@@ -27,7 +27,8 @@ import { ProposalActionSchema } from "@valueflow/shared";
 import type { RunAgentInput } from "@valueflow/shared";
 import { extractJson } from "./llm.ts";
 import type { ChatMessage, Llm } from "./llm.ts";
-import { NotFound, findProject, insertProposal, insertRun, loadState, updateRun } from "./repo.ts";
+import { ruleScores } from "./evals.ts";
+import { NotFound, findProject, insertProposal, insertRun, loadState, updateRun, upsertScore } from "./repo.ts";
 
 // ---- context ---------------------------------------------------------------
 
@@ -110,15 +111,53 @@ const ROLE: Record<AgentKind, { brief: string; task: string; tab: ProjectTab }> 
     task: "Report findings ordered by severity in markdown. Each finding: a `##` title, the evidence (cite the specific fact from the context), the risk, and a concrete recommendation. Set attention=true only when a finding needs a human decision this week: Tier 1 exposure, a release blocked by a governance gap, or failing CI on release-critical work. Otherwise attention=false.",
     tab: "governance",
   },
+  chat: {
+    brief: "You answer questions about a project from its briefing.",
+    task: "Answer the instruction directly and briefly from the briefing only, in markdown, quoting numbers exactly and saying when the briefing lacks the answer.",
+    tab: "overview",
+  },
 };
+
+/** FNV-1a over the text that shapes a kind's prompt; changes whenever the prompt does. */
+const fnv = (s: string): string => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+};
+
+const COMMON_INSTRUCTIONS = "v3: facts-only, typed proposals, calendar events for pending work";
+export const promptVersion = (kind: AgentKind): string => fnv(`${COMMON_INSTRUCTIONS}|${ROLE[kind].brief}|${ROLE[kind].task}`).slice(0, 8);
 
 /** One proposal shape: its type plus the fields that type needs, all required. */
 const shape = (type: string, fields: Record<string, unknown>) => ({
   type: "object",
   additionalProperties: false,
-  properties: { type: { type: "string", enum: [type] }, rationale: { type: "string", description: "One sentence citing the evidence." }, ...fields },
+  properties: { type: { type: "string", enum: [type] }, rationale: { type: "string", description: "One sentence citing the evidence." }, ...fields } as Record<string, unknown>,
   required: ["type", "rationale", ...Object.keys(fields)],
 });
+
+/** The five proposal shapes, shared with the workspace conversation. */
+export const PROPOSAL_SHAPES = [
+  shape("governance_status", { gid: { type: "string", description: "governance id from the briefing" }, status: { type: "string", enum: ["approved", "in_review", "draft", "missing", "na"] } }),
+  shape("milestone_status", { mid: { type: "string", description: "milestone id, MS-n" }, status: { type: "string", enum: ["backlog", "progress", "eval", "shipped"] } }),
+  shape("governance_item", {
+    cat: { type: "string" },
+    name: { type: "string" },
+    status: { type: "string", enum: ["approved", "in_review", "draft", "missing", "na"] },
+    owner: { type: "string", description: "team initials" },
+    detail: { type: "string" },
+  }),
+  shape("calendar_event", {
+    date: { type: "string", description: "YYYY-MM-DD" },
+    text: { type: "string" },
+    sub: { type: ["string", "null"] },
+    tab: { type: "string", enum: ["overview", "value", "roadmap", "development", "governance"] },
+  }),
+  shape("targets", { fte: { type: "number" }, time: { type: "number" } }),
+];
 
 const RESULT_SCHEMA = {
   name: "agent_result",
@@ -133,26 +172,7 @@ const RESULT_SCHEMA = {
         type: "array",
         maxItems: 6,
         description: "Concrete changes to the project's facts that a person could accept with one click. Empty when nothing should change.",
-        items: {
-          anyOf: [
-            shape("governance_status", { gid: { type: "string", description: "governance id from the briefing" }, status: { type: "string", enum: ["approved", "in_review", "draft", "missing", "na"] } }),
-            shape("milestone_status", { mid: { type: "string", description: "milestone id, MS-n" }, status: { type: "string", enum: ["backlog", "progress", "eval", "shipped"] } }),
-            shape("governance_item", {
-              cat: { type: "string" },
-              name: { type: "string" },
-              status: { type: "string", enum: ["approved", "in_review", "draft", "missing", "na"] },
-              owner: { type: "string", description: "team initials" },
-              detail: { type: "string" },
-            }),
-            shape("calendar_event", {
-              date: { type: "string", description: "YYYY-MM-DD" },
-              text: { type: "string" },
-              sub: { type: ["string", "null"] },
-              tab: { type: "string", enum: ["overview", "value", "roadmap", "development", "governance"] },
-            }),
-            shape("targets", { fte: { type: "number" }, time: { type: "number" } }),
-          ],
-        },
+        items: { anyOf: PROPOSAL_SHAPES },
       },
     },
     required: ["summary", "attention", "body", "proposals"],
@@ -164,6 +184,7 @@ interface AgentResult {
   attention: boolean;
   body: string;
   proposals: { action: Proposal["action"]; rationale: string }[];
+  proposalsReturned: number;
 }
 
 /** Keep only proposals the schema accepts and that point at things the project has. */
@@ -176,8 +197,9 @@ const parseProposals = (raw: unknown, p: Project): AgentResult["proposals"] => {
     const parsed = ProposalActionSchema.safeParse(rest);
     if (!parsed.success) continue;
     const a = parsed.data;
-    if (a.type === "governance_status" && !p.governance.some((g) => g.id === a.gid)) continue;
-    if (a.type === "milestone_status" && !p.milestones.some((m) => m.id === a.mid)) continue;
+    // Targets must exist, and a status "change" to the current status is noise.
+    if (a.type === "governance_status" && !p.governance.some((g) => g.id === a.gid && g.status !== a.status)) continue;
+    if (a.type === "milestone_status" && !p.milestones.some((m) => m.id === a.mid && m.status !== a.status)) continue;
     if (a.type === "governance_item" && p.governance.some((g) => g.name.toLowerCase() === a.name.toLowerCase())) continue;
     out.push({ action: a, rationale: typeof rationale === "string" ? rationale.trim().slice(0, 400) : "" });
   }
@@ -185,7 +207,7 @@ const parseProposals = (raw: unknown, p: Project): AgentResult["proposals"] => {
 };
 
 /** Cut at a word boundary with an ellipsis when the model overruns the one-line limit. */
-const clip = (s: string, max: number): string => {
+export const clip = (s: string, max: number): string => {
   if (s.length <= max) return s;
   const cut = s.slice(0, max - 1);
   const space = cut.lastIndexOf(" ");
@@ -197,7 +219,7 @@ const parseResult = (text: string, p: Project): AgentResult => {
   if (typeof raw !== "object" || raw === null) throw new Error("reply is not an object");
   const o = raw as Record<string, unknown>;
   if (typeof o.summary !== "string" || typeof o.body !== "string") throw new Error("reply is missing summary or body");
-  return { summary: clip(o.summary.trim(), 140), attention: o.attention === true, body: o.body.trim(), proposals: parseProposals(o.proposals, p) };
+  return { summary: clip(o.summary.trim(), 140), attention: o.attention === true, body: o.body.trim(), proposals: parseProposals(o.proposals, p), proposalsReturned: Array.isArray(o.proposals) ? o.proposals.length : 0 };
 };
 
 export const buildMessages = (agent: Agent, state: AppState, p: Project, cal: Calendar, instruction: string | null): ChatMessage[] => {
@@ -226,12 +248,20 @@ export const buildMessages = (agent: Agent, state: AppState, p: Project, cal: Ca
 
 // ---- running ---------------------------------------------------------------
 
-export const runAgent = async (db: Database, llm: Llm, input: RunAgentInput, now: Date): Promise<AgentRun> => {
+export interface RunOptions {
+  /** Benchmark case id when the run belongs to a benchmark. */
+  benchmark?: string;
+}
+
+export const runAgent = async (db: Database, llm: Llm, input: RunAgentInput, now: Date, options: RunOptions = {}): Promise<AgentRun> => {
   const state = loadState(db, now);
   const agent = state.agents.find((a) => a.id === input.agentId);
   if (!agent) throw new NotFound(`agent ${input.agentId} not found`);
   const project = findProject(state, input.proj);
   const cal = calendarOf(state);
+  const messages = buildMessages(agent, state, project, cal, input.instruction ?? null);
+  const briefing = messages[1]?.content ?? "";
+  const started = Date.now();
   const run: AgentRun = {
     id: nextRunId(state.runs),
     agentId: agent.id,
@@ -245,10 +275,22 @@ export const runAgent = async (db: Database, llm: Llm, input: RunAgentInput, now
     output: "",
     model: null,
     error: null,
+    promptVersion: promptVersion(agent.kind),
+    latencyMs: null,
+    promptTokens: null,
+    completionTokens: null,
+    benchmark: options.benchmark ?? null,
+    rating: null,
+    ratingNote: null,
   };
-  insertRun(db, run);
+  insertRun(db, run, briefing);
   try {
-    const res = await llm.chat(buildMessages(agent, state, project, cal, run.instruction), { jsonSchema: RESULT_SCHEMA, maxTokens: 4000 });
+    let res = await llm.chat(messages, { jsonSchema: RESULT_SCHEMA, maxTokens: 4000 });
+    if (res.truncated) {
+      // The reply hit the budget mid-JSON. Ask once more, tersely, with more room.
+      const terse: ChatMessage[] = [...messages, { role: "assistant", content: res.content.slice(0, 400) }, { role: "user", content: "That reply was cut off before the JSON closed. Reply again, complete and valid, keeping the body under 500 words and at most 4 proposals." }];
+      res = await llm.chat(terse, { jsonSchema: RESULT_SCHEMA, maxTokens: 6000 });
+    }
     let result: AgentResult;
     try {
       result = parseResult(res.content, project);
@@ -262,6 +304,9 @@ export const runAgent = async (db: Database, llm: Llm, input: RunAgentInput, now
       summary: result.summary,
       output: result.body,
       model: res.model,
+      latencyMs: Date.now() - started,
+      promptTokens: res.usage?.prompt ?? null,
+      completionTokens: res.usage?.completion ?? null,
     };
     updateRun(db, finished);
     let existing = loadState(db, now).proposals;
@@ -270,10 +315,12 @@ export const runAgent = async (db: Database, llm: Llm, input: RunAgentInput, now
       insertProposal(db, proposal);
       existing = [...existing, proposal];
     }
+    for (const s of ruleScores({ run: finished, briefing, proposalsReturned: result.proposalsReturned, proposalsKept: result.proposals.length }, finished.finishedAt ?? now.toISOString())) upsertScore(db, s);
     return finished;
   } catch (e) {
-    const failed: AgentRun = { ...run, state: "failed", finishedAt: new Date().toISOString(), summary: `${agent.name} run failed`, error: e instanceof Error ? e.message : String(e) };
+    const failed: AgentRun = { ...run, state: "failed", finishedAt: new Date().toISOString(), summary: `${agent.name} run failed`, error: e instanceof Error ? e.message : String(e), latencyMs: Date.now() - started };
     updateRun(db, failed);
+    for (const s of ruleScores({ run: failed, briefing, proposalsReturned: 0, proposalsKept: 0 }, failed.finishedAt ?? now.toISOString())) upsertScore(db, s);
     return failed;
   }
 };
@@ -284,6 +331,7 @@ export const runDue = async (db: Database, llm: Llm, now: Date): Promise<AgentRu
   const out: AgentRun[] = [];
   for (const agent of state.agents) {
     if (!isDue(agent, state.runs, now.toISOString())) continue;
+    if (agent.kind === "chat") continue;
     for (const p of state.projects) out.push(await runAgent(db, llm, { agentId: agent.id, proj: p.id }, now));
   }
   return out;

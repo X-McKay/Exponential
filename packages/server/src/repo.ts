@@ -11,6 +11,7 @@ import type {
   AppState,
   Proposal,
   ProposalAction,
+  RunScore,
   SetupDraft,
   Build,
   CalendarEvent,
@@ -162,6 +163,21 @@ interface RunRow {
   output: string;
   model: string | null;
   error: string | null;
+  prompt_version: string | null;
+  latency_ms: number | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  benchmark: string | null;
+  rating: number | null;
+  rating_note: string | null;
+}
+interface ScoreRow {
+  run_id: string;
+  scorer: RunScore["scorer"];
+  dimension: string;
+  score: number;
+  note: string;
+  at: string;
 }
 interface WorkspaceRow {
   user_name: string;
@@ -302,6 +318,7 @@ export const loadState = (db: Database, now: Date = new Date()): AppState => {
     runs: loadRuns(db, now),
     llm: null,
     proposals: loadProposals(db, now),
+    scores: loadScores(db, now),
     events: loadEvents(db, now),
     calendar: loadCalendar(db),
   };
@@ -378,17 +395,66 @@ const toRun = (r: RunRow): AgentRun => ({
   output: r.output,
   model: r.model,
   error: r.error,
+  promptVersion: r.prompt_version,
+  latencyMs: r.latency_ms,
+  promptTokens: r.prompt_tokens,
+  completionTokens: r.completion_tokens,
+  benchmark: r.benchmark,
+  rating: r.rating === 1 ? 1 : r.rating === -1 ? -1 : null,
+  ratingNote: r.rating_note,
 });
+
+const RUN_COLUMNS = "id, agent_id, project_id, tab, state, started_at, finished_at, instruction, summary, output, model, error, prompt_version, latency_ms, prompt_tokens, completion_tokens, benchmark, rating, rating_note";
 
 export const loadRuns = (db: Database, now: Date, windowDays = RUN_WINDOW_DAYS * 2): AgentRun[] => {
   const since = new Date(now.getTime() - windowDays * 86_400_000).toISOString();
-  return db.query<RunRow, [string]>("SELECT * FROM agent_runs WHERE started_at >= ? ORDER BY started_at DESC, id").all(since).map(toRun);
+  return db.query<RunRow, [string]>(`SELECT ${RUN_COLUMNS} FROM agent_runs WHERE started_at >= ? ORDER BY started_at DESC, id`).all(since).map(toRun);
 };
 
-export const insertRun = (db: Database, r: AgentRun): void => {
-  db.query(
-    "INSERT INTO agent_runs (id, agent_id, project_id, tab, state, started_at, finished_at, instruction, summary, output, model, error) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-  ).run(r.id, r.agentId, r.proj, r.tab, r.state, r.startedAt, r.finishedAt, r.instruction, r.summary, r.output, r.model, r.error);
+/** The briefing a run was given; kept out of AppState because it is large. */
+export const loadRunContext = (db: Database, runId: string): string | null =>
+  db.query<{ context: string | null }, [string]>("SELECT context FROM agent_runs WHERE id = ?").get(runId)?.context ?? null;
+
+export const insertRun = (db: Database, r: AgentRun, context: string | null = null): void => {
+  db.query(`INSERT INTO agent_runs (${RUN_COLUMNS}, context) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    r.id,
+    r.agentId,
+    r.proj,
+    r.tab,
+    r.state,
+    r.startedAt,
+    r.finishedAt,
+    r.instruction,
+    r.summary,
+    r.output,
+    r.model,
+    r.error,
+    r.promptVersion,
+    r.latencyMs,
+    r.promptTokens,
+    r.completionTokens,
+    r.benchmark,
+    r.rating,
+    r.ratingNote,
+    context,
+  );
+};
+
+export const rateRun = (db: Database, runId: string, rating: 1 | -1 | null, note: string | null): void => {
+  const res = db.query("UPDATE agent_runs SET rating = ?, rating_note = ? WHERE id = ?").run(rating, note, runId);
+  if (res.changes === 0) throw new NotFound(`run ${runId} not found`);
+};
+
+export const loadScores = (db: Database, now: Date, windowDays = RUN_WINDOW_DAYS * 2): RunScore[] => {
+  const since = new Date(now.getTime() - windowDays * 86_400_000).toISOString();
+  return db
+    .query<ScoreRow, [string]>("SELECT s.* FROM run_scores s JOIN agent_runs r ON r.id = s.run_id WHERE r.started_at >= ? ORDER BY s.run_id, s.scorer, s.dimension")
+    .all(since)
+    .map((r) => ({ runId: r.run_id, scorer: r.scorer, dimension: r.dimension, score: r.score, note: r.note, at: r.at }));
+};
+
+export const upsertScore = (db: Database, s: RunScore): void => {
+  db.query("INSERT OR REPLACE INTO run_scores (run_id, scorer, dimension, score, note, at) VALUES (?,?,?,?,?,?)").run(s.runId, s.scorer, s.dimension, s.score, s.note, s.at);
 };
 
 /** Pending proposals plus those decided in the trailing window, newest first. */
@@ -489,8 +555,8 @@ export const deleteSetupDraft = (db: Database, id: string): void => {
 
 export const updateRun = (db: Database, r: AgentRun): void => {
   const res = db
-    .query("UPDATE agent_runs SET state = ?, finished_at = ?, summary = ?, output = ?, model = ?, error = ? WHERE id = ?")
-    .run(r.state, r.finishedAt, r.summary, r.output, r.model, r.error, r.id);
+    .query("UPDATE agent_runs SET state = ?, finished_at = ?, summary = ?, output = ?, model = ?, error = ?, latency_ms = ?, prompt_tokens = ?, completion_tokens = ? WHERE id = ?")
+    .run(r.state, r.finishedAt, r.summary, r.output, r.model, r.error, r.latencyMs, r.promptTokens, r.completionTokens, r.id);
   if (res.changes === 0) throw new NotFound(`run ${r.id} not found`);
 };
 

@@ -199,8 +199,8 @@ export interface DevFacts {
 
 // ---- agents -------------------------------------------------------------
 
-export type AgentKind = "deck" | "comms" | "ideation" | "audit";
-export const AGENT_KINDS: readonly AgentKind[] = ["deck", "comms", "ideation", "audit"];
+export type AgentKind = "deck" | "comms" | "ideation" | "audit" | "chat";
+export const AGENT_KINDS: readonly AgentKind[] = ["deck", "comms", "ideation", "audit", "chat"];
 /** Derived from runs: working while a run is in flight, scheduled when a schedule is set, otherwise idle. */
 export type AgentStatus = "working" | "idle" | "scheduled";
 export type RunState = "queued" | "working" | "done" | "attention" | "failed";
@@ -237,6 +237,37 @@ export interface AgentRun {
   output: string;
   model: string | null;
   error: string | null;
+  /** Short hash of the prompt the run used, so quality can be compared across prompt changes. */
+  promptVersion: string | null;
+  latencyMs: number | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  /** Benchmark case id when the run was part of a benchmark, else null. */
+  benchmark: string | null;
+  /** Human rating: 1 useful, -1 not useful. */
+  rating: 1 | -1 | null;
+  ratingNote: string | null;
+}
+
+/** One measured dimension of one run: deterministic rules or the LLM judge. */
+export interface RunScore {
+  runId: string;
+  scorer: "rules" | "judge";
+  dimension: string;
+  /** 0–1 */
+  score: number;
+  note: string;
+  at: string;
+}
+
+/** A fixed question an agent is expected to answer well; benchmarks re-run these to compare prompts and models. */
+export interface EvalCase {
+  id: string;
+  agentId: string;
+  proj: string;
+  instruction: string;
+  /** Things a good answer must contain; the judge scores each. */
+  expectations: string[];
 }
 
 export interface LlmInfo {
@@ -399,6 +430,8 @@ export interface AppState {
   llm: LlmInfo | null;
   /** Pending proposals plus recently decided ones, newest first. */
   proposals: Proposal[];
+  /** Scores for the runs in `runs`. */
+  scores: RunScore[];
   /** Newest first, trailing EVENT_WINDOW_DAYS. */
   events: Event[];
   calendar: CalendarEvent[];

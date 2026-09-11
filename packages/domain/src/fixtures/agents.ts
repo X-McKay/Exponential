@@ -2,7 +2,7 @@
 // from the state's `asOf`; a real run is produced by the server's agent
 // runner calling the configured LLM.
 
-import type { Agent, AgentRun, ProjectTab, RunState } from "../types.ts";
+import type { Agent, AgentRun, EvalCase, ProjectTab, RunState } from "../types.ts";
 
 const HOUR = 3_600_000;
 
@@ -51,6 +51,32 @@ export const AGENTS: Agent[] = [
     caps: ["Audit-trail gaps", "Code-quality habits", "Governance drift", "PM practice review"],
     schedule: "nightly",
   },
+  {
+    id: "ask",
+    name: "Ask",
+    grad: "linear-gradient(135deg,#EEEFF1,#8A8F98)",
+    purpose: "Answers questions about the whole workspace, points at the right page, and drafts proposals from the conversation",
+    kind: "chat",
+    model: null,
+    owner: "AM",
+    caps: ["Cross-project questions", "Where to look", "Draft proposals", "Every answer cites the briefing"],
+    schedule: null,
+  },
+];
+
+/** The built-in conversational agent; installed on boot if missing. */
+export const ASK_AGENT = AGENTS[AGENTS.length - 1] as Agent;
+
+/** Fixed questions the benchmark re-runs so prompt and model changes can be compared. */
+export const EVAL_CASES: EvalCase[] = [
+  { id: "slider-onboarding-q3", agentId: "slider", proj: "onboarding", instruction: "A Q3 value review deck for the steering group.", expectations: ["States 15% of the 40% FTE target is realized", "Names R2 Ingestion GA as at risk with 1 of 4 criteria met", "Lists Document ingestion pipeline as below its base gate"] },
+  { id: "slider-ima-airc", agentId: "slider", proj: "ima", instruction: "An AIRC pre-read for the quarterly Tier 1 re-review.", expectations: ["Notes the project is Tier 1 with quarterly re-review", "Shows rule recall 86% against the 88% base gate", "Lists the missing governance items: Product SLA, UAT process, User & ops documentation"] },
+  { id: "comma-onboarding-update", agentId: "comma", proj: "onboarding", instruction: "This week's stakeholder update.", expectations: ["Mentions the failed build #1148 on doc-ingest-pipeline", "Mentions ops documentation moving to In review", "Stays under 350 words"] },
+  { id: "comma-ima-memo", agentId: "comma", proj: "ima", instruction: "A decision memo on the recall gate: 88% base as set, or 90% as the SMEs want.", expectations: ["States current recall is 86%", "Lays out both thresholds with a consequence for each", "Ends with a clear recommendation and who decides"] },
+  { id: "nova-sector-quality", agentId: "nova", proj: "sector", instruction: "Options to lift analyst quality rating without adding reviewer load.", expectations: ["References the 64% analyst quality rating against its gate", "Gives at least 8 distinct options with effort sizes", "Ties options to the Draft generation pipeline milestone"] },
+  { id: "audie-ima-audit", agentId: "audie", proj: "ima", instruction: "Full audit ahead of R1 shadow mode.", expectations: ["Flags Tier 1 exposure with attention set", "Cites the recall gap (86% vs 88%)", "Names the pending security review and model risk assessment", "Proposes at least one concrete change"] },
+  { id: "audie-sector-habits", agentId: "audie", proj: "sector", instruction: "Code-quality and delivery habits review.", expectations: ["Cites 58% coverage on sector-report-agents", "Mentions the flaky failing build", "Recommends a concrete CI or review practice"] },
+  { id: "ask-workspace-blocked", agentId: "ask", proj: "ima", instruction: "Why is R1 blocked and what would unblock it fastest?", expectations: ["Lists the unmet R1 criteria", "Identifies the recall gate as the closest fix", "Links to the IMA roadmap or value page"] },
 ];
 
 interface SampleRun {
@@ -100,6 +126,13 @@ export const RUNS = (asOf: string): AgentRun[] => {
         output: running ? "" : `${r.summary}\n\n(Sample run. Real runs store the full response from the configured model.)`,
         model: running ? null : "sample",
         error: null,
+        promptVersion: null,
+        latencyMs: running ? null : 40_000,
+        promptTokens: null,
+        completionTokens: null,
+        benchmark: null,
+        rating: null,
+        ratingNote: null,
       };
     })
     .sort((a, b) => (b.startedAt < a.startedAt ? -1 : b.startedAt > a.startedAt ? 1 : a.id < b.id ? -1 : 1));

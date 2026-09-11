@@ -25,7 +25,7 @@ if (ensureAgents(db)) console.log("installed the default workspace agents");
 const source = sourceFromEnv(process.env);
 /** `LLM_BASE_URL` (OpenAI-compatible) enables agent runs; `AGENT_SCHEDULE=off` disables nightly runs. */
 const llm = llmFromEnv(process.env);
-const app = createApp(db, { now, source, llm });
+const app = createApp(db, { now, source, llm, autoJudge: process.env.EVAL_JUDGE !== "off" });
 if (llm) {
   llm
     .model()

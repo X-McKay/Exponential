@@ -5,7 +5,7 @@
 // what it produced. Status, run counts, success rates, and "last run" are
 // derived from runs and the clock, never stored.
 
-import type { Agent, AgentRun, AgentStatus, RunState } from "./types.ts";
+import type { Agent, AgentRun, AgentStatus, Proposal, RunScore, RunState } from "./types.ts";
 
 const DAY = 86_400_000;
 
@@ -61,4 +61,113 @@ export const RUN_STATE_ICON: Record<RunState, string> = { queued: "◌", working
 export const nextRunId = (runs: Pick<AgentRun, "id">[]): string => {
   const nums = runs.map((r) => parseInt((r.id.match(/\d+/) ?? ["0"])[0] ?? "0", 10));
   return `run-${Math.max(0, ...nums) + 1}`;
+};
+
+// ---- scorecards -----------------------------------------------------------
+
+export const JUDGE_DIMENSIONS = ["groundedness", "completeness", "actionability", "clarity"] as const;
+export type JudgeDimension = (typeof JUDGE_DIMENSIONS)[number];
+
+export interface BenchmarkBatch {
+  /** Day the batch ran. */
+  day: string;
+  promptVersion: string | null;
+  model: string | null;
+  n: number;
+  /** Mean judge overall, 0–1, or null when unjudged. */
+  overall: number | null;
+  /** Mean share of expectations met, 0–1, or null. */
+  expectations: number | null;
+  failed: number;
+}
+
+export interface AgentScorecard {
+  /** Non-benchmark runs in the window. */
+  runs: number;
+  failed: number;
+  latencyMedianMs: number | null;
+  tokensMean: number | null;
+  rules: { format: number | null; grounding: number | null; proposalsValid: number | null };
+  judge: Record<JudgeDimension, number | null> & { overall: number | null; judged: number };
+  ratings: { up: number; down: number };
+  proposals: { total: number; accepted: number; dismissed: number; acceptanceRate: number | null };
+  /** Newest first. */
+  benchmarks: BenchmarkBatch[];
+}
+
+const mean = (xs: number[]): number | null => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+const medianOf = (xs: number[]): number | null => {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? (s[m] ?? null) : ((s[m - 1] ?? 0) + (s[m] ?? 0)) / 2;
+};
+
+const scoreOf = (scores: RunScore[], runIds: Set<string>, scorer: RunScore["scorer"], dimension: string): number | null =>
+  mean(scores.filter((s) => runIds.has(s.runId) && s.scorer === scorer && s.dimension === dimension).map((s) => s.score));
+
+/** Everything measurable about an agent's recent work; nothing here is stored. */
+export const agentScorecard = (agent: Pick<Agent, "id">, runs: AgentRun[], scores: RunScore[], proposals: Proposal[], asOf: string): AgentScorecard => {
+  const since = new Date(new Date(asOf).getTime() - RUN_WINDOW_DAYS * DAY).toISOString();
+  const mine = runs.filter((r) => r.agentId === agent.id && r.startedAt >= since);
+  const live = mine.filter((r) => r.benchmark === null);
+  const liveIds = new Set(live.map((r) => r.id));
+  const finishedLive = live.filter(finished);
+  const judged = new Set(scores.filter((s) => liveIds.has(s.runId) && s.scorer === "judge" && s.dimension === "overall").map((s) => s.runId));
+  const mineProposals = proposals.filter((p) => p.agentId === agent.id && p.createdAt >= since);
+  const decided = mineProposals.filter((p) => p.state !== "pending");
+  const judge = Object.fromEntries(JUDGE_DIMENSIONS.map((d) => [d, scoreOf(scores, liveIds, "judge", d)])) as Record<JudgeDimension, number | null>;
+
+  const batches = new Map<string, AgentRun[]>();
+  for (const r of mine.filter((x) => x.benchmark !== null)) {
+    const key = `${r.startedAt.slice(0, 10)}|${r.promptVersion ?? ""}|${r.model ?? ""}`;
+    batches.set(key, [...(batches.get(key) ?? []), r]);
+  }
+  const benchmarks: BenchmarkBatch[] = [...batches.entries()]
+    .map(([key, rs]) => {
+      const ids = new Set(rs.map((r) => r.id));
+      const [day, promptVersion, model] = key.split("|");
+      return {
+        day: day ?? "",
+        promptVersion: promptVersion || null,
+        model: model || null,
+        n: rs.length,
+        overall: scoreOf(scores, ids, "judge", "overall"),
+        expectations: scoreOf(scores, ids, "judge", "expectations"),
+        failed: rs.filter((r) => r.state === "failed").length,
+      };
+    })
+    .sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0));
+
+  return {
+    runs: live.length,
+    failed: live.filter((r) => r.state === "failed").length,
+    latencyMedianMs: medianOf(finishedLive.map((r) => r.latencyMs).filter((x): x is number => x !== null)),
+    tokensMean: mean(finishedLive.map((r) => (r.promptTokens ?? 0) + (r.completionTokens ?? 0)).filter((x) => x > 0)),
+    rules: {
+      format: scoreOf(scores, liveIds, "rules", "format"),
+      grounding: scoreOf(scores, liveIds, "rules", "grounding"),
+      proposalsValid: scoreOf(scores, liveIds, "rules", "proposals_valid"),
+    },
+    judge: { ...judge, overall: scoreOf(scores, liveIds, "judge", "overall"), judged: judged.size },
+    ratings: { up: live.filter((r) => r.rating === 1).length, down: live.filter((r) => r.rating === -1).length },
+    proposals: {
+      total: mineProposals.length,
+      accepted: decided.filter((p) => p.state === "accepted").length,
+      dismissed: decided.filter((p) => p.state === "dismissed").length,
+      acceptanceRate: decided.length ? decided.filter((p) => p.state === "accepted").length / decided.length : null,
+    },
+    benchmarks,
+  };
+};
+
+/** Numbers and ids an output cites that do not appear in the briefing it was given. */
+export const ungroundedTokens = (output: string, briefing: string): { cited: string[]; missing: string[] } => {
+  const norm = (s: string) => s.replace(/,/g, "");
+  const tokens = new Set<string>();
+  for (const m of norm(output).matchAll(/(?<![\w.-])(MS-\d+|R\d+|PRJ-\d+|\d+(?:\.\d+)?%|\d{2,}(?:\.\d+)?)(?![\w%])/g)) tokens.add(m[1] ?? "");
+  const hay = norm(briefing);
+  const cited = [...tokens].filter(Boolean);
+  const missing = cited.filter((t) => !hay.includes(t.endsWith("%") ? t.slice(0, -1) : t));
+  return { cited, missing };
 };

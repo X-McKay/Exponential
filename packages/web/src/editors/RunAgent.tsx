@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { AGENT_KIND_LABEL, PROJECT_TABS, RUN_STATE_ICON, relTime } from "@valueflow/domain";
-import type { Agent, AgentRun, AppState, Project, ProjectTab, Proposal } from "@valueflow/domain";
+import { AGENT_KIND_LABEL, JUDGE_DIMENSIONS, PROJECT_TABS, RUN_STATE_ICON, relTime } from "@valueflow/domain";
+import type { Agent, AgentRun, AppState, Project, ProjectTab, Proposal, RunScore } from "@valueflow/domain";
 import type { RunAgentInput } from "@valueflow/shared";
 import { ProposalList } from "../ui/Proposals.tsx";
-import { Btn, Chip, Lbl, Modal, inpStyle } from "../ui/primitives.tsx";
+import { Btn, Chip, Lbl, Modal, Tip, ghostBtn, inpStyle } from "../ui/primitives.tsx";
 import { C, RUN_COLOR } from "../theme.ts";
 
 const TAB_LABEL: Record<ProjectTab, string> = { overview: "Overview", value: "Value", roadmap: "Roadmap", development: "Development", governance: "Governance" };
@@ -14,6 +14,7 @@ const PLACEHOLDER: Record<Agent["kind"], string> = {
   comms: "e.g. Decision memo on the 88% vs 90% recall threshold for compliance SMEs",
   ideation: "e.g. Options to lift citation accuracy without adding reviewer load",
   audit: "e.g. Focus on audit-trail gaps for rule activations",
+  chat: "e.g. What is blocking the next release?",
 };
 
 /** Start a run: pick the project (and optionally where the result should link) and give the agent an instruction. */
@@ -102,7 +103,7 @@ export function RunAgentEditor({
 // ---- output ------------------------------------------------------------------
 
 /** Enough markdown for agent output: headings, bullets, bold, paragraphs. */
-function Markdown({ text }: { text: string }) {
+export function Markdown({ text }: { text: string }) {
   const inline = (s: string) =>
     s.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, i) => {
       if (part.startsWith("**") && part.endsWith("**")) return <strong key={i}>{part.slice(2, -2)}</strong>;
@@ -160,8 +161,12 @@ export function RunViewer({
   project,
   asOf,
   proposals,
+  scores,
   state,
+  canJudge,
   onDecide,
+  onRate,
+  onJudge,
   onClose,
 }: {
   run: AgentRun;
@@ -169,11 +174,22 @@ export function RunViewer({
   project: Project | undefined;
   asOf: string;
   proposals: Proposal[];
+  scores: RunScore[];
   state: Pick<AppState, "projects" | "agents">;
+  canJudge: boolean;
   onDecide: (id: string, decision: "accept" | "dismiss") => void;
+  onRate: (id: string, rating: 1 | -1 | null, note?: string) => void;
+  onJudge: (id: string) => Promise<void>;
   onClose: () => void;
 }) {
+  const [judging, setJudging] = useState(false);
+  const [note, setNote] = useState(run.ratingNote ?? "");
   const tone = run.state === "attention" ? "warn" : run.state === "failed" ? "bad" : run.state === "done" ? "good" : "accent";
+  const rules = scores.filter((s) => s.scorer === "rules");
+  const judge = scores.filter((s) => s.scorer === "judge");
+  const overall = judge.find((s) => s.dimension === "overall");
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
+  const scoreColor = (v: number) => (v >= 0.8 ? C.green : v >= 0.6 ? C.amber : C.red);
   return (
     <Modal title={`${agent?.name ?? run.agentId} · ${project?.name ?? run.proj}`} onClose={onClose}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "8px 0 12px" }}>
@@ -190,6 +206,79 @@ export function RunViewer({
         <div style={{ fontSize: 12, color: C.mut, background: "#0E1015", border: `1px solid ${C.line}`, borderRadius: 8, padding: "8px 10px", marginBottom: 12 }}>
           <span style={{ color: C.dim }}>Instruction · </span>
           {run.instruction}
+        </div>
+      )}
+      {(rules.length > 0 || judge.length > 0 || run.state === "done" || run.state === "attention") && (
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginBottom: 12, padding: "8px 10px", background: "#0E1015", border: `1px solid ${C.line}`, borderRadius: 8 }}>
+          <span style={{ fontSize: 11, color: C.dim, marginRight: 2 }}>Quality</span>
+          {rules.map((s) => (
+            <Tip key={s.dimension} label={s.note || s.dimension}>
+              <Chip dot={scoreColor(s.score)}>
+                {s.dimension.replace("_", " ")} {pct(s.score)}
+              </Chip>
+            </Tip>
+          ))}
+          {JUDGE_DIMENSIONS.map((d) => {
+            const s = judge.find((x) => x.dimension === d);
+            return s ? (
+              <Tip key={d} label={s.note || `judge: ${d}`}>
+                <Chip dot={scoreColor(s.score)}>
+                  {d} {pct(s.score)}
+                </Chip>
+              </Tip>
+            ) : null;
+          })}
+          {overall && (
+            <Chip tone={overall.score >= 0.8 ? "good" : overall.score >= 0.6 ? "warn" : "bad"}>
+              judge overall {pct(overall.score)}
+            </Chip>
+          )}
+          <span style={{ flex: 1 }} />
+          {judge.length === 0 && canJudge && (run.state === "done" || run.state === "attention") && (
+            <button
+              type="button"
+              className="vf-ghost"
+              disabled={judging}
+              onClick={() => {
+                setJudging(true);
+                void onJudge(run.id).finally(() => setJudging(false));
+              }}
+              style={{ ...ghostBtn, height: 24, opacity: judging ? 0.5 : 1 }}
+            >
+              {judging ? "Judging…" : "Judge this run"}
+            </button>
+          )}
+          {run.latencyMs !== null && (
+            <span style={{ fontSize: 11, color: C.dim }}>
+              {(run.latencyMs / 1000).toFixed(1)}s{run.promptTokens !== null ? ` · ${(run.promptTokens ?? 0) + (run.completionTokens ?? 0)} tokens` : ""}
+              {run.promptVersion ? ` · prompt ${run.promptVersion}` : ""}
+            </span>
+          )}
+        </div>
+      )}
+      {overall?.note && <div style={{ fontSize: 12, color: C.mut, lineHeight: 1.5, marginBottom: 12, paddingLeft: 10, borderLeft: `2px solid ${C.line2}` }}>Judge: {overall.note}</div>}
+      {(run.state === "done" || run.state === "attention") && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
+          <span style={{ fontSize: 11, color: C.dim }}>Was this useful?</span>
+          <Tip label="Useful">
+            <button type="button" aria-pressed={run.rating === 1} onClick={() => onRate(run.id, run.rating === 1 ? null : 1, note)} className="vf-ghost" style={{ ...ghostBtn, height: 24, color: run.rating === 1 ? C.green : C.mut, borderColor: run.rating === 1 ? C.green : C.line2 }}>
+              👍
+            </button>
+          </Tip>
+          <Tip label="Not useful">
+            <button type="button" aria-pressed={run.rating === -1} onClick={() => onRate(run.id, run.rating === -1 ? null : -1, note)} className="vf-ghost" style={{ ...ghostBtn, height: 24, color: run.rating === -1 ? C.red : C.mut, borderColor: run.rating === -1 ? C.red : C.line2 }}>
+              👎
+            </button>
+          </Tip>
+          <input
+            style={{ ...inpStyle, height: 24, fontSize: 12, padding: "0 8px", flex: 1 }}
+            value={note}
+            placeholder="why? (optional, saved with the rating)"
+            onChange={(e) => setNote(e.target.value)}
+            onBlur={() => {
+              if (run.rating !== null && note !== (run.ratingNote ?? "")) onRate(run.id, run.rating, note);
+            }}
+          />
         </div>
       )}
       <div style={{ fontSize: 13, fontWeight: 500, color: C.text, marginBottom: 10 }}>{run.summary}</div>

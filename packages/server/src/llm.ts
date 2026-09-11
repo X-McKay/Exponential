@@ -24,6 +24,8 @@ export interface ChatResult {
   content: string;
   model: string;
   usage: { prompt: number; completion: number } | null;
+  /** True when the reply was cut off by the token budget. */
+  truncated: boolean;
 }
 
 export interface Llm {
@@ -55,7 +57,7 @@ interface ModelsResponse {
 }
 interface ChatResponse {
   model?: string;
-  choices: { message: { content: string | null } }[];
+  choices: { message: { content: string | null }; finish_reason?: string | null }[];
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
@@ -104,6 +106,7 @@ export const createLlm = (options: LlmOptions): Llm => {
       content: content.trim(),
       model: body.model ?? m,
       usage: body.usage ? { prompt: body.usage.prompt_tokens ?? 0, completion: body.usage.completion_tokens ?? 0 } : null,
+      truncated: body.choices[0]?.finish_reason === "length",
     };
   };
 

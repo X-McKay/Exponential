@@ -79,6 +79,7 @@ Settings come from the environment. Bun loads `.env` from its working directory;
 | `LLM_MODEL` | first model listed by the endpoint | Model name to request. |
 | `LLM_THINKING` | off | `on` lets reasoning models think before answering (slower, more tokens). |
 | `AGENT_SCHEDULE` | on | `off` disables the nightly scheduled runs. |
+| `EVAL_JUDGE` | on | `off` stops the LLM judge scoring every finished run in the background (rules scores are always recorded; *Judge this run* still works). |
 | `NODE_ENV` | unset | `production` serves the built bundle instead of bundling on the fly. `bun run start` sets it. |
 
 ### Changing dependencies
@@ -153,6 +154,10 @@ An agent is a definition (kind, model, owner, schedule); a run is a fact. A run 
 
 **Proposals.** Alongside prose, an agent may propose concrete changes: move a governance item or milestone to another status, add a missing governance item, add a dated calendar event, or change the value targets. Proposals are typed (the schema is enforced per type), validated against the project (unknown ids are dropped), and stored pending. A person accepts or dismisses them in the run viewer or the inbox at the top of the Agents page; accepting applies the change through the same repository functions the editors use, so events are appended and every derivation follows. A proposal whose target has since been deleted is refused rather than applied.
 
+**Ask the workspace.** The *Ask* button at the bottom right (or `⌘J`) opens a conversation over every project. The model is briefed with a compact summary of the whole portfolio plus the full briefing of the project you are looking at, must answer from that only, links to the tabs that hold the evidence, and may draft proposals you accept in the panel. Every turn is a run of the built-in *Ask* agent (kind `chat`), so it is audited and scored like any other run; the transcript lives in the browser session.
+
+**Evals: measured, not felt.** Every finished run is scored on three layers, all stored in `run_scores` and never derived on the fly from prose. *Rules* run instantly: `format` (summary, body, and a non-empty reply), `grounding` (the share of ids, percentages, and larger numbers in the output that appear in the briefing), and `proposals_valid` (the share of returned proposals that survived validation). A *judge* (the same model, a separate prompt) grades groundedness, completeness, actionability, and clarity 1–5 with a note; groundedness counts double in the overall. *People* rate a run 👍 / 👎 with a note in the run viewer. The Quality section on Agents turns these into a scorecard per agent: rules, judge, human rating, proposals accepted, latency, and the prompt version (a hash of the system prompt, so a change in wording is visible as a new version). *Run benchmark* replays a fixed set of cases (`EVAL_CASES`) against each agent with expectations checked by the judge, so two prompt versions or two models can be compared on the same questions; benchmark runs are labelled and excluded from the nightly flags. A reply the model cut off at the token budget is retried once with more room and a request to be terse.
+
 **Setting up a project from documents.** *Set up from documents…* on Portfolio hands a setup agent a name, a brief, pasted snippets, and uploaded Word, PowerPoint, or text files (a dependency-free zip reader pulls the text out of `.docx` and `.pptx`; PDFs are reported as unsupported). The agent drafts every field of the project record — stage, risk tier, committee approval, targets, team, repositories, milestones with gate metrics, governance items with evidence-based statuses, releases with criteria — each with a rationale, its source document, and a confidence. The review step lets you untick, edit, or ask the agent to change things (rows you edited survive a refinement), then creates everything in one transaction.
 
 ### Glance as a composition contract
@@ -184,7 +189,8 @@ Nothing is hard-coded: every fact the app shows can be changed in the UI, and ev
 | Activity feed | Derived from the event log, not edited |
 | Calendar events | Data → Calendar → *+ Add event* / *Edit* |
 | Agent definitions | Agents → *Edit agents* (a validated JSON document) |
-| Agent runs | Agents → expand an agent → *Run…*; nightly for scheduled agents |
+| Agent runs | Agents → expand an agent → *Run…*; nightly for scheduled agents; the Ask panel (`⌘J`) for the conversational agent |
+| Run ratings and judge scores | A run's viewer → 👍 / 👎 with a note, *Judge this run*; Agents → Quality → *Run benchmark* |
 | Signed-in user (sidebar, Glance greeting, default owner) | Click your name at the bottom of the sidebar, or *Data → Workspace* |
 
 Ids are generated for you: milestones `MS-n`, releases `Rn`, project keys `PRJ-n`, runs `run-n`; URL ids, governance ids, and calendar ids are slugs of the name. Deleting a milestone or governance item leaves any release criterion that referenced it in place; it resolves to *not met* / *not tracked* at read time. Deleting a project removes everything under it.
@@ -213,6 +219,10 @@ To start from a clean slate rather than the sample portfolio, delete the three s
 | PUT | `/api/agents` | `Agent[]` |
 | POST | `/api/agents/:aid/runs` | `{ proj, tab?, instruction? }` |
 | POST | `/api/proposals/:id/accept` · `/dismiss` | |
+| POST | `/api/chat` | `{ messages: [{ role, content }], proj? }` → `{ answer, links, proposals, runId, model }` |
+| POST | `/api/runs/:id/rate` | `{ rating: 1 \| -1 \| null, note? }` |
+| POST | `/api/runs/:id/judge` | |
+| POST | `/api/benchmark` | `{ agentId? }` → 202; poll `GET /api/benchmark` |
 | POST | `/api/setup` | multipart: `name`, `key?`, `brief`, `snippet[]`, `file[]` |
 | GET | `/api/setup/:id` | |
 | POST | `/api/setup/:id/refine` | `{ feedback }` |
@@ -224,6 +234,7 @@ Schemas live in `packages/shared/src/schemas.ts`; the web client and the server 
 
 ## Keyboard
 
+- `⌘J` / `Ctrl+J` — Ask the workspace (↵ send, ⇧↵ newline, esc close)
 - `⌘K` / `Ctrl+K` — command palette (↑↓ navigate, ↵ open, esc close; recent destinations are listed first; includes the Data page)
 - `g` then `g` / `p` / `a` — Glance / Portfolio / Agents (the sidebar tooltips show these)
 - `g` then `o` / `v` / `r` / `d` / `n` — Overview / Value / Roadmap / Development / Governance of the current (or last visited) project
