@@ -17,7 +17,8 @@ import type { CriterionEval, ReleaseState } from "./derive.ts";
 import { attentionRuns, latestRunOfKind } from "./agents.ts";
 import { deriveUpcoming, recentEvents } from "./feed.ts";
 import type { FeedItem, Upcoming } from "./feed.ts";
-import type { AgentRun, AppState, BriefSection, Build, Dim, GovStatus, Metric, Milestone, Project, ProjectTab, Proposal, PullRequest, Release, Widget } from "./types.ts";
+import { PROJECT_TABS } from "./types.ts";
+import type { AgentRun, AppState, BriefAction, BriefSection, Build, Dim, GovStatus, Metric, Milestone, Project, ProjectTab, Proposal, PullRequest, Release, Widget } from "./types.ts";
 
 export type Tone = "bad" | "warn" | "good" | "info";
 
@@ -600,6 +601,19 @@ export const parseWidget = (raw: unknown, state: AppState): Widget | null => {
   return w && resolveWidget(w, state) ? w : null;
 };
 
+/** An action link from the model: a short label and a place that exists (a project tab, or the inbox). */
+export const parseAction = (raw: unknown, state: Pick<AppState, "projects">): BriefAction | null => {
+  if (typeof raw !== "object" || raw === null) return null;
+  const o = raw as Record<string, unknown>;
+  const label = str(o.label);
+  const proj = str(o.proj);
+  if (!label || !proj) return null;
+  if (proj === "inbox") return { label: label.slice(0, 32), proj: "inbox", tab: "overview" };
+  if (!state.projects.some((p) => p.id === proj)) return null;
+  const tab = (PROJECT_TABS as readonly string[]).includes(String(o.tab)) ? (o.tab as ProjectTab) : "overview";
+  return { label: label.slice(0, 32), proj, tab };
+};
+
 /** The ids a brief may point at, one line per project, so the model never has to guess. */
 export const factIndex = (state: AppState): string => {
   const lines: string[] = [];
@@ -650,18 +664,26 @@ export const defaultBrief = (state: AppState, cal: Calendar = calendarOf(state))
   const narrative = writeNarrativeFor(state, s);
   const sections: BriefSection[] = [];
   const pending = state.proposals.filter((p) => p.state === "pending");
-  if (pending.length) sections.push({ text: `**${pending.length} proposal${pending.length === 1 ? "" : "s"}** wait on you: ${[...new Set(pending.map((p) => state.agents.find((a) => a.id === p.agentId)?.name ?? p.agentId))].join(", ")} proposed changes you can apply here.`, widget: { type: "proposals", ids: pending.slice(0, 4).map((p) => p.id) } });
-  for (const { p, r, st } of s.blocked.slice(0, 2)) sections.push({ text: `**${r.id} ${r.name}** on ${p.name} is blocked: ${st.met} of ${st.total} go-live criteria met, target ${monthLabel(r.month, cal.todayYm)}.`, widget: { type: "release", proj: p.id, rid: r.id } });
-  for (const { p, m, gap, worst } of s.shortfalls.slice(0, 1)) sections.push({ text: `The closest fix: **${worst.label}** on ${m.name} (${p.name}) sits ${gap}pt${gap === 1 ? "" : "s"} under its base gate.`, widget: { type: "gates", proj: p.id, mid: m.id } });
+  if (pending.length) {
+    const from = [...new Set(pending.map((p) => state.agents.find((a) => a.id === p.agentId)?.name ?? p.agentId))].join(", ");
+    sections.push({ group: "top", text: `Review ${pending.length} proposal${pending.length === 1 ? "" : "s"} from ${from} waiting on your decision.`, tip: "Accept applies the change through the same paths the editors use; dismiss records the decision.", action: { label: "Review proposals", proj: "inbox", tab: "overview" }, widget: { type: "proposals", ids: pending.slice(0, 3).map((p) => p.id) } });
+  }
+  for (const { p, r, st } of s.blocked.slice(0, 2)) {
+    const unmet = r.criteria.filter((_, i) => !st.evals[i]?.ok).map((c) => c.label);
+    sections.push({ group: "top", text: `${r.id} ${r.name} on ${p.name} is blocked with ${st.met} of ${st.total} go-live criteria met, targeting ${monthLabel(r.month, cal.todayYm)}.`, tip: unmet.length ? `Unmet: ${unmet.slice(0, 3).join("; ")}.` : null, action: { label: "View release", proj: p.id, tab: "roadmap" }, widget: { type: "release", proj: p.id, rid: r.id } });
+  }
+  for (const { p, m, gap, worst } of s.shortfalls.slice(0, 1)) sections.push({ group: "top", text: `${worst.label} on ${m.name} (${p.name}) sits ${gap}pt${gap === 1 ? "" : "s"} under its base gate, the closest fix in the portfolio.`, tip: null, action: { label: "View gates", proj: p.id, tab: "value" }, widget: { type: "gates", proj: p.id, mid: m.id } });
   for (const { pid, pr } of s.failPRs.slice(0, 1)) {
     const p = state.projects.find((x) => x.id === pid);
-    if (p) sections.push({ text: `CI is red on **${pr.repo} #${pr.number}** (${p.name}).`, widget: { type: "ci", proj: p.id, repo: pr.repo, number: pr.number } });
+    if (p) sections.push({ group: "top", text: `CI is failing on ${pr.repo} #${pr.number} (${p.name}), open ${pr.title ? `for "${pr.title}"` : "now"}.`, tip: null, action: { label: "View PR", proj: p.id, tab: "development" }, widget: null });
   }
-  for (const p of s.t1gaps.slice(0, 1)) sections.push({ text: `**${p.name}** is Tier 1 with ${blockers(p)} governance item${blockers(p) === 1 ? "" : "s"} missing.`, widget: { type: "governance", proj: p.id } });
-  if (s.brief) sections.push({ text: `This week's brief by ${state.agents.find((a) => a.id === s.brief?.agentId)?.name ?? "Monday"}: ${s.brief.summary}`, widget: null });
-  if (s.upcoming.length) sections.push({ text: "Coming up.", widget: { type: "upcoming", days: 56 } });
-  if (s.recent.length) sections.push({ text: state.workspace.lastGlanceAt ? "Since you last looked." : "Since yesterday.", widget: { type: "activity", hours: 48 } });
-  return { headline: narrative[0] ?? "Nothing needs you right now.", sections: sections.slice(0, 7) };
+  for (const p of s.t1gaps.slice(0, 1)) sections.push({ group: "top", text: `${p.name} is Tier 1 with ${blockers(p)} governance item${blockers(p) === 1 ? "" : "s"} still missing.`, tip: `Missing: ${p.governance.filter((g) => g.status === "missing").map((g) => g.name).slice(0, 3).join(", ")}.`, action: { label: "View governance", proj: p.id, tab: "governance" }, widget: null });
+  if (s.brief) sections.push({ group: "fyi", text: `This week's brief by ${state.agents.find((a) => a.id === s.brief?.agentId)?.name ?? "Monday"}: ${s.brief.summary}`, tip: null, action: null, widget: null });
+  const next = s.upcoming[0];
+  if (next) sections.push({ group: "fyi", text: `Next on the calendar: ${next.text} on ${next.date}${next.sub ? ` (${next.sub})` : ""}.`, tip: null, action: { label: "View calendar", proj: next.proj, tab: next.tab }, widget: s.upcoming.length > 1 ? { type: "upcoming", days: 56 } : null });
+  const moved = s.recent[0];
+  if (moved) sections.push({ group: "fyi", text: `${s.recent.length} thing${s.recent.length === 1 ? "" : "s"} moved ${state.workspace.lastGlanceAt ? "since you last looked" : "since yesterday"}, most recently: ${moved.text}.`, tip: null, action: { label: "View activity", proj: moved.proj, tab: moved.tab }, widget: s.recent.length > 1 ? { type: "activity", hours: 48 } : null });
+  return { headline: narrative[0] ?? "Nothing needs you right now.", sections: sections.slice(0, 8) };
 };
 
 /**

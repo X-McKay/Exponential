@@ -152,7 +152,7 @@ export const EVAL_CASES: EvalCase[] = [
   { id: "audie-ima-audit", agentId: "audie", proj: "ima", instruction: "Full audit ahead of R1 shadow mode.", expectations: ["Flags Tier 1 exposure with attention set", "Cites the recall gap (86% vs 88%)", "Names the pending security review and model risk assessment", "Proposes at least one concrete change"] },
   { id: "audie-sector-habits", agentId: "audie", proj: "sector", instruction: "Code-quality and delivery habits review.", expectations: ["Cites 58% coverage on sector-report-agents", "Mentions the flaky failing build", "Recommends a concrete CI or review practice"] },
   { id: "ask-workspace-blocked", agentId: "ask", proj: "ima", instruction: "Why is R1 blocked and what would unblock it fastest?", expectations: ["Lists the unmet R1 criteria", "Identifies the recall gate as the closest fix", "Links to the IMA roadmap or value page"] },
-  { id: "curator-morning", agentId: "curator", proj: "ima", instruction: "", expectations: ["Covers the blocked R1 Shadow mode release with a release widget", "Covers the Tier 1 governance gaps", "Every number in the prose appears in the signals", "At most six sections and a one-sentence headline under 120 characters"] },
+  { id: "curator-morning", agentId: "curator", proj: "ima", instruction: "", expectations: ["Covers the blocked R1 Shadow mode release under top of mind with an action link", "Covers the Tier 1 governance gaps", "Every number in the prose appears in the signals", "Every item is at most two sentences and no item repeats another's fact"] },
 ];
 
 interface SampleRun {

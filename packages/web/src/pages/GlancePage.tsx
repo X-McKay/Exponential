@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { calendarOf, composeGlancePage, defaultBrief, describeAction, monthLabel, relTime, resolveWidget, shortAge } from "@valueflow/domain";
-import type { AppState, Block, BriefSection, Calendar, ProjectTab, ResolvedWidget } from "@valueflow/domain";
+import { BRIEF_GROUPS, calendarOf, composeGlancePage, defaultBrief, describeAction, monthLabel, relTime, resolveWidget, shortAge } from "@valueflow/domain";
+import type { AppState, Block, BriefGroup, BriefSection, Calendar, ProjectTab, ResolvedWidget } from "@valueflow/domain";
 import { Bullet, GovStack, Spark } from "../charts/small.tsx";
 import { Markdown } from "../editors/RunAgent.tsx";
 import { Btn, Caret, Chip, Tip, ghostBtn, reset } from "../ui/primitives.tsx";
@@ -369,19 +369,36 @@ function WidgetView({ w, cal, state, onOpen, onDecide }: { w: ResolvedWidget; ca
   }
 }
 
-function Section({ section, cal, state, onOpen, onDecide }: { section: BriefSection; cal: Calendar; state: AppState; onOpen: (id: string, tab: ProjectTab) => void; onDecide: (id: string, d: "accept" | "dismiss") => void }) {
+const GROUP_LABEL: Record<BriefGroup, string> = { top: "Top of mind", fyi: "FYI" };
+
+/** One item: a hollow bullet, a short snippet, an action link, a muted tip, and a widget only when one was warranted. */
+function Item({ section, cal, state, onOpen, onOpenInbox, onDecide }: { section: BriefSection; cal: Calendar; state: AppState; onOpen: (id: string, tab: ProjectTab) => void; onOpenInbox: () => void; onDecide: (id: string, d: "accept" | "dismiss") => void }) {
   const w = section.widget ? resolveWidget(section.widget, state, cal) : null;
+  const action = section.action ?? null;
+  const go = () => (action ? (action.proj === "inbox" ? onOpenInbox() : onOpen(action.proj, action.tab)) : undefined);
   return (
-    <section style={{ display: "grid", gap: 8, paddingBottom: 18, marginBottom: 18, borderBottom: `1px solid ${C.line}` }}>
-      <div style={{ fontSize: 14, lineHeight: 1.65, color: C.text, maxWidth: 760 }}>
-        <Markdown text={section.text} />
+    <li style={{ display: "flex", gap: 14, padding: "12px 0 16px", listStyle: "none" }}>
+      <span aria-hidden style={{ width: 7, height: 7, borderRadius: "50%", border: `1.5px solid ${C.mut}`, flexShrink: 0, marginTop: 8 }} />
+      <div style={{ flex: 1, minWidth: 0, display: "grid", gap: 8 }}>
+        <div style={{ fontSize: 14.5, lineHeight: 1.6, color: C.text, maxWidth: 680 }}>{section.text}</div>
+        {action && (
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <button type="button" onClick={go} className="vf-link" style={{ ...reset, display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: C.text2 }}>
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" style={{ color: C.dim }}>
+                <path d="M6 8.5a3 3 0 0 0 4.2 0l1.8-1.8a3 3 0 0 0-4.2-4.2L7 3.3M8 5.5a3 3 0 0 0-4.2 0L2 7.3a3 3 0 0 0 4.2 4.2L7 10.7" />
+              </svg>
+              {action.label}
+            </button>
+          </div>
+        )}
+        {section.tip && <div style={{ fontSize: 13, lineHeight: 1.55, color: C.mut, borderLeft: `2px solid ${C.line2}`, paddingLeft: 12, maxWidth: 640 }}>{section.tip}</div>}
+        {w && (
+          <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 14px", maxWidth: 680 }}>
+            <WidgetView w={w} cal={cal} state={state} onOpen={onOpen} onDecide={onDecide} />
+          </div>
+        )}
       </div>
-      {w && (
-        <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 14px", maxWidth: 760 }}>
-          <WidgetView w={w} cal={cal} state={state} onOpen={onOpen} onDecide={onDecide} />
-        </div>
-      )}
-    </section>
+    </li>
   );
 }
 
@@ -436,8 +453,8 @@ export function GlancePage({
   return (
     <div style={{ padding: "16px 20px 30px" }}>
       <div style={{ marginBottom: 18 }}>
-        <div style={{ fontSize: 12, color: C.dim, marginBottom: 4 }}>Morning, {userName}. Your daily brief.</div>
-        <div style={{ fontSize: 18, fontWeight: 550, letterSpacing: "-0.015em", lineHeight: 1.35, maxWidth: 760 }}>{headline}</div>
+        <div style={{ fontSize: 22, fontWeight: 550, letterSpacing: "-0.02em", lineHeight: 1.3, maxWidth: 760, marginBottom: 6 }}>Hey {userName}, here's what today has in store.</div>
+        <div style={{ fontSize: 14.5, color: C.text2, lineHeight: 1.55, maxWidth: 680 }}>{headline}</div>
         <div style={{ fontSize: 11, color: C.dim, marginTop: 8, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span>
             {live ? `Written by ${curator?.name ?? "the curator"} ${relTime(live.at, cal.asOf)}${live.model ? ` · ${live.model}` : ""}` : "Composed from live state"} · {glance.projectCount} projects · {glance.blocks.length} signal{glance.blocks.length === 1 ? "" : "s"}
@@ -478,9 +495,20 @@ export function GlancePage({
         </div>
       </div>
 
-      {sections.map((sec, i) => (
-        <Section key={i} section={sec} cal={cal} state={state} onOpen={onOpen} onDecide={onDecide} />
-      ))}
+      {BRIEF_GROUPS.map((g) => {
+        const items = sections.filter((sec) => (sec.group ?? "top") === g);
+        if (items.length === 0) return null;
+        return (
+          <section key={g} style={{ marginBottom: 22 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.text, letterSpacing: "-0.01em", paddingBottom: 4, borderBottom: `1px solid ${C.line}` }}>{GROUP_LABEL[g]}</div>
+            <ul style={{ margin: 0, padding: 0 }}>
+              {items.map((sec, i) => (
+                <Item key={i} section={sec} cal={cal} state={state} onOpen={onOpen} onOpenInbox={onOpenInbox} onDecide={onDecide} />
+              ))}
+            </ul>
+          </section>
+        );
+      })}
       {sections.length === 0 && (
         <div style={{ padding: "28px 14px", textAlign: "center", color: C.dim, fontSize: 13, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12 }}>
           Nothing needs you right now. The brief fills as releases block, gates slip, CI fails, agents flag, or proposals arrive.

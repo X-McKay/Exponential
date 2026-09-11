@@ -66,7 +66,7 @@ const RUBRIC: Record<AgentKind, string> = {
   brief: "A weekly brief under 400 words for one person: what moved, what is blocked, decisions waiting on them, proposals pending; numbers exact; no padding.",
   tuner: "An evidence-based critique of an agent's recent runs and a concise, specific change to its extra instructions.",
   scout: "A factual comparison of models on the same benchmark with a recommendation only where the numbers justify it.",
-  curator: "A daily brief of at most six short sections, most urgent first (decisions, then risks, then what moved), every number taken from the signals, with a widget wherever a visual says it better than prose and no section repeating another. A blocked release, a Tier 1 gap, and pending proposals must not be left out. Headline under 120 characters, one plain sentence.",
+  curator: "A scannable daily brief: a one-sentence headline, then short items (one or two plain sentences, at most 35 words) grouped into what needs the reader today and FYI, most urgent first, each with a verb-led action link and a one-sentence tip where something should be done; every number from the signals; a widget only where a visual beats the sentence; no fact repeated. A blocked release, a Tier 1 gap, and pending proposals must not be left out.",
 };
 
 const JUDGE_SCHEMA = {

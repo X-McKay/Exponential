@@ -469,9 +469,24 @@ export type Widget =
 export type WidgetType = Widget["type"];
 export const WIDGET_TYPES: readonly WidgetType[] = ["metric", "gates", "release", "governance", "value", "proposals", "ci", "upcoming", "activity", "table"];
 
-/** One paragraph of the brief, with at most one widget under it. */
+/** "Top of mind" needs the reader today; "FYI" is worth knowing. */
+export type BriefGroup = "top" | "fyi";
+export const BRIEF_GROUPS: readonly BriefGroup[] = ["top", "fyi"];
+
+/** Where an item leads: a project tab, or "inbox" for proposals. */
+export interface BriefAction {
+  label: string;
+  proj: string;
+  tab: ProjectTab;
+}
+
+/** One item of the brief: a short snippet, where to go, what to do, and at most one widget. */
 export interface BriefSection {
+  group: BriefGroup;
   text: string;
+  /** One muted sentence on what to do about it, or null. */
+  tip: string | null;
+  action: BriefAction | null;
   widget: Widget | null;
 }
 

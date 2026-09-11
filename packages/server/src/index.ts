@@ -72,6 +72,8 @@ const serveStatic = staticHandler(join(import.meta.dir, "../../web/dist"));
 const server = Bun.serve({
   port,
   development: !production,
+  // Agent runs and the curator answer in one request and can take a minute; Bun closes idle connections after 10 s by default (255 is its maximum).
+  idleTimeout: 255,
   // In development Bun bundles the React app on the fly with HMR; in
   // production the pre-built bundle in web/dist is served as static files.
   routes: production ? undefined : { "/": index },

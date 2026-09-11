@@ -29,10 +29,10 @@ const curatorReply = () =>
   JSON.stringify({
     headline: "R1 is blocked on recall; nothing else needs you today",
     sections: [
-      { text: "**R1 Shadow mode** is blocked: 1 of 4 criteria met, recall 86% against the 88% gate.", widget: { type: "release", proj: "ima", rid: "R1" } },
-      { text: "Gates across the portfolio.", widget: { type: "table", columns: ["Milestone", "Metric", "Now", "Base"], rows: [["MS-21", "Rule recall", "86%", "88%"], ["MS-13", "Extraction accuracy", "81%", "85%"]] } },
-      { text: "Something about a milestone that does not exist, worth 99999 points.", widget: { type: "gates", proj: "ima", mid: "MS-99" } },
-      { text: "Nothing to see.", widget: { type: "none" } },
+      { group: "top", text: "R1 Shadow mode is blocked: 1 of 4 criteria met, recall 86% against the 88% gate.", tip: "Decide the recall threshold before Sep 30.", action: { label: "View release", proj: "ima", tab: "roadmap" }, widget: { type: "release", proj: "ima", rid: "R1" } },
+      { group: "top", text: "Gates across the portfolio.", tip: null, action: { label: "Nowhere", proj: "nope", tab: "value" }, widget: { type: "table", columns: ["Milestone", "Metric", "Now", "Base"], rows: [["MS-21", "Rule recall", "86%", "88%"], ["MS-13", "Extraction accuracy", "81%", "85%"]] } },
+      { group: "fyi", text: "Something about a milestone that does not exist, worth 99999 points.", tip: null, action: { label: "Review proposals", proj: "inbox", tab: "overview" }, widget: { type: "gates", proj: "ima", mid: "MS-99" } },
+      { group: "elsewhere", text: "Nothing to see.", tip: "", action: null, widget: { type: "none" } },
     ],
   });
 
@@ -71,8 +71,10 @@ describe("widgets and the composer's own brief", () => {
     let state = loadState(db, NOW);
     const own = defaultBrief(state);
     expect(own.headline).toMatch(/^One release is blocked/);
-    expect(own.sections.map((s) => s.widget?.type ?? "none")).toEqual(["release", "gates", "ci", "governance", "upcoming", "activity"]);
-    expect(own.sections[0]?.text).toContain("**R1 Shadow mode**");
+    expect(own.sections.map((s) => `${s.group}:${s.widget?.type ?? "none"}`)).toEqual(["top:release", "top:gates", "top:none", "top:none", "fyi:upcoming", "fyi:activity"]);
+    expect(own.sections[0]?.text).toMatch(/^R1 Shadow mode on IMA compliance rule extraction is blocked/);
+    expect(own.sections[0]?.action).toEqual({ label: "View release", proj: "ima", tab: "roadmap" });
+    expect(own.sections[0]?.tip).toMatch(/^Unmet: /);
     expect(own.sections.every((s) => !s.widget || resolveWidget(s.widget, state))).toBe(true);
     const blocks = composeGlance(state, calendarOf(state));
     expect(blocks.find((b) => b.kind === "activity")?.title).toBe("Since yesterday");
@@ -81,7 +83,7 @@ describe("widgets and the composer's own brief", () => {
     expect(seen.body.lastGlanceAt).toBe(NOW.toISOString());
     state = loadState(db, NOW);
     expect(composeGlance(state, calendarOf(state)).find((b) => b.kind === "activity")?.title).toMatch(/^Since you last looked/);
-    expect(defaultBrief(state).sections.at(-1)?.text).toBe("Since you last looked.");
+    expect(defaultBrief(state).sections.at(-1)?.text).toContain("since you last looked");
   });
 });
 
@@ -105,11 +107,18 @@ describe("curator", () => {
     expect(run.state).toBe("done");
     expect(run.proj).toBeNull();
     expect(run.summary).toBe("R1 is blocked on recall; nothing else needs you today");
+    expect(run.output).toContain("## Top of mind");
+    expect(run.output).toContain("→ View release");
     expect(run.output).toContain("[widget: release ima/R1]");
     expect(run.output).toContain("| MS-21 | Rule recall | 86% | 88% |");
     const state = (await call<AppState>("GET", routes.state())).body;
     expect(state.brief?.runId).toBe(run.id);
-    expect(state.brief?.sections.map((s) => s.widget?.type ?? null)).toEqual(["release", "table", null, null]);
+    expect(state.brief?.sections.map((s) => [s.group, s.widget?.type ?? null, s.action?.label ?? null, s.tip])).toEqual([
+      ["top", "release", "View release", "Decide the recall threshold before Sep 30."],
+      ["top", "table", null, null],
+      ["fyi", null, "Review proposals", null],
+      ["top", null, null, null],
+    ]);
     const scores = db.query<{ dimension: string; score: number; note: string }, [string]>("SELECT dimension, score, note FROM run_scores WHERE run_id = ? AND scorer = 'rules' ORDER BY dimension").all(run.id);
     expect(scores.find((s) => s.dimension === "widgets_valid")?.score).toBeCloseTo(2 / 3);
     const grounding = scores.find((s) => s.dimension === "grounding");

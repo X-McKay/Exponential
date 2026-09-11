@@ -11,7 +11,7 @@
 // rule-scored, judged, rated on the page, and benchmarked.
 
 import type { Database } from "bun:sqlite";
-import { WIDGET_TYPES, blocksHash, calendarOf, composeGlance, describeBlock, factIndex, nextRunId, parseWidget, widgetMarkdown } from "@valueflow/domain";
+import { BRIEF_GROUPS, WIDGET_TYPES, blocksHash, calendarOf, composeGlance, describeBlock, factIndex, nextRunId, parseAction, parseWidget, widgetMarkdown } from "@valueflow/domain";
 import type { Agent, AgentRun, AppState, Block, BriefSection, DailyBrief } from "@valueflow/domain";
 import { clip } from "./agents.ts";
 import { ruleScores } from "./evals.ts";
@@ -20,7 +20,8 @@ import type { ChatMessage, Llm } from "./llm.ts";
 import { promptVersion } from "./prompts.ts";
 import { insertBrief, insertRun, loadState, updateRun, upsertScore } from "./repo.ts";
 
-export const MAX_SECTIONS = 6;
+export const MAX_SECTIONS = 7;
+export const MAX_WIDGETS = 3;
 
 /**
  * Models like Title Case Headlines; readers do not. When most words are
@@ -89,10 +90,22 @@ const BRIEF_SCHEMA = {
           type: "object",
           additionalProperties: false,
           properties: {
-            text: { type: "string", description: "One short paragraph in markdown (bold the thing it is about); numbers exact; under 60 words." },
+            group: { type: "string", enum: [...BRIEF_GROUPS], description: "top = needs the reader today; fyi = worth knowing." },
+            text: { type: "string", description: "One or two plain sentences, at most 35 words, that say the thing and the number that matters. No markdown, no headings." },
+            tip: { type: ["string", "null"], description: "One sentence on what to do about it, or null when nothing is needed." },
+            action: {
+              type: ["object", "null"],
+              additionalProperties: false,
+              properties: {
+                label: { type: "string", description: "Two or three words starting with a verb: View release, Review proposals, Check gates." },
+                proj: { type: "string", description: "project id from the id list, or inbox for proposals" },
+                tab: { type: "string", enum: ["overview", "value", "roadmap", "development", "governance"] },
+              },
+              required: ["label", "proj", "tab"],
+            },
             widget: { anyOf: WIDGET_SHAPES },
           },
-          required: ["text", "widget"],
+          required: ["group", "text", "tip", "action", "widget"],
         },
       },
     },
@@ -104,12 +117,12 @@ export const buildCuratorMessages = (agent: Agent, state: AppState, blocks: Bloc
   {
     role: "system",
     content: [
-      `You are ${agent.name}, who writes one person's daily brief in ValueFlow, an AI-project delivery platform. The brief says what they need to know this morning and nothing else, from the signals a deterministic composer found. You never invent a number, a name, or a fact.`,
-      `Write a headline and ${MAX_SECTIONS} sections at most, most urgent first: what needs their decision, then what is at risk, then what moved. Skip anything that would repeat another section. Under 60 words per section.`,
-      `Under a section, add one widget when a visual says it better than prose, otherwise {"type":"none"}. Widgets: ${WIDGET_TYPES.join(", ")}. Prefer a widget over listing numbers: a gate under threshold → gates or metric; a blocked release → release; missing governance → governance; value against target → value; proposals waiting → proposals with their ids; a failing PR → ci; dated things → upcoming; what happened → activity. Use a table only for a comparison the other widgets cannot show, with cells that repeat figures from the signals exactly.`,
-      "Widget ids must come from the id list; a widget that points at nothing is dropped.",
+      `You are ${agent.name}, who writes one person's daily brief in ValueFlow, an AI-project delivery platform. It reads like a good personal digest: short items a busy person scans in a minute, each one saying the thing and the number that matters, from the signals a deterministic composer found. You never invent a number, a name, or a fact.`,
+      `Write a headline (one plain sentence, under 100 characters) and ${MAX_SECTIONS} items at most. Group "top" holds what needs the reader today (decisions, blocked or at-risk releases, gates under threshold, failing CI on release-critical work, Tier 1 gaps), most urgent first; "fyi" holds what moved and what is coming. One item per subject; never repeat a fact across items.`,
+      "Each item: text of one or two plain sentences, at most 35 words, no markdown; a tip of one sentence on what to do, or null; an action link with a two- or three-word verb label to the project tab that holds the evidence (proj \"inbox\" for proposals).",
+      `Add a widget only when a visual says it better than the sentence, at most ${MAX_WIDGETS} in the whole brief, otherwise {"type":"none"}. Widgets: ${WIDGET_TYPES.join(", ")}. Gates under threshold → gates or metric; a blocked release → release; missing governance → governance; value against target → value; proposals → proposals with their ids; a failing PR → ci; several dated things → upcoming; several things that moved → activity; a table only for a comparison the others cannot show, with cells repeating figures from the signals exactly. Widget ids must come from the id list; a widget that points at nothing is dropped.`,
       ...(agent.prompt ? [`\nAdditional instructions from the workspace:\n${agent.prompt}`] : []),
-      'Reply with a JSON object: {"headline": string, "sections": [{"text": string, "widget": {...}}]}.',
+      'Reply with a JSON object: {"headline": string, "sections": [{"group": "top|fyi", "text": string, "tip": string|null, "action": {"label","proj","tab"}|null, "widget": {...}}]}.',
     ].join("\n"),
   },
   { role: "user", content: curatorContext(state, blocks) },
@@ -165,16 +178,30 @@ export const curateGlance = async (db: Database, llm: Llm, agent: Agent, now: Da
     for (const item of rawSections.slice(0, MAX_SECTIONS)) {
       if (typeof item !== "object" || item === null) continue;
       const sec = item as Record<string, unknown>;
-      const text = typeof sec.text === "string" ? sec.text.trim() : "";
+      const text = typeof sec.text === "string" ? sec.text.trim().replace(/^#+\s*/, "") : "";
       if (!text) continue;
       const wantsWidget = typeof sec.widget === "object" && sec.widget !== null && (sec.widget as Record<string, unknown>).type !== "none";
       if (wantsWidget) widgetsReturned += 1;
-      const widget = wantsWidget ? parseWidget(sec.widget, state) : null;
+      let widget = wantsWidget ? parseWidget(sec.widget, state) : null;
+      if (widget && widgetsKept >= MAX_WIDGETS) widget = null;
       if (widget) widgetsKept += 1;
-      sections.push({ text, widget });
+      const group = BRIEF_GROUPS.find((g) => g === sec.group) ?? "top";
+      const tip = typeof sec.tip === "string" && sec.tip.trim() ? sec.tip.trim().slice(0, 200) : null;
+      const action = parseAction(sec.action, state);
+      // "Add Items" → "Add items": the first word keeps its case, acronyms and ids too, the rest lower.
+      if (action) action.label = action.label.split(/\s+/).map((w, i) => (i === 0 || /[A-Z]{2,}|\d/.test(w) ? w : w.toLowerCase())).join(" ");
+      sections.push({ group, text: text.slice(0, 400), tip, action, widget });
     }
     if (!headline || sections.length === 0) throw new Error(`reply had ${headline ? "no sections" : "no headline"}`);
-    const body = [`# ${headline}`, ...sections.map((s) => `${s.text}${s.widget ? `\n\n${widgetMarkdown(s.widget)}` : ""}`)].join("\n\n");
+    const body = [
+      `# ${headline}`,
+      ...BRIEF_GROUPS.map((g) => {
+        const items = sections.filter((s) => s.group === g);
+        return items.length ? `## ${g === "top" ? "Top of mind" : "FYI"}\n${items.map((s) => `- ${s.text}${s.tip ? `\n  _${s.tip}_` : ""}${s.action ? `\n  → ${s.action.label}` : ""}${s.widget ? `\n\n${widgetMarkdown(s.widget)}` : ""}`).join("\n")}` : "";
+      }),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     const finished: AgentRun = { ...run, state: "done", finishedAt: new Date().toISOString(), summary: headline, output: body, model: res.model, latencyMs: Date.now() - started, promptTokens: res.usage?.prompt ?? null, completionTokens: res.usage?.completion ?? null };
     updateRun(db, finished);
     if (!options.benchmark) {
