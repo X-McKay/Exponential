@@ -6,6 +6,10 @@
 //   LLM_API_KEY    optional bearer token
 //   LLM_MODEL      optional; defaults to the first model the server lists
 //   LLM_THINKING   "on" to let reasoning models think (slower); default off
+//   LLM_MODELS     optional comma list of candidate models the scout may try;
+//                  an entry may be "name@https://other-host/v1" to reach a
+//                  second endpoint (same API key)
+//   EVAL_JUDGE_MODEL  optional model for the judge (defaults to LLM_MODEL)
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -18,6 +22,8 @@ export interface ChatOptions {
   maxTokens?: number;
   temperature?: number;
   timeoutMs?: number;
+  /** Model for this call instead of the default; "name@base-url" routes to another endpoint. */
+  model?: string | null;
 }
 
 export interface ChatResult {
@@ -32,7 +38,7 @@ export interface Llm {
   /** Model name in use (resolved lazily when LLM_MODEL is unset). */
   model: () => Promise<string>;
   chat: (messages: ChatMessage[], options?: ChatOptions) => Promise<ChatResult>;
-  describe: () => { baseUrl: string; model: string | null };
+  describe: () => { baseUrl: string; model: string | null; models: string[]; judgeModel: string | null };
 }
 
 export class LlmError extends Error {
@@ -49,8 +55,18 @@ export interface LlmOptions {
   apiKey?: string | undefined;
   model?: string | undefined;
   thinking?: boolean;
+  /** Candidate models beyond the default. */
+  candidates?: string[];
+  judgeModel?: string | undefined;
   fetch?: (input: string, init?: RequestInit) => Promise<Response>;
 }
+
+/** "name@https://host/v1" → the model name and the endpoint it lives on. */
+export const splitModel = (spec: string, defaultBase: string): { model: string; base: string } => {
+  const at = spec.indexOf("@");
+  if (at <= 0) return { model: spec, base: defaultBase };
+  return { model: spec.slice(0, at), base: spec.slice(at + 1).replace(/\/$/, "") };
+};
 
 interface ModelsResponse {
   data: { id: string }[];
@@ -84,7 +100,8 @@ export const createLlm = (options: LlmOptions): Llm => {
   };
 
   const chat = async (messages: ChatMessage[], o: ChatOptions = {}): Promise<ChatResult> => {
-    const m = await model();
+    const spec = o.model ? splitModel(o.model, base) : { model: await model(), base };
+    const m = spec.model;
     const payload: Record<string, unknown> = {
       model: m,
       messages,
@@ -93,7 +110,7 @@ export const createLlm = (options: LlmOptions): Llm => {
     };
     if (o.jsonSchema) payload.response_format = { type: "json_schema", json_schema: { name: o.jsonSchema.name, schema: o.jsonSchema.schema, strict: true } };
     if (!options.thinking) payload.chat_template_kwargs = { enable_thinking: false };
-    const res = await doFetch(`${base}/chat/completions`, {
+    const res = await doFetch(`${spec.base}/chat/completions`, {
       method: "POST",
       headers: headers(),
       body: JSON.stringify(payload),
@@ -104,18 +121,27 @@ export const createLlm = (options: LlmOptions): Llm => {
     const content = body.choices[0]?.message.content ?? "";
     return {
       content: content.trim(),
-      model: body.model ?? m,
+      model: o.model ?? body.model ?? m,
       usage: body.usage ? { prompt: body.usage.prompt_tokens ?? 0, completion: body.usage.completion_tokens ?? 0 } : null,
       truncated: body.choices[0]?.finish_reason === "length",
     };
   };
 
-  return { model, chat, describe: () => ({ baseUrl: base, model: resolved }) };
+  const candidates = (options.candidates ?? []).map((c) => c.trim()).filter(Boolean);
+  const describe = () => ({ baseUrl: base, model: resolved, models: [...new Set([...(resolved ? [resolved] : []), ...candidates])], judgeModel: options.judgeModel ?? null });
+  return { model, chat, describe };
 };
 
 export const llmFromEnv = (env: Record<string, string | undefined>): Llm | null => {
   if (!env.LLM_BASE_URL) return null;
-  return createLlm({ baseUrl: env.LLM_BASE_URL, apiKey: env.LLM_API_KEY, model: env.LLM_MODEL, thinking: env.LLM_THINKING === "on" });
+  return createLlm({
+    baseUrl: env.LLM_BASE_URL,
+    apiKey: env.LLM_API_KEY,
+    model: env.LLM_MODEL,
+    thinking: env.LLM_THINKING === "on",
+    candidates: (env.LLM_MODELS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+    judgeModel: env.EVAL_JUDGE_MODEL,
+  });
 };
 
 /** Pull a JSON object out of a reply that may be wrapped in prose or a code fence. */

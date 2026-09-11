@@ -33,12 +33,12 @@ export const FEED_LABEL: Record<FeedType, string> = {
 export const AGENT_STATUS_LABEL: Record<AgentStatus, string> = {
   working: "Working…",
   idle: "Idle",
-  scheduled: "Scheduled · nightly",
+  scheduled: "Scheduled",
 };
 
 export const CHECK_ICON: Record<CheckStatus, string> = { pass: "✓", fail: "✗", running: "◌" };
 
-export const AGENT_KIND_LABEL: Record<AgentKind, string> = { deck: "Decks", comms: "Communications", ideation: "Ideation", audit: "Audit", chat: "Conversation" };
+export const AGENT_KIND_LABEL: Record<AgentKind, string> = { deck: "Decks", comms: "Communications", ideation: "Ideation", audit: "Audit", chat: "Conversation", rules: "Standing rules", brief: "Weekly brief", tuner: "Prompt tuning", scout: "Model scouting" };
 
 /** Re-review cadence implied by a project's AI risk tier. */
 export const reReviewCadence = (tier: RiskTier | null): string => {

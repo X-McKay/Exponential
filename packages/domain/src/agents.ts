@@ -5,7 +5,7 @@
 // what it produced. Status, run counts, success rates, and "last run" are
 // derived from runs and the clock, never stored.
 
-import type { Agent, AgentRun, AgentStatus, Proposal, RunScore, RunState } from "./types.ts";
+import type { Agent, AgentRun, AgentStatus, PromptVersion, Proposal, RunScore, RunState } from "./types.ts";
 
 const DAY = 86_400_000;
 
@@ -37,22 +37,41 @@ export const agentStats = (agent: Agent, runs: AgentRun[], asOf: string): AgentS
     runs: recent.length,
     success: done.length ? Math.round((100 * done.filter((r) => r.state !== "failed").length) / done.length) : null,
     last: mine[0]?.startedAt ?? null,
-    attention: recent.filter((r) => r.state === "attention").length,
+    attention: recent.filter((r) => r.state === "attention" && r.benchmark === null).length,
   };
 };
 
-/** Runs flagged for attention in the window, newest first, across every agent. */
+/** Runs flagged for attention in the window, newest first, across every agent. Benchmark runs measure; they do not flag. */
 export const attentionRuns = (runs: AgentRun[], asOf: string): AgentRun[] => {
   const since = new Date(new Date(asOf).getTime() - RUN_WINDOW_DAYS * DAY).toISOString();
-  return runs.filter((r) => r.state === "attention" && r.startedAt >= since).sort((a, b) => (b.startedAt < a.startedAt ? -1 : 1));
+  return runs.filter((r) => r.state === "attention" && r.benchmark === null && r.startedAt >= since).sort((a, b) => (b.startedAt < a.startedAt ? -1 : 1));
 };
 
-/** Whether a scheduled agent is due: nightly means no run started in the last 20 hours. */
+/** Most recent Monday 00:00 UTC at or before the instant. */
+export const weekStart = (now: string): string => {
+  const d = new Date(now);
+  const back = (d.getUTCDay() + 6) % 7;
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - back)).toISOString();
+};
+
+/** Whether a scheduled agent is due: nightly means no run in the last 20 hours; weekly means none since Monday. */
 export const isDue = (agent: Agent, runs: AgentRun[], now: string): boolean => {
   if (!agent.schedule) return false;
   const last = runsOf(agent, runs)[0];
   if (!last) return true;
-  return new Date(now).getTime() - new Date(last.startedAt).getTime() > 20 * 3_600_000;
+  switch (agent.schedule) {
+    case "nightly":
+      return new Date(now).getTime() - new Date(last.startedAt).getTime() > 20 * 3_600_000;
+    case "weekly":
+      return last.startedAt < weekStart(now);
+  }
+};
+
+/** The newest finished run of a kind in the trailing days, for the "your week" card and the Ask briefing. */
+export const latestRunOfKind = (kind: Agent["kind"], agents: Agent[], runs: AgentRun[], asOf: string, days = 7): AgentRun | null => {
+  const ids = new Set(agents.filter((a) => a.kind === kind).map((a) => a.id));
+  const since = new Date(new Date(asOf).getTime() - days * DAY).toISOString();
+  return runs.filter((r) => ids.has(r.agentId) && (r.state === "done" || r.state === "attention") && r.startedAt >= since).sort((a, b) => (b.startedAt < a.startedAt ? -1 : 1))[0] ?? null;
 };
 
 export const RUN_STATE_ICON: Record<RunState, string> = { queued: "◌", working: "◌", done: "✓", attention: "!", failed: "✗" };
@@ -159,6 +178,91 @@ export const agentScorecard = (agent: Pick<Agent, "id">, runs: AgentRun[], score
     },
     benchmarks,
   };
+};
+
+// ---- prompt versions & models ------------------------------------------------
+
+export interface PromptHistoryRow {
+  version: string;
+  /** The extra instructions in force, null for the built-in prompt alone, undefined when unknown (set in code before versions were recorded). */
+  prompt: string | null | undefined;
+  source: PromptVersion["source"] | "builtin";
+  since: string | null;
+  current: boolean;
+  runs: number;
+  failed: number;
+  grounding: number | null;
+  judge: number | null;
+  up: number;
+  down: number;
+  /** Benchmark runs under this version. */
+  benchmark: { n: number; failed: number; overall: number | null; expectations: number | null };
+}
+
+/** Every prompt version an agent has run under, newest first, with what the runs under it measured. */
+export const promptHistory = (agent: Pick<Agent, "id">, currentVersion: string | null, runs: AgentRun[], scores: RunScore[], versions: PromptVersion[]): PromptHistoryRow[] => {
+  const mine = runs.filter((r) => r.agentId === agent.id && r.promptVersion !== null);
+  const recorded = versions.filter((v) => v.agentId === agent.id);
+  const seen = new Set<string>([...mine.map((r) => r.promptVersion ?? ""), ...recorded.map((v) => v.version), ...(currentVersion ? [currentVersion] : [])]);
+  seen.delete("");
+  return [...seen]
+    .map((version): PromptHistoryRow => {
+      const rs = mine.filter((r) => r.promptVersion === version);
+      const live = rs.filter((r) => r.benchmark === null);
+      const liveIds = new Set(live.map((r) => r.id));
+      const bench = rs.filter((r) => r.benchmark !== null);
+      const benchIds = new Set(bench.map((r) => r.id));
+      const rec = recorded.filter((v) => v.version === version).sort((a, b) => (a.at < b.at ? -1 : 1))[0];
+      return {
+        version,
+        prompt: rec ? rec.prompt : version === currentVersion && !rec ? null : undefined,
+        source: rec?.source ?? "builtin",
+        since: rec?.at ?? rs.map((r) => r.startedAt).sort()[0] ?? null,
+        current: version === currentVersion,
+        runs: live.length,
+        failed: live.filter((r) => r.state === "failed").length,
+        grounding: scoreOf(scores, liveIds, "rules", "grounding"),
+        judge: scoreOf(scores, liveIds, "judge", "overall"),
+        up: live.filter((r) => r.rating === 1).length,
+        down: live.filter((r) => r.rating === -1).length,
+        benchmark: { n: benchIds.size, failed: bench.filter((r) => r.state === "failed").length, overall: scoreOf(scores, benchIds, "judge", "overall"), expectations: scoreOf(scores, benchIds, "judge", "expectations") },
+      };
+    })
+    .sort((a, b) => (a.current ? -1 : b.current ? 1 : (b.since ?? "") < (a.since ?? "") ? -1 : 1));
+};
+
+export interface ModelRow {
+  model: string;
+  n: number;
+  failed: number;
+  overall: number | null;
+  expectations: number | null;
+  grounding: number | null;
+  latencyMedianMs: number | null;
+  tokensMean: number | null;
+}
+
+/** Benchmark results per model for one agent under one prompt version (or any version when null), best first. */
+export const modelComparison = (agent: Pick<Agent, "id">, runs: AgentRun[], scores: RunScore[], promptVersion: string | null): ModelRow[] => {
+  const mine = runs.filter((r) => r.agentId === agent.id && r.benchmark !== null && r.model !== null && (promptVersion === null || r.promptVersion === promptVersion));
+  const byModel = new Map<string, AgentRun[]>();
+  for (const r of mine) byModel.set(r.model ?? "", [...(byModel.get(r.model ?? "") ?? []), r]);
+  return [...byModel.entries()]
+    .map(([model, rs]): ModelRow => {
+      const ids = new Set(rs.map((r) => r.id));
+      const ok = rs.filter(finished).filter((r) => r.state !== "failed");
+      return {
+        model,
+        n: rs.length,
+        failed: rs.filter((r) => r.state === "failed").length,
+        overall: scoreOf(scores, ids, "judge", "overall"),
+        expectations: scoreOf(scores, ids, "judge", "expectations"),
+        grounding: scoreOf(scores, ids, "rules", "grounding"),
+        latencyMedianMs: medianOf(ok.map((r) => r.latencyMs).filter((x): x is number => x !== null)),
+        tokensMean: mean(ok.map((r) => (r.promptTokens ?? 0) + (r.completionTokens ?? 0)).filter((x) => x > 0)),
+      };
+    })
+    .sort((a, b) => (b.overall ?? -1) - (a.overall ?? -1) || a.model.localeCompare(b.model));
 };
 
 /** Numbers and ids an output cites that do not appear in the briefing it was given. */

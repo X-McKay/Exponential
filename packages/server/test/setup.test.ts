@@ -124,7 +124,7 @@ const fakeLlm = (replies: unknown[]): Llm => {
   return {
     model: () => Promise.resolve("fake"),
     chat: () => Promise.resolve({ content: JSON.stringify(replies[Math.min(i++, replies.length - 1)]), model: "fake", usage: null, truncated: false }),
-    describe: () => ({ baseUrl: "http://fake", model: "fake" }),
+    describe: () => ({ baseUrl: "http://fake", model: "fake", models: ["fake"], judgeModel: null }),
   };
 };
 

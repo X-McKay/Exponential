@@ -122,7 +122,8 @@ export const AgentSchema = z.object({
   model: z.string().trim().max(80).nullable(),
   owner: short(3),
   caps: z.array(short(60)).max(12),
-  schedule: z.enum(["nightly"]).nullable(),
+  schedule: z.enum(["nightly", "weekly"]).nullable(),
+  prompt: z.string().trim().max(4000).nullable().default(null),
 });
 export const AgentsInputSchema = z.array(AgentSchema).max(20);
 export type AgentsInput = z.infer<typeof AgentsInputSchema>;
@@ -137,6 +138,8 @@ export const ProposalActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("governance_item"), cat: short(80), name: short(160), status: enumOf(GOV_STATUSES), owner: short(3), detail: z.string().max(2000).default("") }),
   z.object({ type: z.literal("calendar_event"), date: isoDate, tab: projectTab.default("overview"), text: short(200), sub: z.string().max(200).nullable().default(null) }),
   z.object({ type: z.literal("targets"), fte: pct, time: pct }),
+  z.object({ type: z.literal("agent_prompt"), agentId: id, prompt: z.string().trim().max(4000).nullable() }),
+  z.object({ type: z.literal("agent_model"), agentId: id, model: z.string().trim().min(1).max(160).nullable() }),
 ]);
 export type ProposalActionInput = z.infer<typeof ProposalActionSchema>;
 
@@ -164,13 +167,31 @@ export const RateRunInputSchema = z.object({ rating: z.union([z.literal(1), z.li
 export type RateRunInput = z.infer<typeof RateRunInputSchema>;
 
 export const BenchmarkInputSchema = z.object({ agentId: id.optional() });
+
+export const ScoutInputSchema = z.object({ agentId: id.optional(), models: z.array(z.string().trim().min(1).max(160)).max(8).optional() });
+export type ScoutInput = z.infer<typeof ScoutInputSchema>;
+
+export const RuleInputSchema = z.object({
+  text: z.string().trim().min(12, "say what should happen when a condition holds").max(600),
+  proj: id.nullable().default(null),
+  enabled: z.boolean().default(true),
+  auto: z.boolean().default(false),
+  owner: short(3),
+});
+export type RuleInput = z.infer<typeof RuleInputSchema>;
+
+export const AgentPromptInputSchema = z.object({ prompt: z.string().trim().max(4000).nullable() });
+export type AgentPromptInput = z.infer<typeof AgentPromptInputSchema>;
 export type BenchmarkInput = z.infer<typeof BenchmarkInputSchema>;
 
 export const RunAgentInputSchema = z.object({
   agentId: id,
-  proj: id,
+  /** Required for project-scoped kinds; ignored by workspace-scoped ones (brief, tuner, scout). */
+  proj: id.optional(),
   tab: projectTab.optional(),
   instruction: z.string().trim().max(2000).optional(),
+  /** Agent to tune (tuner) or scout (scout); omitted means every eligible agent. */
+  target: id.optional(),
 });
 export type RunAgentInput = z.infer<typeof RunAgentInputSchema>;
 

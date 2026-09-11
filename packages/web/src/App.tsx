@@ -280,7 +280,7 @@ export function App() {
       {editor?.kind === "agents" && (
         <JsonDocEditor
           title="Agents"
-          help="One entry per workspace agent: id, name, grad (CSS gradient), purpose, kind (deck | comms | ideation | audit), model (null = workspace default), owner initials, caps, schedule (null | nightly). Runs are kept when an agent is edited and removed when it is deleted."
+          help="One entry per workspace agent: id, name, grad (CSS gradient), purpose, kind (deck | comms | ideation | audit | chat | rules | brief | tuner | scout), model (null = workspace default), owner initials, caps, schedule (null | nightly | weekly), prompt (extra instructions or null; a change is recorded as a prompt version). Runs are kept when an agent is edited and removed when it is deleted."
           value={state.agents}
           schema={AgentsInputSchema}
           onSave={(agents) => {
@@ -350,7 +350,7 @@ export function App() {
               <h1 style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em", margin: 0 }}>Glance</h1>
               <span style={{ fontSize: 12, color: C.dim }}>{dayLabel(state.asOf)}</span>
             </Header>
-            <GlancePage state={state} userName={firstName} onOpen={openProject} />
+            <GlancePage state={state} userName={firstName} onOpen={openProject} onOpenAgents={() => go("agents", null)} />
           </>
         ) : view.page === "agents" ? (
           <>
@@ -365,9 +365,12 @@ export function App() {
               runs={state.runs}
               proposals={state.proposals}
               scores={state.scores}
+              rules={state.rules}
+              promptVersions={state.promptVersions}
               projects={projects}
               asOf={state.asOf}
               llm={state.llm}
+              userIni={user.ini}
               currentProject={view.projectId ?? lastProject}
               onOpen={openProject}
               onEdit={() => setEditor({ kind: "agents" })}
@@ -376,6 +379,10 @@ export function App() {
               onRate={(id, r, n) => void store.rateRun(id, r, n)}
               onJudge={store.judgeRun}
               onBenchmark={store.runBenchmark}
+              onScout={store.runScout}
+              onSetPrompt={(id, prompt) => void store.setAgentPrompt(id, prompt)}
+              onSaveRule={(rule, input) => void store.saveRule(rule, input)}
+              onDeleteRule={(id) => void store.deleteRule(id)}
             />
           </>
         ) : view.page === "portfolio" ? (

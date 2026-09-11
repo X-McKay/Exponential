@@ -80,6 +80,9 @@ Settings come from the environment. Bun loads `.env` from its working directory;
 | `LLM_THINKING` | off | `on` lets reasoning models think before answering (slower, more tokens). |
 | `AGENT_SCHEDULE` | on | `off` disables the nightly scheduled runs. |
 | `EVAL_JUDGE` | on | `off` stops the LLM judge scoring every finished run in the background (rules scores are always recorded; *Judge this run* still works). |
+| `EVAL_JUDGE_MODEL` | unset (same as `LLM_MODEL`) | A different model for the judge, so agents are not graded by themselves. |
+| `LLM_MODELS` | unset | Comma-separated candidate models the scout benchmarks against the current one. An entry may be `name@https://other-host/v1` to reach a second endpoint (same API key). |
+| `BRIEF_WEBHOOK_URL` | unset (in-app only) | Also POST the weekly brief as JSON (`{ text, title, summary, body, runId, to }`) to Slack, Teams, Zapier, or your own endpoint. |
 | `NODE_ENV` | unset | `production` serves the built bundle instead of bundling on the fly. `bun run start` sets it. |
 
 ### Changing dependencies
@@ -150,13 +153,21 @@ Eval suites report readings with `PUT …/readings { value, source: "eval" }`; e
 
 ### Agents
 
-An agent is a definition (kind, model, owner, schedule); a run is a fact. A run briefs the agent with the project's live state — targets, milestones and gates, governance, releases, synced development activity, recent events, and the calendar — then asks the configured model for a JSON reply (`summary`, `attention`, `body`, `proposals`) and stores it. Four kinds ship: **Slider** (decks), **Comma** (communications), **Nova** (ideation), and **Audie** (audit), which runs nightly. Runs flagged for attention appear on Glance. The LLM client is a minimal fetch wrapper over the OpenAI chat API with JSON-schema output; nothing else is required of the endpoint.
+An agent is a definition (kind, model, owner, schedule); a run is a fact. A run briefs the agent with the project's live state — targets, milestones and gates, governance, releases, synced development activity, recent events, and the calendar — then asks the configured model for a JSON reply (`summary`, `attention`, `body`, `proposals`) and stores it. Nine agents ship: **Slider** (decks), **Comma** (communications), **Nova** (ideation), **Audie** (audit, nightly), **Ask** (the workspace conversation), **Sentry** (standing rules, nightly), **Monday** (the weekly brief), **Coach** (prompt tuning), and **Scout** (model comparison), the last three weekly. Runs flagged for attention appear on Glance. The LLM client is a minimal fetch wrapper over the OpenAI chat API with JSON-schema output; nothing else is required of the endpoint.
 
 **Proposals.** Alongside prose, an agent may propose concrete changes: move a governance item or milestone to another status, add a missing governance item, add a dated calendar event, or change the value targets. Proposals are typed (the schema is enforced per type), validated against the project (unknown ids are dropped), and stored pending. A person accepts or dismisses them in the run viewer or the inbox at the top of the Agents page; accepting applies the change through the same repository functions the editors use, so events are appended and every derivation follows. A proposal whose target has since been deleted is refused rather than applied.
 
 **Ask the workspace.** The *Ask* button at the bottom right (or `⌘J`) opens a conversation over every project. The model is briefed with a compact summary of the whole portfolio plus the full briefing of the project you are looking at, must answer from that only, links to the tabs that hold the evidence, and may draft proposals you accept in the panel. Every turn is a run of the built-in *Ask* agent (kind `chat`), so it is audited and scored like any other run; the transcript lives in the browser session.
 
-**Evals: measured, not felt.** Every finished run is scored on three layers, all stored in `run_scores` and never derived on the fly from prose. *Rules* run instantly: `format` (summary, body, and a non-empty reply), `grounding` (the share of ids, percentages, and larger numbers in the output that appear in the briefing), and `proposals_valid` (the share of returned proposals that survived validation). A *judge* (the same model, a separate prompt) grades groundedness, completeness, actionability, and clarity 1–5 with a note; groundedness counts double in the overall. *People* rate a run 👍 / 👎 with a note in the run viewer. The Quality section on Agents turns these into a scorecard per agent: rules, judge, human rating, proposals accepted, latency, and the prompt version (a hash of the system prompt, so a change in wording is visible as a new version). *Run benchmark* replays a fixed set of cases (`EVAL_CASES`) against each agent with expectations checked by the judge, so two prompt versions or two models can be compared on the same questions; benchmark runs are labelled and excluded from the nightly flags. A reply the model cut off at the token budget is retried once with more room and a request to be terse.
+**Evals: measured, not felt.** Every finished run is scored on three layers, all stored in `run_scores` and never derived on the fly from prose. *Rules* run instantly: `format` (summary, body, and a non-empty reply), `grounding` (the share of ids, percentages, and larger numbers in the output that appear in the briefing), and `proposals_valid` (the share of returned proposals that survived validation). A *judge* (the same model, a separate prompt) grades groundedness, completeness, actionability, and clarity 1–5 with a note; groundedness counts double in the overall. *People* rate a run 👍 / 👎 with a note in the run viewer. The Quality section on Agents turns these into a scorecard per agent: rules, judge, human rating, proposals accepted, latency, and the prompt version (a hash of the system prompt, so a change in wording is visible as a new version). *Run benchmark* replays a fixed set of cases (`EVAL_CASES`) against each agent with expectations checked by the judge, so two prompt versions or two models can be compared on the same questions; benchmark runs are labelled, excluded from attention flags, and their proposals are scored but not queued. A reply the model cut off at the token budget is retried once with more room and a request to be terse.
+
+**Standing rules.** A person writes a rule in plain language on the Agents page ("If a Tier 1 project has a failing build for more than two days, add a calendar event for a fix-by decision and flag me"). Sentry, the rules agent, checks every enabled rule against each project's live state nightly, reports fires / does not fire with evidence, and turns what a fired rule asks for into proposals tagged with the rule's id. Anything a rule did not ask for is dropped. The rule's acceptance rate is derived from those proposals; after five decisions at 80% or better accepted the rule has *earned autonomy*, and the person can switch it to apply its proposals immediately (the proposal is still recorded, as accepted). The switch is always visible and always reversible.
+
+**The weekly brief.** Monday, the brief agent, runs weekly (or on demand) over the whole workspace and writes one person's note: what moved, what is blocked, decisions waiting on them, proposals pending, with links to where to look. It is stored as a workspace-level run, shows on Glance as *Your week*, and is posted to `BRIEF_WEBHOOK_URL` when set. `just brief` prints it.
+
+**Closing the loop: prompt versions and the tuner.** Every agent may carry extra instructions layered on its built-in role (*Edit instructions* in the Quality section, the agents document, or `POST /api/agents/:aid/prompt`). Each change is a prompt version: a hash of the whole system prompt, recorded with its text and who set it. Runs carry their version, so the Quality section shows, per version, grounding, judge score, ratings, and benchmark results side by side. Coach, the tuner, reads an agent's weakest measured runs (judge critiques, unsupported claims, missed expectations, thumbs-down notes) and proposes new extra instructions with the number it expects to move. Accepting records the version and immediately re-runs that agent's benchmark, so the new row fills in beside the old one. Nothing changes a prompt without a person accepting it.
+
+**Better models where it matters: the scout.** With candidate models in `LLM_MODELS`, Scout runs every benchmark case on each candidate under the agent's current prompt version, judges them with the same rubric, and writes a comparison table (judge, expectations, grounding, latency, tokens). It proposes a switch only when a candidate is at least five points better, or equal within three points and at 70% of the latency or less. Accepting sets the agent's model; the judge can run on its own model via `EVAL_JUDGE_MODEL`. Scout runs weekly when candidates exist, or from *Scout models* on the Quality section.
 
 **Setting up a project from documents.** *Set up from documents…* on Portfolio hands a setup agent a name, a brief, pasted snippets, and uploaded Word, PowerPoint, or text files (a dependency-free zip reader pulls the text out of `.docx` and `.pptx`; PDFs are reported as unsupported). The agent drafts every field of the project record — stage, risk tier, committee approval, targets, team, repositories, milestones with gate metrics, governance items with evidence-based statuses, releases with criteria — each with a rationale, its source document, and a confidence. The review step lets you untick, edit, or ask the agent to change things (rows you edited survive a refinement), then creates everything in one transaction.
 
@@ -191,6 +202,9 @@ Nothing is hard-coded: every fact the app shows can be changed in the UI, and ev
 | Agent definitions | Agents → *Edit agents* (a validated JSON document) |
 | Agent runs | Agents → expand an agent → *Run…*; nightly for scheduled agents; the Ask panel (`⌘J`) for the conversational agent |
 | Run ratings and judge scores | A run's viewer → 👍 / 👎 with a note, *Judge this run*; Agents → Quality → *Run benchmark* |
+| Standing rules (add, edit, enable, autonomy) | Agents → *Standing rules* → *+ New rule*, click a rule to edit; *Check now* runs Sentry |
+| An agent's extra instructions and model | Agents → Quality → expand the agent → *Edit instructions* / *Tune prompt* / *Scout models*; or accept Coach's and Scout's proposals |
+| The weekly brief | Agents → Monday → *Run…*, or `just brief`; shows on Glance as *Your week* |
 | Signed-in user (sidebar, Glance greeting, default owner) | Click your name at the bottom of the sidebar, or *Data → Workspace* |
 
 Ids are generated for you: milestones `MS-n`, releases `Rn`, project keys `PRJ-n`, runs `run-n`; URL ids, governance ids, and calendar ids are slugs of the name. Deleting a milestone or governance item leaves any release criterion that referenced it in place; it resolves to *not met* / *not tracked* at read time. Deleting a project removes everything under it.
@@ -217,12 +231,16 @@ To start from a clean slate rather than the sample portfolio, delete the three s
 | POST | `/api/projects/:pid/sync` | |
 | GET | `/api/sync` | |
 | PUT | `/api/agents` | `Agent[]` |
-| POST | `/api/agents/:aid/runs` | `{ proj, tab?, instruction? }` |
+| POST | `/api/agents/:aid/runs` | `{ proj?, tab?, instruction?, target? }` (`proj` for project agents; `target` picks the agent to tune or scout) |
 | POST | `/api/proposals/:id/accept` · `/dismiss` | |
 | POST | `/api/chat` | `{ messages: [{ role, content }], proj? }` → `{ answer, links, proposals, runId, model }` |
 | POST | `/api/runs/:id/rate` | `{ rating: 1 \| -1 \| null, note? }` |
 | POST | `/api/runs/:id/judge` | |
-| POST | `/api/benchmark` | `{ agentId? }` → 202; poll `GET /api/benchmark` |
+| POST | `/api/evals/benchmark` | `{ agentId? }` → 202; poll `GET /api/evals/benchmark` (`{ running, kind, done, total }`) |
+| POST | `/api/evals/scout` | `{ agentId?, models? }` → 202; same status endpoint |
+| POST | `/api/agents/:aid/prompt` | `{ prompt: string \| null }` records a prompt version |
+| GET / POST | `/api/rules` | `RuleInput` |
+| PUT / DELETE | `/api/rules/:id` | `RuleInput` |
 | POST | `/api/setup` | multipart: `name`, `key?`, `brief`, `snippet[]`, `file[]` |
 | GET | `/api/setup/:id` | |
 | POST | `/api/setup/:id/refine` | `{ feedback }` |

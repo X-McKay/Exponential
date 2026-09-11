@@ -14,10 +14,13 @@ import {
   ProjectInputSchema,
   ReadingInputSchema,
   ReleaseInputSchema,
+  AgentPromptInputSchema,
   BenchmarkInputSchema,
   ChatInputSchema,
   RateRunInputSchema,
+  RuleInputSchema,
   RunAgentInputSchema,
+  ScoutInputSchema,
   SetupCreateInputSchema,
   SetupRefineInputSchema,
   TargetsInputSchema,
@@ -40,6 +43,7 @@ import {
   loadState,
   loadWorkspace,
   recordReading,
+  setAgentPrompt,
   setAgents,
   setTargets,
   setWorkspace,
@@ -49,8 +53,14 @@ import {
   upsertProject,
   upsertRelease,
 } from "./repo.ts";
-import { runAgent } from "./agents.ts";
+import { nextRuleId } from "@valueflow/domain";
+import type { Rule } from "@valueflow/domain";
 import { askWorkspace } from "./chat.ts";
+import type { BriefDelivery } from "./brief.ts";
+import { promptVersion } from "./prompts.ts";
+import { deleteRule, insertRule, loadRules, updateRule } from "./repo.ts";
+import { runAny } from "./runner.ts";
+import { scoutModels } from "./scout.ts";
 import { judgeRun, runBenchmark } from "./evals.ts";
 import { extractSource } from "./extract.ts";
 import type { ExtractedSource } from "./extract.ts";
@@ -124,6 +134,16 @@ export interface AppOptions {
   llm?: Llm | null;
   /** Grade every finished run with the LLM judge in the background (default on when a model is configured). */
   autoJudge?: boolean;
+  /** Where the weekly brief goes besides the app; null keeps it in-app only. */
+  deliverBrief?: BriefDelivery | null;
+}
+
+export interface JobStatus {
+  running: boolean;
+  kind: "benchmark" | "scout" | null;
+  done: number;
+  total: number;
+  startedAt: string | null;
 }
 
 export const createApp = (db: Database, options: AppOptions = {}): App => {
@@ -138,7 +158,23 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
       judgeRun(db, model, runId, now()).catch((e: unknown) => console.error(`judge ${runId} failed`, e instanceof Error ? e.message : e));
     }, 0);
   };
-  let benchmarkStatus: { running: boolean; done: number; total: number; startedAt: string | null } = { running: false, done: 0, total: 0, startedAt: null };
+  const deliverBrief = options.deliverBrief ?? null;
+  let benchmarkStatus: JobStatus = { running: false, kind: null, done: 0, total: 0, startedAt: null };
+  /** Long evaluation jobs run one at a time in the background; the status is polled. */
+  const startJob = (kind: "benchmark" | "scout", job: (progress: (done: number, total: number) => void) => Promise<unknown>): JobStatus => {
+    if (benchmarkStatus.running) throw new HttpError(409, `a ${benchmarkStatus.kind ?? "job"} is already running`);
+    benchmarkStatus = { running: true, kind, done: 0, total: 0, startedAt: now().toISOString() };
+    setTimeout(() => {
+      job((done, total) => {
+        benchmarkStatus = { ...benchmarkStatus, done, total };
+      })
+        .catch((e: unknown) => console.error(`${kind} failed`, e instanceof Error ? e.message : e))
+        .finally(() => {
+          benchmarkStatus = { ...benchmarkStatus, running: false };
+        });
+    }, 0);
+    return benchmarkStatus;
+  };
   const state = () => ({ ...loadState(db, now()), syncSource: source?.name ?? null, llm: llm ? llm.describe() : null });
   const routes: Route[] = [];
   const on = (method: Method, pattern: string, handler: Handler): void => {
@@ -245,8 +281,38 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     return json({ run, facts: state().dev[project.id] ?? null }, run.ok ? 200 : 502);
   });
   on("PUT", patterns.agents, async (req) => {
-    setAgents(db, await parseBody(req, AgentsInputSchema));
+    const body = await parseBody(req, AgentsInputSchema);
+    const before = new Map(state().agents.map((a) => [a.id, a]));
+    setAgents(db, body);
+    // Hand-edited instructions are a prompt version too.
+    for (const a of body) if ((before.get(a.id)?.prompt ?? null) !== (a.prompt ?? null)) setAgentPrompt(db, a.id, a.prompt ?? null, promptVersion(a.kind, a.prompt ?? null), "person", now().toISOString());
     return json(state().agents);
+  });
+  on("POST", patterns.agentPrompt, async (req, params) => {
+    const body = await parseBody(req, AgentPromptInputSchema);
+    const agent = state().agents.find((a) => a.id === p(params, "aid"));
+    if (!agent) throw new NotFound(`agent ${p(params, "aid")} not found`);
+    setAgentPrompt(db, agent.id, body.prompt, promptVersion(agent.kind, body.prompt), "person", now().toISOString());
+    return json(state().agents.find((a) => a.id === agent.id));
+  });
+
+  on("GET", patterns.rules, () => json(loadRules(db)));
+  on("POST", patterns.rules, async (req) => {
+    const body = await parseBody(req, RuleInputSchema);
+    if (body.proj && !state().projects.some((pr) => pr.id === body.proj)) throw new HttpError(400, `project ${body.proj} not found`);
+    const rule: Rule = { id: nextRuleId(loadRules(db)), text: body.text, proj: body.proj, enabled: body.enabled, auto: body.auto, owner: body.owner, createdAt: now().toISOString() };
+    insertRule(db, rule);
+    return json(rule, 201);
+  });
+  on("PUT", patterns.rule, async (req, params) => {
+    const body = await parseBody(req, RuleInputSchema);
+    if (body.proj && !state().projects.some((pr) => pr.id === body.proj)) throw new HttpError(400, `project ${body.proj} not found`);
+    updateRule(db, p(params, "id"), body);
+    return json(loadRules(db).find((r) => r.id === p(params, "id")));
+  });
+  on("DELETE", patterns.rule, (_req, params) => {
+    deleteRule(db, p(params, "id"));
+    return json({ ok: true });
   });
   // Project setup from documents: multipart with name, brief, snippet[] and file[] parts.
   on("POST", patterns.setup, async (req) => {
@@ -290,13 +356,24 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     return json(findProject(state(), pid), 201);
   });
 
-  on("POST", patterns.proposalAccept, (_req, params) => json(acceptProposal(db, findProposal(db, p(params, "id"), now()), now())));
+  on("POST", patterns.proposalAccept, (_req, params) => {
+    const accepted = acceptProposal(db, findProposal(db, p(params, "id"), now()), now());
+    // A new prompt version gets its numbers straight away, so the version table never shows a blank row for long.
+    if (accepted.action.type === "agent_prompt" && llm && !benchmarkStatus.running) {
+      const model = llm;
+      const target = accepted.action.agentId;
+      startJob("benchmark", (progress) => runBenchmark(db, model, now(), target, progress));
+    }
+    return json(accepted);
+  });
   on("POST", patterns.proposalDismiss, (_req, params) => json(dismissProposal(db, findProposal(db, p(params, "id"), now()), now())));
   on("POST", patterns.agentRuns, async (req, params) => {
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
     const body = await parseBody(req, RunAgentInputSchema.omit({ agentId: true }));
-    const run = await runAgent(db, llm, { ...body, agentId: p(params, "aid") }, now());
-    if (run.state !== "failed") judgeLater(run.id);
+    const runs = await runAny(db, llm, { ...body, agentId: p(params, "aid") }, now(), { deliverBrief });
+    for (const run of runs) if (run.state !== "failed" && run.model !== null) judgeLater(run.id);
+    const run = runs[0];
+    if (!run) throw new HttpError(409, "nothing to run: no eligible target");
     return json(run, 201);
   });
   on("POST", patterns.chat, async (req) => {
@@ -318,20 +395,17 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   on("GET", patterns.benchmark, () => json(benchmarkStatus));
   on("POST", patterns.benchmark, async (req) => {
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
-    if (benchmarkStatus.running) throw new HttpError(409, "a benchmark is already running");
     const body = await parseBody(req, BenchmarkInputSchema);
     const model = llm;
-    benchmarkStatus = { running: true, done: 0, total: 0, startedAt: now().toISOString() };
-    setTimeout(() => {
-      runBenchmark(db, model, now(), body.agentId, (done, total) => {
-        benchmarkStatus = { ...benchmarkStatus, done, total };
-      })
-        .catch((e: unknown) => console.error("benchmark failed", e instanceof Error ? e.message : e))
-        .finally(() => {
-          benchmarkStatus = { ...benchmarkStatus, running: false };
-        });
-    }, 0);
-    return json(benchmarkStatus, 202);
+    return json(startJob("benchmark", (progress) => runBenchmark(db, model, now(), body.agentId, progress)), 202);
+  });
+  on("POST", patterns.scout, async (req) => {
+    if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
+    const body = await parseBody(req, ScoutInputSchema);
+    const scout = state().agents.find((a) => a.kind === "scout");
+    if (!scout) throw new HttpError(409, "no scout agent is installed");
+    const model = llm;
+    return json(startJob("scout", (progress) => scoutModels(db, model, scout, now(), { agentId: body.agentId, models: body.models, onProgress: progress })), 202);
   });
   on("POST", patterns.calendar, async (req) => {
     const body = await parseBody(req, CalendarEventInputSchema);

@@ -37,6 +37,24 @@ agent agent project instruction="":
         -d '{"proj":"{{project}}","instruction":"{{instruction}}"}' \
         | bun -e 'const r = await new Response(Bun.stdin).json(); console.log(`${r.state}: ${r.summary}\n`); console.log(r.output || r.error)'
 
+# Write this week's brief through the running server and print it.
+brief:
+    @curl -sf -X POST "http://localhost:{{port}}/api/agents/monday/runs" -H 'content-type: application/json' -d '{}' \
+        | bun -e 'const r = await new Response(Bun.stdin).json(); console.log(`${r.state}: ${r.summary}\n`); console.log(r.output || r.error)'
+
+# Ask Coach to study an agent and propose a prompt change, e.g. `just tune audie`.
+tune agent:
+    @curl -sf -X POST "http://localhost:{{port}}/api/agents/coach/runs" -H 'content-type: application/json' -d '{"target":"{{agent}}"}' \
+        | bun -e 'const r = await new Response(Bun.stdin).json(); console.log(`${r.state}: ${r.summary}\n`); console.log(r.output || r.error)'
+
+# Benchmark candidate models (LLM_MODELS) against the current one; poll `just jobs` for progress.
+scout:
+    @curl -sf -X POST "http://localhost:{{port}}/api/evals/scout" -H 'content-type: application/json' -d '{}'; echo
+
+# Status of the background benchmark or scout job.
+jobs:
+    @curl -sf "http://localhost:{{port}}/api/evals/benchmark"; echo
+
 # ---- run -------------------------------------------------------------------
 
 # Dev server with HMR in the foreground (PORT={{port}}).

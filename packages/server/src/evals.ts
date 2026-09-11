@@ -56,6 +56,10 @@ const RUBRIC: Record<AgentKind, string> = {
   ideation: "8–12 distinct, concrete options, each with rationale from the briefing, an effort size, and the milestone or metric it moves; ranked by impact on realized value.",
   audit: "Findings ordered by severity, each with evidence cited from the briefing, the risk, and a concrete recommendation; attention set only for decisions needed this week.",
   chat: "A direct answer to the question from the briefing only, with links to the right page and, where warranted, a well-formed proposal.",
+  rules: "One verdict per standing rule (fires / does not fire) with the evidence from the briefing, and proposals only for rules that fired, each tied to its rule.",
+  brief: "A weekly brief under 400 words for one person: what moved, what is blocked, decisions waiting on them, proposals pending; numbers exact; no padding.",
+  tuner: "An evidence-based critique of an agent's recent runs and a concise, specific change to its extra instructions.",
+  scout: "A factual comparison of models on the same benchmark with a recommendation only where the numbers justify it.",
 };
 
 const JUDGE_SCHEMA = {
@@ -141,7 +145,7 @@ export const judgeRun = async (db: Database, llm: Llm, runId: string, now: Date)
   const agent = state.agents.find((a) => a.id === run.agentId);
   const briefing = loadRunContext(db, runId) ?? "";
   const expectations = run.benchmark ? (EVAL_CASES.find((c) => c.id === run.benchmark)?.expectations ?? []) : [];
-  const res = await llm.chat(judgeMessages(agent?.kind ?? "chat", run, briefing, expectations), { jsonSchema: JUDGE_SCHEMA, maxTokens: 1500, temperature: 0 });
+  const res = await llm.chat(judgeMessages(agent?.kind ?? "chat", run, briefing, expectations), { jsonSchema: JUDGE_SCHEMA, maxTokens: 1500, temperature: 0, model: llm.describe().judgeModel });
   const j = parseJudgement(res.content);
   const at = new Date().toISOString();
   const scores: RunScore[] = JUDGE_DIMENSIONS.map((d) => ({ runId, scorer: "judge", dimension: d, score: j[d] / 10, note: d === "groundedness" && j.unsupported.length ? `unsupported: ${j.unsupported.join("; ")}` : "", at }));
@@ -159,14 +163,14 @@ export const judgeRun = async (db: Database, llm: Llm, runId: string, now: Date)
 
 export const benchmarkCases = (agentId?: string): EvalCase[] => EVAL_CASES.filter((c) => !agentId || c.agentId === agentId);
 
-/** Run every case (optionally one agent's), judge each, and return the runs. Sequential: the model is the bottleneck. */
-export const runBenchmark = async (db: Database, llm: Llm, now: Date, agentId?: string, onProgress?: (done: number, total: number) => void): Promise<AgentRun[]> => {
+/** Run every case (optionally one agent's, optionally on another model), judge each, and return the runs. Sequential: the model is the bottleneck. */
+export const runBenchmark = async (db: Database, llm: Llm, now: Date, agentId?: string, onProgress?: (done: number, total: number) => void, model?: string): Promise<AgentRun[]> => {
   const cases = benchmarkCases(agentId);
   const out: AgentRun[] = [];
   for (const [i, c] of cases.entries()) {
     const projects = loadState(db, now).projects;
     if (!projects.some((p) => p.id === c.proj)) continue;
-    const run = await runAgent(db, llm, { agentId: c.agentId, proj: c.proj, instruction: c.instruction }, new Date(), { benchmark: c.id });
+    const run = await runAgent(db, llm, { agentId: c.agentId, proj: c.proj, instruction: c.instruction }, new Date(), { benchmark: c.id, ...(model ? { model } : {}) });
     if (run.state !== "failed") await judgeRun(db, llm, run.id, new Date()).catch(() => []);
     out.push(run);
     onProgress?.(i + 1, cases.length);

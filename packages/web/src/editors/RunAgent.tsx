@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AGENT_KIND_LABEL, JUDGE_DIMENSIONS, PROJECT_TABS, RUN_STATE_ICON, relTime } from "@valueflow/domain";
+import { AGENT_KIND_LABEL, JUDGE_DIMENSIONS, PROJECT_KINDS, PROJECT_TABS, RUN_STATE_ICON, relTime } from "@valueflow/domain";
 import type { Agent, AgentRun, AppState, Project, ProjectTab, Proposal, RunScore } from "@valueflow/domain";
 import type { RunAgentInput } from "@valueflow/shared";
 import { ProposalList } from "../ui/Proposals.tsx";
@@ -15,30 +15,79 @@ const PLACEHOLDER: Record<Agent["kind"], string> = {
   ideation: "e.g. Options to lift citation accuracy without adding reviewer load",
   audit: "e.g. Focus on audit-trail gaps for rule activations",
   chat: "e.g. What is blocking the next release?",
+  rules: "e.g. Only check rules about governance this time",
+  brief: "",
+  tuner: "",
+  scout: "",
 };
 
 /** Start a run: pick the project (and optionally where the result should link) and give the agent an instruction. */
 export function RunAgentEditor({
   agent,
+  agents,
   projects,
   defaultProject,
+  defaultTarget,
   onRun,
   onClose,
 }: {
   agent: Agent;
+  agents: Agent[];
   projects: Project[];
   defaultProject: string | null;
+  defaultTarget?: string | null;
   onRun: (input: RunAgentInput) => void;
   onClose: () => void;
 }) {
   const [proj, setProj] = useState(defaultProject ?? projects[0]?.id ?? "");
   const [tab, setTab] = useState<ProjectTab | "">("");
   const [instruction, setInstruction] = useState("");
-  const valid = proj !== "";
+  const [target, setTarget] = useState(defaultTarget ?? "");
+  const perProject = PROJECT_KINDS.includes(agent.kind);
+  const targets = agents.filter((a) => (agent.kind === "tuner" ? PROJECT_KINDS.includes(a.kind) || a.kind === "brief" : PROJECT_KINDS.includes(a.kind) && a.kind !== "rules"));
+  const valid = perProject ? proj !== "" : true;
   const submit = () => {
     if (!valid) return;
+    if (!perProject) {
+      onRun({ agentId: agent.id, ...(target ? { target } : {}) });
+      return;
+    }
     onRun({ agentId: agent.id, proj, ...(tab ? { tab } : {}), ...(instruction.trim() ? { instruction: instruction.trim() } : {}) });
   };
+  if (!perProject) {
+    const what = agent.kind === "brief" ? "Writes this week's brief for the signed-in user from the whole workspace, stores it as a run, and delivers it if a channel is configured." : agent.kind === "tuner" ? "Reads the agent's weakest measured runs, judge critiques, and ratings, then proposes a change to its extra instructions. Nothing changes until you accept." : "Runs every benchmark case on each candidate model, judges them with the same rubric, and proposes a switch only when the numbers justify it. This can take several minutes.";
+    return (
+      <Modal
+        title={`Run ${agent.name}`}
+        onClose={onClose}
+        onSubmit={submit}
+        footer={
+          <>
+            <Btn onClick={onClose}>Cancel</Btn>
+            <Btn tone="primary" onClick={submit}>
+              Run now
+            </Btn>
+          </>
+        }
+      >
+        <div style={{ fontSize: 12, color: C.mut, lineHeight: 1.55, marginTop: 8 }}>{what}</div>
+        {agent.kind !== "brief" && (
+          <>
+            <Lbl>{agent.kind === "tuner" ? "Agent to tune" : "Agent to scout for"}</Lbl>
+            <select style={inpStyle} value={target} onChange={(e) => setTarget(e.target.value)}>
+              <option value="">{agent.kind === "tuner" ? "Every agent with enough measured runs" : "Every benchmarked agent"}</option>
+              {targets.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+        <div style={{ fontSize: 12, color: C.dim, marginTop: 10 }}>The result is stored as a run and appears in the agent's run list; proposals land in the inbox.</div>
+      </Modal>
+    );
+  }
   return (
     <Modal
       title={`Run ${agent.name}`}
@@ -115,12 +164,18 @@ export function Markdown({ text }: { text: string }) {
         );
       return part;
     });
-  const blocks: { kind: "h" | "li" | "ol" | "p"; level?: number; text: string }[] = [];
+  const blocks: { kind: "h" | "li" | "ol" | "p" | "table"; level?: number; text: string; rows?: string[][] }[] = [];
   for (const raw of text.split("\n")) {
     const line = raw.trimEnd();
     if (!line.trim()) continue;
     const h = line.match(/^(#{1,4})\s+(.*)$/);
-    if (h) blocks.push({ kind: "h", level: h[1]?.length ?? 2, text: h[2] ?? "" });
+    if (/^\s*\|.*\|\s*$/.test(line)) {
+      const cells = line.trim().slice(1, -1).split("|").map((c) => c.trim());
+      if (cells.every((c) => /^:?-{2,}:?$/.test(c))) continue;
+      const last = blocks[blocks.length - 1];
+      if (last?.kind === "table" && last.rows) last.rows.push(cells);
+      else blocks.push({ kind: "table", text: "", rows: [cells] });
+    } else if (h) blocks.push({ kind: "h", level: h[1]?.length ?? 2, text: h[2] ?? "" });
     else if (/^\s*[-*•]\s+/.test(line)) blocks.push({ kind: "li", text: line.replace(/^\s*[-*•]\s+/, "") });
     else if (/^\s*\d+[.)]\s+/.test(line)) blocks.push({ kind: "ol", text: line.replace(/^\s*\d+[.)]\s+/, "") });
     else blocks.push({ kind: "p", text: line });
@@ -149,6 +204,24 @@ export function Markdown({ text }: { text: string }) {
                 {inline(b.text)}
               </p>
             );
+          case "table":
+            return (
+              <div key={i} style={{ overflowX: "auto", margin: "8px 0" }}>
+                <table style={{ borderCollapse: "collapse", fontSize: 12, whiteSpace: "nowrap" }}>
+                  <tbody>
+                    {(b.rows ?? []).map((row, ri) => (
+                      <tr key={ri} style={{ borderBottom: `1px solid ${C.line}` }}>
+                        {row.map((cell, ci) => (
+                          <td key={ci} style={{ padding: "4px 10px 4px 0", color: ri === 0 ? C.dim : "#C6CAD6", fontWeight: ri === 0 ? 500 : 400 }}>
+                            {inline(cell)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
         }
       })}
     </div>
@@ -175,7 +248,7 @@ export function RunViewer({
   asOf: string;
   proposals: Proposal[];
   scores: RunScore[];
-  state: Pick<AppState, "projects" | "agents">;
+  state: Pick<AppState, "projects" | "agents"> & Partial<Pick<AppState, "rules">>;
   canJudge: boolean;
   onDecide: (id: string, decision: "accept" | "dismiss") => void;
   onRate: (id: string, rating: 1 | -1 | null, note?: string) => void;
@@ -191,7 +264,7 @@ export function RunViewer({
   const pct = (v: number) => `${Math.round(v * 100)}%`;
   const scoreColor = (v: number) => (v >= 0.8 ? C.green : v >= 0.6 ? C.amber : C.red);
   return (
-    <Modal title={`${agent?.name ?? run.agentId} · ${project?.name ?? run.proj}`} onClose={onClose}>
+    <Modal title={`${agent?.name ?? run.agentId} · ${project?.name ?? run.proj ?? "workspace"}`} onClose={onClose}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "8px 0 12px" }}>
         <Chip tone={tone} dot={RUN_COLOR[run.state]}>
           {RUN_STATE_ICON[run.state]} {run.state}

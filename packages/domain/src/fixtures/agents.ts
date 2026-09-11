@@ -2,7 +2,7 @@
 // from the state's `asOf`; a real run is produced by the server's agent
 // runner calling the configured LLM.
 
-import type { Agent, AgentRun, EvalCase, ProjectTab, RunState } from "../types.ts";
+import type { Agent, AgentRun, EvalCase, ProjectTab, Rule, RunState } from "../types.ts";
 
 const HOUR = 3_600_000;
 
@@ -17,6 +17,7 @@ export const AGENTS: Agent[] = [
     owner: "AM",
     caps: ["Value review decks", "AIRC pre-reads", "Release readouts", "Brand template aware"],
     schedule: null,
+    prompt: null,
   },
   {
     id: "comma",
@@ -28,6 +29,7 @@ export const AGENTS: Agent[] = [
     owner: "JL",
     caps: ["Release notes", "Decision memos", "Stakeholder updates", "Tone-matched to audience"],
     schedule: null,
+    prompt: null,
   },
   {
     id: "nova",
@@ -39,6 +41,7 @@ export const AGENTS: Agent[] = [
     owner: "AM",
     caps: ["Divergent ideation", "Prior-art scans", "Concept scoring", "Workshop facilitation"],
     schedule: null,
+    prompt: null,
   },
   {
     id: "audie",
@@ -50,6 +53,7 @@ export const AGENTS: Agent[] = [
     owner: "RS",
     caps: ["Audit-trail gaps", "Code-quality habits", "Governance drift", "PM practice review"],
     schedule: "nightly",
+    prompt: null,
   },
   {
     id: "ask",
@@ -61,11 +65,70 @@ export const AGENTS: Agent[] = [
     owner: "AM",
     caps: ["Cross-project questions", "Where to look", "Draft proposals", "Every answer cites the briefing"],
     schedule: null,
+    prompt: null,
+  },
+  {
+    id: "sentry",
+    name: "Sentry",
+    grad: "linear-gradient(135deg,#E3B341,#E5534B)",
+    purpose: "Checks every standing rule against each project nightly and proposes what the rule says should happen",
+    kind: "rules",
+    model: null,
+    owner: "AM",
+    caps: ["Plain-language rules", "Nightly checks", "Proposals per rule", "Earned autonomy"],
+    schedule: "nightly",
+    prompt: null,
+  },
+  {
+    id: "monday",
+    name: "Monday",
+    grad: "linear-gradient(135deg,#39C5CF,#4CC38A)",
+    purpose: "Writes your weekly brief: what moved, what is blocked, decisions waiting on you, and proposals pending",
+    kind: "brief",
+    model: null,
+    owner: "AM",
+    caps: ["Monday brief", "What moved", "Decisions waiting", "Webhook delivery"],
+    schedule: "weekly",
+    prompt: null,
+  },
+  {
+    id: "coach",
+    name: "Coach",
+    grad: "linear-gradient(135deg,#8B96F8,#6E7BF2)",
+    purpose: "Reads each agent's low-scoring runs, judge critiques, and ratings, then proposes a prompt change to benchmark",
+    kind: "tuner",
+    model: null,
+    owner: "AM",
+    caps: ["Reads critiques", "Proposes prompt edits", "Benchmarks on accept", "Version history"],
+    schedule: "weekly",
+    prompt: null,
+  },
+  {
+    id: "scout",
+    name: "Scout",
+    grad: "linear-gradient(135deg,#D253CE,#F5A623)",
+    purpose: "Benchmarks candidate models against each agent's current one and proposes a switch when the numbers justify it",
+    kind: "scout",
+    model: null,
+    owner: "AM",
+    caps: ["Candidate models", "Same cases, same judge", "Quality vs cost", "Proposes switches"],
+    schedule: "weekly",
+    prompt: null,
   },
 ];
 
 /** The built-in conversational agent; installed on boot if missing. */
-export const ASK_AGENT = AGENTS[AGENTS.length - 1] as Agent;
+export const ASK_AGENT = AGENTS.find((a) => a.kind === "chat") as Agent;
+
+/** Standing rules the sample workspace starts with; a person can edit, disable, or delete them. */
+export const RULES = (asOf: string): Rule[] => {
+  const at = new Date(new Date(asOf).getTime() - 14 * 86_400_000).toISOString();
+  return [
+    { id: "rule-1", text: "If a Tier 1 project has a failing build on a release-critical repo for more than two days, add a calendar event for a fix-by decision within a week and flag me.", proj: null, enabled: true, auto: false, owner: "AM", createdAt: at },
+    { id: "rule-2", text: "If a governance item is described as complete in recent activity but is still marked In review or Draft, propose moving it to Approved.", proj: null, enabled: true, auto: false, owner: "RS", createdAt: at },
+    { id: "rule-3", text: "When a milestone in eval has every metric above its base gate, propose marking it shipped.", proj: null, enabled: true, auto: false, owner: "AM", createdAt: at },
+  ];
+};
 
 /** Fixed questions the benchmark re-runs so prompt and model changes can be compared. */
 export const EVAL_CASES: EvalCase[] = [

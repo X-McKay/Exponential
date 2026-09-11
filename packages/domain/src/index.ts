@@ -7,4 +7,5 @@ export * from "./feed.ts";
 export * from "./agents.ts";
 export * from "./proposals.ts";
 export * from "./glance.ts";
+export * from "./prompts.ts";
 export * from "./fixtures/index.ts";

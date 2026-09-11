@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { calendarOf, composeGlancePage, monthLabel, relTime, shortAge } from "@valueflow/domain";
 import type { AppState, Block, Calendar, ProjectTab } from "@valueflow/domain";
 import { Bullet, GovStack, Spark } from "../charts/small.tsx";
+import { Markdown } from "../editors/RunAgent.tsx";
 import { Chip, reset } from "../ui/primitives.tsx";
 import { C, FEED_COLOR, toneBorder, toneToChip } from "../theme.ts";
 
@@ -77,6 +78,15 @@ function Body({ b, cal, pending }: { b: Block; cal: Calendar; pending: number })
           </div>
         </div>
       );
+    case "brief":
+      return (
+        <div style={{ marginTop: 2, maxHeight: 260, overflowY: "auto", paddingRight: 4 }}>
+          <div style={{ fontSize: 11, color: C.dim, marginBottom: 4 }}>
+            {b.agentName} · {relTime(b.run.startedAt, cal.asOf)} · open Agents for the full brief
+          </div>
+          <Markdown text={b.run.output.split("\n## Where to look")[0] ?? ""} />
+        </div>
+      );
     case "upcoming":
       return (
         <div style={{ marginTop: 2 }}>
@@ -103,11 +113,11 @@ function Body({ b, cal, pending }: { b: Block; cal: Calendar; pending: number })
   }
 }
 
-function GlanceCard({ b, cal, pending, onOpen }: { b: Block; cal: Calendar; pending: number; onOpen: (id: string, tab: ProjectTab) => void }) {
+function GlanceCard({ b, cal, pending, onOpen, onOpenAgents }: { b: Block; cal: Calendar; pending: number; onOpen: (id: string, tab: ProjectTab) => void; onOpenAgents: () => void }) {
   return (
     <button
       type="button"
-      onClick={() => onOpen(b.proj, b.tab)}
+      onClick={() => (b.kind === "brief" || (b.kind === "agent_flag" && !b.run.proj) ? onOpenAgents() : onOpen(b.proj, b.tab))}
       className="vf-card vf-pop"
       style={{
         ...reset,
@@ -136,7 +146,7 @@ function GlanceCard({ b, cal, pending, onOpen }: { b: Block; cal: Calendar; pend
   );
 }
 
-export function GlancePage({ state, userName, onOpen }: { state: AppState; userName: string; onOpen: (id: string, tab: ProjectTab) => void }) {
+export function GlancePage({ state, userName, onOpen, onOpenAgents }: { state: AppState; userName: string; onOpen: (id: string, tab: ProjectTab) => void; onOpenAgents: () => void }) {
   const cal = useMemo(() => calendarOf(state), [state]);
   const glance = useMemo(() => composeGlancePage(state, cal), [state, cal]);
   return (
@@ -156,6 +166,7 @@ export function GlancePage({ state, userName, onOpen }: { state: AppState; userN
             cal={cal}
             pending={b.kind === "agent_flag" ? state.proposals.filter((p) => p.runId === b.run.id && p.state === "pending").length : 0}
             onOpen={onOpen}
+            onOpenAgents={onOpenAgents}
           />
         ))}
       </div>

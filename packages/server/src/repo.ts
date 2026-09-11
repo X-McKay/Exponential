@@ -5,42 +5,8 @@
 
 import type { Database } from "bun:sqlite";
 import { EVENT_WINDOW_DAYS, GSTATUS_LABEL, RUN_WINDOW_DAYS, deriveDevEvents } from "@valueflow/domain";
-import type {
-  Agent,
-  AgentRun,
-  AppState,
-  Proposal,
-  ProposalAction,
-  RunScore,
-  SetupDraft,
-  Build,
-  CalendarEvent,
-  Criterion,
-  DevFacts,
-  Event,
-  GovernanceItem,
-  Metric,
-  MetricReading,
-  Milestone,
-  MilestoneStatus,
-  Project,
-  PullRequest,
-  Release,
-  RiskTier,
-  SyncRun,
-  Workspace,
-} from "@valueflow/domain";
-import type {
-  AgentsInput,
-  CalendarEventInput,
-  GovernanceInput,
-  GovernanceItemInput,
-  MilestoneInput,
-  ProjectInput,
-  ReleaseInput,
-  TargetsInput,
-  WorkspaceInput,
-} from "@valueflow/shared";
+import type { Agent, AgentRun, AppState, Build, CalendarEvent, Criterion, DevFacts, Event, GovernanceItem, Metric, MetricReading, Milestone, MilestoneStatus, Project, PromptVersion, Proposal, ProposalAction, PullRequest, Release, RiskTier, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
+import type { AgentsInput, CalendarEventInput, GovernanceInput, GovernanceItemInput, MilestoneInput, ProjectInput, ReleaseInput, RuleInput, TargetsInput, WorkspaceInput } from "@valueflow/shared";
 
 export class NotFound extends Error {
   override name = "NotFound";
@@ -138,12 +104,30 @@ interface AgentRow {
   owner: string;
   caps: string;
   schedule: Agent["schedule"];
+  prompt: string | null;
+}
+interface PromptVersionRow {
+  agent_id: string;
+  version: string;
+  prompt: string | null;
+  at: string;
+  source: PromptVersion["source"];
+}
+interface RuleRow {
+  id: string;
+  text: string;
+  project_id: string | null;
+  enabled: number;
+  auto: number;
+  owner: string;
+  created_at: string;
 }
 interface ProposalRow {
   id: string;
   run_id: string;
   agent_id: string;
-  project_id: string;
+  project_id: string | null;
+  rule_id: string | null;
   action: string;
   rationale: string;
   state: Proposal["state"];
@@ -153,7 +137,7 @@ interface ProposalRow {
 interface RunRow {
   id: string;
   agent_id: string;
-  project_id: string;
+  project_id: string | null;
   tab: AgentRun["tab"];
   state: AgentRun["state"];
   started_at: string;
@@ -319,6 +303,8 @@ export const loadState = (db: Database, now: Date = new Date()): AppState => {
     llm: null,
     proposals: loadProposals(db, now),
     scores: loadScores(db, now),
+    rules: loadRules(db),
+    promptVersions: loadPromptVersions(db),
     events: loadEvents(db, now),
     calendar: loadCalendar(db),
   };
@@ -380,7 +366,48 @@ export const loadAgents = (db: Database): Agent[] =>
   db
     .query<AgentRow, []>("SELECT * FROM agents ORDER BY sort")
     .all()
-    .map((r) => ({ id: r.id, name: r.name, grad: r.grad, purpose: r.purpose, kind: r.kind, model: r.model, owner: r.owner, caps: JSON.parse(r.caps) as string[], schedule: r.schedule }));
+    .map((r) => ({ id: r.id, name: r.name, grad: r.grad, purpose: r.purpose, kind: r.kind, model: r.model, owner: r.owner, caps: JSON.parse(r.caps) as string[], schedule: r.schedule, prompt: r.prompt }));
+
+export const loadPromptVersions = (db: Database): PromptVersion[] =>
+  db
+    .query<PromptVersionRow, []>("SELECT * FROM prompt_versions ORDER BY at DESC, rowid DESC")
+    .all()
+    .map((r) => ({ agentId: r.agent_id, version: r.version, prompt: r.prompt, at: r.at, source: r.source }));
+
+/** Set an agent's extra instructions and record the version it produces. */
+export const setAgentPrompt = (db: Database, agentId: string, prompt: string | null, version: string, source: PromptVersion["source"], at: string): void => {
+  db.transaction(() => {
+    const res = db.query("UPDATE agents SET prompt = ? WHERE id = ?").run(prompt, agentId);
+    if (res.changes === 0) throw new NotFound(`agent ${agentId} not found`);
+    db.query("INSERT OR REPLACE INTO prompt_versions (agent_id, version, prompt, at, source) VALUES (?,?,?,?,?)").run(agentId, version, prompt, at, source);
+  })();
+};
+
+export const setAgentModel = (db: Database, agentId: string, model: string | null): void => {
+  const res = db.query("UPDATE agents SET model = ? WHERE id = ?").run(model, agentId);
+  if (res.changes === 0) throw new NotFound(`agent ${agentId} not found`);
+};
+
+// ---- rules -----------------------------------------------------------------
+
+const toRule = (r: RuleRow): Rule => ({ id: r.id, text: r.text, proj: r.project_id, enabled: r.enabled === 1, auto: r.auto === 1, owner: r.owner, createdAt: r.created_at });
+
+export const loadRules = (db: Database): Rule[] => db.query<RuleRow, []>("SELECT * FROM rules ORDER BY sort, created_at").all().map(toRule);
+
+export const insertRule = (db: Database, r: Rule): void => {
+  const sort = db.query<{ s: number }, []>("SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM rules").get()?.s ?? 0;
+  db.query("INSERT INTO rules (id, text, project_id, enabled, auto, owner, created_at, sort) VALUES (?,?,?,?,?,?,?,?)").run(r.id, r.text, r.proj, r.enabled ? 1 : 0, r.auto ? 1 : 0, r.owner, r.createdAt, sort);
+};
+
+export const updateRule = (db: Database, id: string, r: RuleInput): void => {
+  const res = db.query("UPDATE rules SET text = ?, project_id = ?, enabled = ?, auto = ?, owner = ? WHERE id = ?").run(r.text, r.proj, r.enabled ? 1 : 0, r.auto ? 1 : 0, r.owner, id);
+  if (res.changes === 0) throw new NotFound(`rule ${id} not found`);
+};
+
+export const deleteRule = (db: Database, id: string): void => {
+  const res = db.query("DELETE FROM rules WHERE id = ?").run(id);
+  if (res.changes === 0) throw new NotFound(`rule ${id} not found`);
+};
 
 const toRun = (r: RunRow): AgentRun => ({
   id: r.id,
@@ -468,6 +495,7 @@ export const loadProposals = (db: Database, now: Date, windowDays = RUN_WINDOW_D
       runId: r.run_id,
       agentId: r.agent_id,
       proj: r.project_id,
+      ruleId: r.rule_id,
       action: JSON.parse(r.action) as ProposalAction,
       rationale: r.rationale,
       state: r.state,
@@ -477,11 +505,12 @@ export const loadProposals = (db: Database, now: Date, windowDays = RUN_WINDOW_D
 };
 
 export const insertProposal = (db: Database, p: Proposal): void => {
-  db.query("INSERT INTO proposals (id, run_id, agent_id, project_id, action, rationale, state, created_at, decided_at) VALUES (?,?,?,?,?,?,?,?,?)").run(
+  db.query("INSERT INTO proposals (id, run_id, agent_id, project_id, rule_id, action, rationale, state, created_at, decided_at) VALUES (?,?,?,?,?,?,?,?,?,?)").run(
     p.id,
     p.runId,
     p.agentId,
     p.proj,
+    p.ruleId,
     JSON.stringify(p.action),
     p.rationale,
     p.state,
@@ -951,9 +980,9 @@ export const setAgents = (db: Database, agents: AgentsInput): void => {
     const keep = agents.map((a) => a.id);
     for (const row of db.query<{ id: string }, []>("SELECT id FROM agents").all()) if (!keep.includes(row.id)) db.query("DELETE FROM agents WHERE id = ?").run(row.id);
     const q = db.query(
-      "INSERT INTO agents (id, sort, name, grad, purpose, kind, model, owner, caps, schedule) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET sort = excluded.sort, name = excluded.name, grad = excluded.grad, purpose = excluded.purpose, kind = excluded.kind, model = excluded.model, owner = excluded.owner, caps = excluded.caps, schedule = excluded.schedule",
+      "INSERT INTO agents (id, sort, name, grad, purpose, kind, model, owner, caps, schedule, prompt) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET sort = excluded.sort, name = excluded.name, grad = excluded.grad, purpose = excluded.purpose, kind = excluded.kind, model = excluded.model, owner = excluded.owner, caps = excluded.caps, schedule = excluded.schedule, prompt = excluded.prompt",
     );
-    agents.forEach((a, i) => q.run(a.id, i, a.name, a.grad, a.purpose, a.kind, a.model, a.owner, JSON.stringify(a.caps), a.schedule));
+    agents.forEach((a, i) => q.run(a.id, i, a.name, a.grad, a.purpose, a.kind, a.model, a.owner, JSON.stringify(a.caps), a.schedule, a.prompt ?? null));
   })();
 };
 

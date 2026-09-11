@@ -14,7 +14,7 @@ import { addMonths, calendarOf, monthLabel } from "./calendar.ts";
 import type { Calendar } from "./calendar.ts";
 import { blockers, govCounts, isMeasurable, metricLevel, realized, releaseState, tierOf } from "./derive.ts";
 import type { CriterionEval, ReleaseState } from "./derive.ts";
-import { attentionRuns } from "./agents.ts";
+import { attentionRuns, latestRunOfKind } from "./agents.ts";
 import { deriveUpcoming, recentEvents } from "./feed.ts";
 import type { FeedItem, Upcoming } from "./feed.ts";
 import type { AgentRun, AppState, Build, Dim, GovStatus, Metric, Milestone, Project, ProjectTab, PullRequest, Release } from "./types.ts";
@@ -48,6 +48,7 @@ export type Block =
   | (BlockBase & { kind: "value_trajectory"; milestones: Milestone[]; dim: Dim; target: number; realized: number })
   | (BlockBase & { kind: "ready_release"; release: Release })
   | (BlockBase & { kind: "agent_flag"; run: AgentRun; agentName: string })
+  | (BlockBase & { kind: "brief"; run: AgentRun; agentName: string })
   | (BlockBase & { kind: "upcoming"; items: Upcoming[] })
   | (BlockBase & { kind: "activity"; items: FeedItem[] });
 
@@ -90,6 +91,8 @@ export interface Signals {
   failBuilds: FailingBuild[];
   t1gaps: Project[];
   flags: AgentRun[];
+  /** This week's brief, when one has run. */
+  brief: AgentRun | null;
   bestValue: Project | null;
   upcoming: Upcoming[];
   recent: FeedItem[];
@@ -155,6 +158,7 @@ export const detectSignals = (state: AppState, cal: Calendar = calendarOf(state)
 
   const t1gaps = state.projects.filter((p) => p.tier === 1 && blockers(p) > 0);
   const flags = attentionRuns(state.runs, cal.asOf).filter((r) => state.projects.some((p) => p.id === r.proj));
+  const brief = latestRunOfKind("brief", state.agents, state.runs, cal.asOf);
   const ratio = (p: Project): number => (p.targets.fte > 0 ? realized(p, "fte") / p.targets.fte : 0);
   const bestValue = [...state.projects].sort((a, b) => ratio(b) - ratio(a))[0] ?? null;
 
@@ -170,6 +174,7 @@ export const detectSignals = (state: AppState, cal: Calendar = calendarOf(state)
     failBuilds,
     t1gaps,
     flags,
+    brief,
     bestValue,
     upcoming: deriveUpcoming(state, cal),
     recent,
@@ -299,6 +304,23 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
     });
   }
 
+  if (s.brief) {
+    const agent = state.agents.find((a) => a.id === s.brief?.agentId);
+    blocks.push({
+      kind: "brief",
+      priority: 110,
+      span: 2,
+      tone: "info",
+      tag: "Your week",
+      proj: s.brief.proj ?? state.projects[0]?.id ?? "",
+      tab: "overview",
+      projName: null,
+      title: s.brief.summary,
+      run: s.brief,
+      agentName: agent?.name ?? s.brief.agentId,
+    });
+  }
+
   for (const run of s.flags.slice(0, 1)) {
     const agent = state.agents.find((a) => a.id === run.agentId);
     blocks.push({
@@ -307,9 +329,9 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
       span: 1,
       tone: "warn",
       tag: "Agent flag",
-      proj: run.proj,
+      proj: run.proj ?? "",
       tab: run.tab,
-      projName: short(run.proj),
+      projName: run.proj ? short(run.proj) : null,
       title: run.summary,
       run,
       agentName: agent?.name ?? run.agentId,

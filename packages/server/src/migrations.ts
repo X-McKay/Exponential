@@ -266,6 +266,69 @@ const MIGRATIONS: readonly string[] = [
   DROP TABLE agents;
   ALTER TABLE agents_v2 RENAME TO agents;
   `,
+  // Closing the loop: agents carry extra instructions (prompt) and may run on
+  // a weekly schedule; prompt changes are recorded as versions; standing rules
+  // are facts a person writes; runs and proposals may be workspace-scoped
+  // (no project), and a proposal remembers the rule that produced it.
+  `
+  CREATE TABLE agents_v3 (
+    id TEXT PRIMARY KEY, sort INTEGER NOT NULL, name TEXT NOT NULL, grad TEXT NOT NULL, purpose TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('deck','comms','ideation','audit','chat','rules','brief','tuner','scout')),
+    model TEXT, owner TEXT NOT NULL, caps TEXT NOT NULL,
+    schedule TEXT CHECK (schedule IS NULL OR schedule IN ('nightly','weekly')),
+    prompt TEXT
+  );
+  INSERT INTO agents_v3 (id, sort, name, grad, purpose, kind, model, owner, caps, schedule) SELECT id, sort, name, grad, purpose, kind, model, owner, caps, schedule FROM agents;
+  DROP TABLE agents;
+  ALTER TABLE agents_v3 RENAME TO agents;
+  CREATE TABLE prompt_versions (
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    version TEXT NOT NULL,
+    prompt TEXT,
+    at TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('person','tuner')),
+    PRIMARY KEY (agent_id, at)
+  );
+  CREATE TABLE rules (
+    id TEXT PRIMARY KEY,
+    text TEXT NOT NULL,
+    project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    auto INTEGER NOT NULL DEFAULT 0,
+    owner TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    sort INTEGER NOT NULL
+  );
+  CREATE TABLE agent_runs_v2 (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    tab TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('queued','working','done','attention','failed')),
+    started_at TEXT NOT NULL, finished_at TEXT, instruction TEXT, summary TEXT NOT NULL, output TEXT NOT NULL, model TEXT, error TEXT,
+    prompt_version TEXT, latency_ms INTEGER, prompt_tokens INTEGER, completion_tokens INTEGER, benchmark TEXT, rating INTEGER, rating_note TEXT, context TEXT
+  );
+  INSERT INTO agent_runs_v2 SELECT id, agent_id, project_id, tab, state, started_at, finished_at, instruction, summary, output, model, error, prompt_version, latency_ms, prompt_tokens, completion_tokens, benchmark, rating, rating_note, context FROM agent_runs;
+  DROP TABLE agent_runs;
+  ALTER TABLE agent_runs_v2 RENAME TO agent_runs;
+  CREATE INDEX agent_runs_by_start ON agent_runs(started_at);
+  CREATE TABLE proposals_v2 (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL,
+    project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    rule_id TEXT,
+    action TEXT NOT NULL,
+    rationale TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('pending','accepted','dismissed')),
+    created_at TEXT NOT NULL,
+    decided_at TEXT
+  );
+  INSERT INTO proposals_v2 (id, run_id, agent_id, project_id, action, rationale, state, created_at, decided_at) SELECT id, run_id, agent_id, project_id, action, rationale, state, created_at, decided_at FROM proposals;
+  DROP TABLE proposals;
+  ALTER TABLE proposals_v2 RENAME TO proposals;
+  CREATE INDEX proposals_by_state ON proposals(state, created_at);
+  `,
 ];
 
 export const migrate = (db: Database): void => {

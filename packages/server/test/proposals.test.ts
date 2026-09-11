@@ -31,7 +31,7 @@ const reply = JSON.stringify({
 const fake: Llm = {
   model: () => Promise.resolve("fake"),
   chat: () => Promise.resolve({ content: reply, model: "fake", usage: null, truncated: false }),
-  describe: () => ({ baseUrl: "http://fake", model: "fake" }),
+  describe: () => ({ baseUrl: "http://fake", model: "fake", models: ["fake"], judgeModel: null }),
 };
 
 const appWith = (): TestApp => {

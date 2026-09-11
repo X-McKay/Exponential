@@ -26,7 +26,7 @@ const fakeLlm = (handlers: { agent?: (m: ChatMessage[]) => string; judge?: (m: C
     if (!pick) return Promise.reject(new Error("no handler"));
     return Promise.resolve({ content: pick(messages), model: "fake", usage: { prompt: 1200, completion: 300 }, truncated: false });
   },
-  describe: () => ({ baseUrl: "http://fake", model: "fake" }),
+  describe: () => ({ baseUrl: "http://fake", model: "fake", models: ["fake"], judgeModel: null }),
 });
 
 const AUDIT_REPLY = JSON.stringify({

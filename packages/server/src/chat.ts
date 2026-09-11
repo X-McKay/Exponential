@@ -24,10 +24,11 @@ import {
   releaseState,
   tierOf,
 } from "@valueflow/domain";
-import type { AgentRun, AppState, Calendar, ProjectTab, Proposal } from "@valueflow/domain";
+import type { Agent, AgentRun, AppState, Calendar, ProjectTab, Proposal } from "@valueflow/domain";
 import { ProposalActionSchema } from "@valueflow/shared";
 import type { ChatInput } from "@valueflow/shared";
-import { PROPOSAL_SHAPES, clip, projectContext, promptVersion } from "./agents.ts";
+import { clip, projectContext } from "./agents.ts";
+import { promptVersion, shapesWith } from "./prompts.ts";
 import { ruleScores } from "./evals.ts";
 import { extractJson } from "./llm.ts";
 import type { ChatMessage, Llm } from "./llm.ts";
@@ -85,7 +86,7 @@ const ANSWER_SCHEMA = {
           required: ["label", "proj", "tab"],
         },
       },
-      proposals: { type: "array", maxItems: 4, items: { anyOf: PROPOSAL_SHAPES.map((s) => ({ ...s, properties: { ...s.properties, proj: { type: "string", description: "project id the change applies to" } }, required: [...s.required, "proj"] })) } },
+      proposals: { type: "array", maxItems: 4, items: { anyOf: shapesWith("proj", "project id the change applies to") } },
     },
     required: ["answer", "links", "proposals"],
   },
@@ -101,7 +102,7 @@ export interface ChatReply {
 
 const isTab = (s: unknown): s is ProjectTab => (PROJECT_TABS as readonly string[]).includes(String(s));
 
-export const buildChatMessages = (state: AppState, cal: Calendar, input: ChatInput): ChatMessage[] => {
+export const buildChatMessages = (state: AppState, cal: Calendar, input: ChatInput, ask: Pick<Agent, "prompt"> = { prompt: null }): ChatMessage[] => {
   const focus = input.proj ? state.projects.find((p) => p.id === input.proj) : undefined;
   const briefing = [workspaceBriefing(state, cal), focus ? `\n\n# The project the user is looking at, in full\n${projectContext(state, focus, cal)}` : ""].join("");
   return [
@@ -119,6 +120,7 @@ export const buildChatMessages = (state: AppState, cal: Calendar, input: ChatInp
         '  {"type":"targets","proj":"<project id>","fte":30,"time":50,"rationale":"…"}',
         "Never propose a status the item already has. Proposals are applied only when a person accepts them.",
         'Reply with a JSON object: {"answer": string, "links": [...], "proposals": [...]}.',
+        ...(ask.prompt ? [`\nAdditional instructions from the workspace:\n${ask.prompt}`] : []),
         `\n${briefing}`,
       ].join("\n"),
     },
@@ -132,9 +134,9 @@ export const askWorkspace = async (db: Database, llm: Llm, input: ChatInput, now
   const ask = state.agents.find((a) => a.kind === "chat");
   if (!ask) throw new NotFound("no conversational agent is installed");
   const question = input.messages[input.messages.length - 1]?.content ?? "";
-  const messages = buildChatMessages(state, cal, input);
+  const messages = buildChatMessages(state, cal, input, ask);
   const started = Date.now();
-  const focusProj = input.proj && state.projects.some((p) => p.id === input.proj) ? input.proj : (state.projects[0]?.id ?? "");
+  const focusProj = input.proj && state.projects.some((p) => p.id === input.proj) ? input.proj : null;
   const run: AgentRun = {
     id: nextRunId(state.runs),
     agentId: ask.id,
@@ -148,7 +150,7 @@ export const askWorkspace = async (db: Database, llm: Llm, input: ChatInput, now
     output: "",
     model: null,
     error: null,
-    promptVersion: promptVersion("chat"),
+    promptVersion: promptVersion("chat", ask.prompt),
     latencyMs: null,
     promptTokens: null,
     completionTokens: null,
@@ -158,7 +160,7 @@ export const askWorkspace = async (db: Database, llm: Llm, input: ChatInput, now
   };
   insertRun(db, run, messages[0]?.content ?? "");
   try {
-    const res = await llm.chat(messages, { jsonSchema: ANSWER_SCHEMA, maxTokens: 2000, temperature: 0.2 });
+    const res = await llm.chat(messages, { jsonSchema: ANSWER_SCHEMA, maxTokens: 2000, temperature: 0.2, model: ask.model });
     const raw = extractJson(res.content);
     const o = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
     const answer = typeof o.answer === "string" ? o.answer.trim() : "";
@@ -190,9 +192,10 @@ export const askWorkspace = async (db: Database, llm: Llm, input: ChatInput, now
       const parsed = ProposalActionSchema.safeParse(rest);
       if (!project || !parsed.success) continue;
       const a = parsed.data;
+      if (a.type === "agent_prompt" || a.type === "agent_model") continue;
       if (a.type === "governance_status" && !project.governance.some((g) => g.id === a.gid && g.status !== a.status)) continue;
       if (a.type === "milestone_status" && !project.milestones.some((m) => m.id === a.mid && m.status !== a.status)) continue;
-      const proposal: Proposal = { id: nextProposalId(existing), runId: run.id, agentId: ask.id, proj: project.id, action: a, rationale: typeof rationale === "string" ? rationale.slice(0, 400) : "", state: "pending", createdAt: finished.finishedAt ?? now.toISOString(), decidedAt: null };
+      const proposal: Proposal = { id: nextProposalId(existing), runId: run.id, agentId: ask.id, proj: project.id, ruleId: null, action: a, rationale: typeof rationale === "string" ? rationale.slice(0, 400) : "", state: "pending", createdAt: finished.finishedAt ?? now.toISOString(), decidedAt: null };
       insertProposal(db, proposal);
       existing = [...existing, proposal];
       proposals.push(proposal);

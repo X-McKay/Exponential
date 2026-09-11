@@ -1,6 +1,6 @@
 // ================= typed API client =================
 
-import type { Agent, AgentRun, CalendarEvent, DevFacts, GovernanceItem, ImpactPair, Metric, MetricReading, Milestone, Project, ProjectTab, Proposal, Release, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
+import type { Agent, AgentRun, CalendarEvent, DevFacts, GovernanceItem, ImpactPair, Metric, MetricReading, Milestone, Project, ProjectTab, Proposal, Release, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import type {
   AgentsInput,
@@ -14,7 +14,9 @@ import type {
   ReleaseInput,
   ChatInput,
   RateRunInput,
+  RuleInput,
   RunAgentInput,
+  ScoutInput,
   SetupCreateInput,
   TargetsInput,
   WorkspaceInput,
@@ -51,6 +53,14 @@ const request = async <T>(method: string, path: string, body?: unknown): Promise
 
 type Ok = { ok: true };
 
+export interface JobStatus {
+  running: boolean;
+  kind: "benchmark" | "scout" | null;
+  done: number;
+  total: number;
+  startedAt: string | null;
+}
+
 export const api = {
   state: () => request<import("@valueflow/domain").AppState>("GET", routes.state()),
   setWorkspace: (body: WorkspaceInput) => request<Workspace>("PUT", routes.workspace(), body),
@@ -81,8 +91,14 @@ export const api = {
   chat: (body: ChatInput) => request<{ answer: string; links: { label: string; proj: string; tab: ProjectTab }[]; proposals: Proposal[]; runId: string; model: string }>("POST", routes.chat(), body),
   rateRun: (id: string, body: RateRunInput) => request<AgentRun>("POST", routes.runRate(id), body),
   judgeRun: (id: string) => request<RunScore[]>("POST", routes.runJudge(id)),
-  benchmark: (agentId?: string) => request<{ running: boolean; done: number; total: number }>("POST", routes.benchmark(), agentId ? { agentId } : {}),
-  benchmarkStatus: () => request<{ running: boolean; done: number; total: number; startedAt: string | null }>("GET", routes.benchmark()),
+  benchmark: (agentId?: string) => request<JobStatus>("POST", routes.benchmark(), agentId ? { agentId } : {}),
+  benchmarkStatus: () => request<JobStatus>("GET", routes.benchmark()),
+  scout: (body: ScoutInput) => request<JobStatus>("POST", routes.scout(), body),
+  setAgentPrompt: (aid: string, prompt: string | null) => request<Agent>("POST", routes.agentPrompt(aid), { prompt }),
+  rules: () => request<Rule[]>("GET", routes.rules()),
+  createRule: (body: RuleInput) => request<Rule>("POST", routes.rules(), body),
+  updateRule: (id: string, body: RuleInput) => request<Rule>("PUT", routes.rule(id), body),
+  deleteRule: (id: string) => request<Ok>("DELETE", routes.rule(id)),
   setupAnalyze: (form: FormData) => request<SetupDraft>("POST", routes.setup(), form),
   setupRefine: (id: string, feedback: string) => request<SetupDraft>("POST", routes.setupRefine(id), { feedback }),
   setupCreate: (id: string, body: SetupCreateInput) => request<Project>("POST", routes.setupCreate(id), body),

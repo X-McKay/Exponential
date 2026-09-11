@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
-import { AGENTS, ASK_AGENT, CALENDAR, DEV, PROJECTS, RELEASES, RUNS, SEED_ASOF, WORKSPACE, addMonths, isMeasurable, monthsBetween, seedEvents, ymOf } from "@valueflow/domain";
-import { insertRun, recordEvent, replaceDevFacts, setAgents } from "./repo.ts";
+import { AGENTS, CALENDAR, DEV, PROJECTS, RELEASES, RULES, RUNS, SEED_ASOF, WORKSPACE, addMonths, isMeasurable, monthsBetween, seedEvents, ymOf } from "@valueflow/domain";
+import { insertRule, insertRun, recordEvent, replaceDevFacts, setAgents } from "./repo.ts";
 import type { AppState, Metric } from "@valueflow/domain";
 
 /** The instant the fixtures describe. Seeding at another time shifts every planned month and timestamp by the same offset. */
@@ -39,7 +39,7 @@ export const trajectory = (metric: Pick<Metric, "current">, seed: number, n = RE
 export const isSeeded = (db: Database): boolean =>
   (db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM projects").get()?.n ?? 0) > 0;
 
-export const fixtureState = (asOf = SEED_ASOF): AppState => ({ asOf, syncSource: null, workspace: WORKSPACE, projects: PROJECTS, releases: RELEASES, dev: DEV(asOf), agents: AGENTS, runs: RUNS(asOf), llm: null, proposals: [], scores: [], events: seedEvents(asOf), calendar: CALENDAR(asOf) });
+export const fixtureState = (asOf = SEED_ASOF): AppState => ({ asOf, syncSource: null, workspace: WORKSPACE, projects: PROJECTS, releases: RELEASES, dev: DEV(asOf), agents: AGENTS, runs: RUNS(asOf), llm: null, proposals: [], scores: [], rules: RULES(asOf), promptVersions: [], events: seedEvents(asOf), calendar: CALENDAR(asOf) });
 
 export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_NOW): void => {
   // Planned months are relative to the fixtures' own "today"; keep them the same distance from `now`.
@@ -104,36 +104,28 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
       if (d) replaceDevFacts(db, p.id, d, d.lastSync ?? { source: "sample", startedAt: now.toISOString(), finishedAt: now.toISOString(), ok: true, message: "seeded" });
     }
     setAgents(db, state.agents);
+    for (const r of state.rules) insertRule(db, r);
     for (const r of state.runs) insertRun(db, r);
     for (const e of state.events) recordEvent(db, e);
     for (const c of state.calendar) q.calendar.run(c.id, c.date, c.proj, c.tab, c.text, c.sub);
   })();
 };
 
-/** Install the default agent definitions when none exist (fresh or migrated databases). */
-export const ensureAgents = (db: Database): boolean => {
+/** Install the default agent definitions when none exist, and add built-in kinds older databases lack; returns the ids added. */
+export const ensureAgents = (db: Database): string[] => {
   if ((db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM agents").get()?.n ?? 0) === 0) {
     setAgents(db, AGENTS);
-    return true;
+    return AGENTS.map((a) => a.id);
   }
-  // The conversational agent is built in: add it to older databases without touching the rest.
-  if ((db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM agents WHERE kind = 'chat'").get()?.n ?? 0) === 0) {
+  const have = new Set(db.query<{ kind: string }, []>("SELECT kind FROM agents").all().map((r) => r.kind));
+  const added: string[] = [];
+  for (const a of AGENTS) {
+    if (have.has(a.kind) || !["chat", "rules", "brief", "tuner", "scout"].includes(a.kind)) continue;
     const sort = db.query<{ s: number }, []>("SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM agents").get()?.s ?? 0;
-    db.query("INSERT INTO agents (id, sort, name, grad, purpose, kind, model, owner, caps, schedule) VALUES (?,?,?,?,?,?,?,?,?,?)").run(
-      ASK_AGENT.id,
-      sort,
-      ASK_AGENT.name,
-      ASK_AGENT.grad,
-      ASK_AGENT.purpose,
-      ASK_AGENT.kind,
-      ASK_AGENT.model,
-      ASK_AGENT.owner,
-      JSON.stringify(ASK_AGENT.caps),
-      ASK_AGENT.schedule,
-    );
-    return true;
+    db.query("INSERT INTO agents (id, sort, name, grad, purpose, kind, model, owner, caps, schedule, prompt) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run(a.id, sort, a.name, a.grad, a.purpose, a.kind, a.model, a.owner, JSON.stringify(a.caps), a.schedule, a.prompt);
+    added.push(a.id);
   }
-  return false;
+  return added;
 };
 
 /** Seed only when empty; returns whether seeding happened. */

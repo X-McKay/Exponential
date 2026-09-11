@@ -1,6 +1,7 @@
 import { join } from "node:path";
-import { runDue } from "./agents.ts";
 import { createApp } from "./app.ts";
+import { webhookDelivery } from "./brief.ts";
+import { runDue } from "./runner.ts";
 import { sourceFromEnv } from "./connectors/index.ts";
 import { llmFromEnv } from "./llm.ts";
 import { openDb } from "./db.ts";
@@ -19,21 +20,27 @@ const now = () => pinned ?? new Date();
 
 const db = openDb();
 if (ensureSeeded(db, now())) console.log(`seeded database with sample data as of ${now().toISOString().slice(0, 10)}`);
-if (ensureAgents(db)) console.log("installed the default workspace agents");
+const added = ensureAgents(db);
+if (added.length) console.log(`installed workspace agents: ${added.join(", ")}`);
 
 /** `SYNC_SOURCE=sample|github|none`; `SYNC_INTERVAL_MIN=30` re-syncs every project on a timer. */
 const source = sourceFromEnv(process.env);
 /** `LLM_BASE_URL` (OpenAI-compatible) enables agent runs; `AGENT_SCHEDULE=off` disables nightly runs. */
 const llm = llmFromEnv(process.env);
-const app = createApp(db, { now, source, llm, autoJudge: process.env.EVAL_JUDGE !== "off" });
+/** `BRIEF_WEBHOOK_URL` also posts the weekly brief as JSON ({ text, title, summary, body }) to Slack, Teams, Zapier, or your own endpoint. */
+const deliverBrief = process.env.BRIEF_WEBHOOK_URL ? webhookDelivery(process.env.BRIEF_WEBHOOK_URL) : null;
+const app = createApp(db, { now, source, llm, autoJudge: process.env.EVAL_JUDGE !== "off", deliverBrief });
 if (llm) {
   llm
     .model()
-    .then((m) => console.log(`agents run against ${m} at ${llm.describe().baseUrl}`))
+    .then((m) => {
+      const d = llm.describe();
+      console.log(`agents run against ${m} at ${d.baseUrl}${d.models.length > 1 ? `; scout candidates: ${d.models.filter((x) => x !== m).join(", ")}` : ""}${d.judgeModel ? `; judge: ${d.judgeModel}` : ""}`);
+    })
     .catch((e: unknown) => console.error("LLM unreachable:", e instanceof Error ? e.message : e));
   if (process.env.AGENT_SCHEDULE !== "off") {
     const tick = () =>
-      runDue(db, llm, now())
+      runDue(db, llm, now(), { deliverBrief })
         .then((runs) => {
           if (runs.length) console.log(`scheduled agents: ${runs.length} run${runs.length === 1 ? "" : "s"}, ${runs.filter((r) => r.state === "failed").length} failed`);
         })

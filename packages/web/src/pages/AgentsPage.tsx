@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { AGENT_KIND_LABEL, AGENT_STATUS_LABEL, JUDGE_DIMENSIONS, RUN_STATE_ICON, agentScorecard, agentStats, pendingProposals, relTime, runsOf } from "@valueflow/domain";
-import type { Agent, AgentRun, AgentScorecard, LlmInfo, Project, ProjectTab, Proposal, RunScore } from "@valueflow/domain";
-import type { RunAgentInput } from "@valueflow/shared";
+import { AGENT_KIND_LABEL, AGENT_STATUS_LABEL, JUDGE_DIMENSIONS, PROJECT_KINDS, RUN_STATE_ICON, agentScorecard, agentStats, pendingProposals, promptVersion, relTime, runsOf } from "@valueflow/domain";
+import type { Agent, AgentRun, AgentScorecard, LlmInfo, Project, ProjectTab, PromptVersion, Proposal, Rule, RunScore } from "@valueflow/domain";
+import type { RuleInput, RunAgentInput } from "@valueflow/shared";
 import { RunAgentEditor, RunViewer } from "../editors/RunAgent.tsx";
+import { AgentQuality } from "../ui/AgentQuality.tsx";
 import { ProposalList } from "../ui/Proposals.tsx";
+import { RulesPanel } from "../ui/RulesPanel.tsx";
 import { Avatar, Caret, Chip, Kbd, Kpi, SectionCard, Tip, ghostBtn, reset } from "../ui/primitives.tsx";
 import { AGENT_STATUS, C, RUN_COLOR } from "../theme.ts";
 
@@ -36,8 +38,9 @@ const pct = (v: number | null): string => (v === null ? "—" : `${Math.round(v 
 const scoreColor = (v: number | null): string => (v === null ? C.dim : v >= 0.8 ? C.green : v >= 0.6 ? C.amber : C.red);
 
 /** One agent's measured quality: rules, judge, people, and the latest benchmark against the previous one. */
-function Scorecard({ agent, card, running, canBenchmark, onBenchmark }: { agent: Agent; card: AgentScorecard; running: boolean; canBenchmark: boolean; onBenchmark: (agentId: string) => void }) {
+function Scorecard({ agent, card, running, canBenchmark, open, onToggle, onBenchmark }: { agent: Agent; card: AgentScorecard; running: boolean; canBenchmark: boolean; open: boolean; onToggle: () => void; onBenchmark: (agentId: string) => void }) {
   const latest = card.benchmarks[0];
+  const benchmarkable = PROJECT_KINDS.includes(agent.kind) && agent.kind !== "rules";
   const previous = card.benchmarks[1];
   const delta = latest && previous && latest.overall !== null && previous.overall !== null ? latest.overall - previous.overall : null;
   const cell = (label: string, v: number | null, tip: string) => (
@@ -50,12 +53,15 @@ function Scorecard({ agent, card, running, canBenchmark, onBenchmark }: { agent:
   );
   return (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14, padding: "10px 0", borderTop: `1px solid ${C.line}` }}>
-      <span style={{ width: 96, flexShrink: 0 }}>
-        <span style={{ fontSize: 13, fontWeight: 500, color: C.text, display: "block" }}>{agent.name}</span>
-        <span style={{ fontSize: 11, color: C.dim }}>
-          {card.runs} run{card.runs === 1 ? "" : "s"} · {card.failed} failed
+      <button type="button" onClick={onToggle} className="vf-row" style={{ ...reset, width: 110, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, textAlign: "left" }}>
+        <Caret open={open} />
+        <span>
+          <span style={{ fontSize: 13, fontWeight: 500, color: C.text, display: "block" }}>{agent.name}</span>
+          <span style={{ fontSize: 11, color: C.dim }}>
+            {card.runs} run{card.runs === 1 ? "" : "s"} · {card.failed} failed
+          </span>
         </span>
-      </span>
+      </button>
       {cell("format", card.rules.format, "Rules: reply parsed with summary and body")}
       {cell("grounded", card.rules.grounding, "Rules: share of cited numbers and ids that exist in the briefing")}
       {cell("proposals ok", card.rules.proposalsValid, "Rules: share of proposals that were well-formed and pointed at real items")}
@@ -98,9 +104,11 @@ function Scorecard({ agent, card, running, canBenchmark, onBenchmark }: { agent:
         ) : (
           <span style={{ fontSize: 12, color: C.dim }}>no benchmark yet</span>
         )}
-        <button type="button" className="vf-ghost" disabled={running || !canBenchmark} onClick={() => onBenchmark(agent.id)} style={{ ...ghostBtn, height: 24, opacity: running || !canBenchmark ? 0.5 : 1 }}>
-          {running ? "Running…" : "Run benchmark"}
-        </button>
+        {benchmarkable && (
+          <button type="button" className="vf-ghost" disabled={running || !canBenchmark} onClick={() => onBenchmark(agent.id)} style={{ ...ghostBtn, height: 24, opacity: running || !canBenchmark ? 0.5 : 1 }}>
+            {running ? "Running…" : "Run benchmark"}
+          </button>
+        )}
       </span>
     </div>
   );
@@ -111,9 +119,12 @@ export function AgentsPage({
   runs,
   proposals,
   scores,
+  rules,
+  promptVersions,
   projects,
   asOf,
   llm,
+  userIni,
   currentProject,
   onOpen,
   onEdit,
@@ -122,14 +133,21 @@ export function AgentsPage({
   onRate,
   onJudge,
   onBenchmark,
+  onScout,
+  onSetPrompt,
+  onSaveRule,
+  onDeleteRule,
 }: {
   agents: Agent[];
   runs: AgentRun[];
   proposals: Proposal[];
   scores: RunScore[];
+  rules: Rule[];
+  promptVersions: PromptVersion[];
   projects: Project[];
   asOf: string;
   llm: LlmInfo | null;
+  userIni: string;
   currentProject: string | null;
   onOpen: (id: string, tab: ProjectTab) => void;
   onEdit: () => void;
@@ -138,14 +156,26 @@ export function AgentsPage({
   onRate: (id: string, rating: 1 | -1 | null, note?: string) => void;
   onJudge: (id: string) => Promise<void>;
   onBenchmark: (agentId?: string) => Promise<void>;
+  onScout: (agentId?: string) => Promise<void>;
+  onSetPrompt: (agentId: string, prompt: string | null) => void;
+  onSaveRule: (rule: Rule | null, input: RuleInput) => void;
+  onDeleteRule: (id: string) => void;
 }) {
   const inbox = pendingProposals({ proposals });
   const [benchmarking, setBenchmarking] = useState<string | null>(null);
+  const [detail, setDetail] = useState<string | null>(null);
   const cards = new Map(agents.map((a) => [a.id, agentScorecard(a, runs, scores, proposals, asOf)]));
   const bench = (agentId?: string) => {
     setBenchmarking(agentId ?? "all");
     void onBenchmark(agentId).finally(() => setBenchmarking(null));
   };
+  const scout = (agentId?: string) => {
+    setBenchmarking(`scout:${agentId ?? "all"}`);
+    void onScout(agentId).finally(() => setBenchmarking(null));
+  };
+  const sentry = agents.find((a) => a.kind === "rules");
+  const coach = agents.find((a) => a.kind === "tuner");
+  const versionOf = (a: Agent) => (a.kind === "scout" ? null : promptVersion(a.kind, a.prompt));
   const [open, setOpen] = useState<string | null>(agents.find((a) => a.id === "audie")?.id ?? agents[0]?.id ?? null);
   const [running, setRunning] = useState<Agent | null>(null);
   const [viewing, setViewing] = useState<AgentRun | null>(null);
@@ -176,9 +206,23 @@ export function AgentsPage({
 
       {inbox.length > 0 && (
         <SectionCard title="Proposals awaiting a decision" pad="12px 14px">
-          <ProposalList proposals={inbox} state={{ projects, agents }} asOf={asOf} showProject onDecide={onDecide} />
+          <ProposalList proposals={inbox} state={{ projects, agents, rules }} asOf={asOf} showProject onDecide={onDecide} />
         </SectionCard>
       )}
+
+      <RulesPanel
+        rules={rules}
+        proposals={proposals}
+        projects={projects}
+        defaultOwner={userIni}
+        canRun={llm !== null && sentry !== undefined}
+        onSave={onSaveRule}
+        onDelete={onDeleteRule}
+        onRunNow={() => {
+          if (!sentry) return;
+          for (const p of projects) if (rules.some((r) => r.enabled && (r.proj === null || r.proj === p.id))) onRun({ agentId: sentry.id, proj: p.id });
+        }}
+      />
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
         <span style={{ fontSize: 12, color: C.dim, flex: 1 }}>
@@ -244,6 +288,11 @@ export function AgentsPage({
                       <Chip key={c}>{c}</Chip>
                     ))}
                     {a.schedule && <Chip tone="accent">runs {a.schedule}</Chip>}
+                    {a.prompt && (
+                      <Tip label={a.prompt}>
+                        <Chip>custom instructions</Chip>
+                      </Tip>
+                    )}
                     <span style={{ flex: 1 }} />
                     <span style={{ fontSize: 11, color: C.dim }}>Owner</span>
                     <Avatar ini={a.owner} size={18} />
@@ -294,12 +343,12 @@ export function AgentsPage({
                           tabIndex={-1}
                           onClick={(e) => {
                             e.stopPropagation();
-                            onOpen(r.proj, r.tab);
+                            if (r.proj) onOpen(r.proj, r.tab);
                           }}
                           className="vf-link"
                           style={{ fontSize: 11, color: C.dim, flexShrink: 0 }}
                         >
-                          {shortProjectName(byId.get(r.proj))}
+                          {r.proj ? shortProjectName(byId.get(r.proj)) : "workspace"}
                         </span>
                         <span style={{ fontSize: 11, color: C.dim, width: 52, textAlign: "right", flexShrink: 0 }}>{relTime(r.startedAt, asOf)}</span>
                       </button>
@@ -317,7 +366,12 @@ export function AgentsPage({
         pad="0 14px 4px"
         right={
           <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 11, color: C.dim }}>30-day window · rules on every run · judge on finished runs · benchmark on a fixed case set</span>
+            <span style={{ fontSize: 11, color: C.dim }}>30-day window · rules on every run · judge on finished runs · benchmark on a fixed case set · expand an agent for prompt versions and models</span>
+            <Tip label={llm && llm.models.length >= 2 ? `Benchmark ${llm.models.length} models on every agent` : "Add candidate models with LLM_MODELS to compare"}>
+              <button type="button" className="vf-ghost" disabled={benchmarking !== null || !llm || llm.models.length < 2} onClick={() => scout()} style={{ ...ghostBtn, height: 24, opacity: benchmarking !== null || !llm || llm.models.length < 2 ? 0.5 : 1 }}>
+                {benchmarking === "scout:all" ? "Scouting…" : "Scout models"}
+              </button>
+            </Tip>
             <button type="button" className="vf-ghost" disabled={benchmarking !== null || !llm} onClick={() => bench()} style={{ ...ghostBtn, height: 24, color: C.indigoHi, opacity: benchmarking !== null || !llm ? 0.5 : 1 }}>
               {benchmarking === "all" ? "Running all…" : "Run full benchmark"}
             </button>
@@ -326,18 +380,40 @@ export function AgentsPage({
       >
         {agents.map((a) => {
           const card = cards.get(a.id);
-          return card ? <Scorecard key={a.id} agent={a} card={card} running={benchmarking === a.id || benchmarking === "all"} canBenchmark={llm !== null} onBenchmark={bench} /> : null;
+          if (!card) return null;
+          const expanded = detail === a.id;
+          return (
+            <div key={a.id}>
+              <Scorecard agent={a} card={card} running={benchmarking === a.id || benchmarking === "all" || benchmarking === `scout:${a.id}` || benchmarking === "scout:all"} canBenchmark={llm !== null} open={expanded} onToggle={() => setDetail(expanded ? null : a.id)} onBenchmark={bench} />
+              {expanded && (
+                <AgentQuality
+                  agent={a}
+                  currentVersion={versionOf(a)}
+                  runs={runs}
+                  scores={scores}
+                  versions={promptVersions}
+                  llm={llm}
+                  busy={benchmarking !== null}
+                  onSetPrompt={(prompt) => onSetPrompt(a.id, prompt)}
+                  onTune={() => {
+                    if (coach) onRun({ agentId: coach.id, target: a.id });
+                  }}
+                  onScout={() => scout(a.id)}
+                />
+              )}
+            </div>
+          );
         })}
       </SectionCard>
 
-      <div style={{ fontSize: 12, color: C.dim, lineHeight: 1.6, maxWidth: 680 }}>
-        Every run briefs the agent with the project's live state — targets, gates, governance, releases, synced development activity, and recent events — and
-        stores the result. Runs flagged for attention surface on Glance. Audie runs nightly when a model is configured.
+      <div style={{ fontSize: 12, color: C.dim, lineHeight: 1.6, maxWidth: 720 }}>
+        Every run briefs the agent with live state and stores the result; runs flagged for attention surface on Glance. Audie and Sentry run nightly. Monday writes the weekly brief, Coach proposes prompt changes from measured runs, and Scout compares candidate models, all weekly, all as proposals you decide on.
       </div>
 
       {running && (
         <RunAgentEditor
           agent={running}
+          agents={agents}
           projects={projects}
           defaultProject={currentProject}
           onRun={(input) => {
@@ -351,11 +427,11 @@ export function AgentsPage({
         <RunViewer
           run={runs.find((r) => r.id === viewing.id) ?? viewing}
           agent={viewingAgent}
-          project={byId.get(viewing.proj)}
+          project={viewing.proj ? byId.get(viewing.proj) : undefined}
           asOf={asOf}
           proposals={proposals.filter((p) => p.runId === viewing.id)}
           scores={scores.filter((s) => s.runId === viewing.id)}
-          state={{ projects, agents }}
+          state={{ projects, agents, rules }}
           canJudge={llm !== null}
           onDecide={onDecide}
           onRate={onRate}

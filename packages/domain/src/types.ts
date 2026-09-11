@@ -199,13 +199,15 @@ export interface DevFacts {
 
 // ---- agents -------------------------------------------------------------
 
-export type AgentKind = "deck" | "comms" | "ideation" | "audit" | "chat";
-export const AGENT_KINDS: readonly AgentKind[] = ["deck", "comms", "ideation", "audit", "chat"];
+export type AgentKind = "deck" | "comms" | "ideation" | "audit" | "chat" | "rules" | "brief" | "tuner" | "scout";
+export const AGENT_KINDS: readonly AgentKind[] = ["deck", "comms", "ideation", "audit", "chat", "rules", "brief", "tuner", "scout"];
+/** Kinds briefed with one project at a time; the rest work over the whole workspace. */
+export const PROJECT_KINDS: readonly AgentKind[] = ["deck", "comms", "ideation", "audit", "chat", "rules"];
 /** Derived from runs: working while a run is in flight, scheduled when a schedule is set, otherwise idle. */
 export type AgentStatus = "working" | "idle" | "scheduled";
 export type RunState = "queued" | "working" | "done" | "attention" | "failed";
 export const RUN_STATES: readonly RunState[] = ["queued", "working", "done", "attention", "failed"];
-export type AgentSchedule = "nightly" | null;
+export type AgentSchedule = "nightly" | "weekly" | null;
 
 /** What an agent is; everything about how it has been doing derives from its runs. */
 export interface Agent {
@@ -219,13 +221,37 @@ export interface Agent {
   owner: string;
   caps: string[];
   schedule: AgentSchedule;
+  /** Extra instructions layered on the kind's built-in role; null means the built-in prompt alone. */
+  prompt: string | null;
 }
 
-/** One execution of an agent against one project. */
+/** A prompt a person or the tuner set for an agent; the version is the hash runs carry. */
+export interface PromptVersion {
+  agentId: string;
+  version: string;
+  prompt: string | null;
+  at: string;
+  source: "person" | "tuner";
+}
+
+/** A standing rule in plain language; the rules agent checks it nightly and proposes what follows. */
+export interface Rule {
+  id: string;
+  text: string;
+  /** Project the rule is scoped to, or null for every project. */
+  proj: string | null;
+  enabled: boolean;
+  /** Apply this rule's proposals immediately instead of waiting for a decision. Earned, never default. */
+  auto: boolean;
+  owner: string;
+  createdAt: string;
+}
+
+/** One execution of an agent against one project, or the whole workspace when proj is null. */
 export interface AgentRun {
   id: string;
   agentId: string;
-  proj: string;
+  proj: string | null;
   tab: ProjectTab;
   state: RunState;
   startedAt: string;
@@ -273,6 +299,10 @@ export interface EvalCase {
 export interface LlmInfo {
   baseUrl: string;
   model: string | null;
+  /** Every model runs may use: the default plus candidates (LLM_MODELS), for the scout to compare. */
+  models: string[];
+  /** Model the judge uses when it differs from the default. */
+  judgeModel: string | null;
 }
 
 // ---- project setup drafts ---------------------------------------------------
@@ -354,7 +384,9 @@ export type ProposalAction =
   | { type: "milestone_status"; mid: string; status: MilestoneStatus }
   | { type: "governance_item"; cat: string; name: string; status: GovStatus; owner: string; detail: string }
   | { type: "calendar_event"; date: string; tab: ProjectTab; text: string; sub: string | null }
-  | { type: "targets"; fte: number; time: number };
+  | { type: "targets"; fte: number; time: number }
+  | { type: "agent_prompt"; agentId: string; prompt: string | null }
+  | { type: "agent_model"; agentId: string; model: string | null };
 
 export type ProposalState = "pending" | "accepted" | "dismissed";
 
@@ -362,7 +394,10 @@ export interface Proposal {
   id: string;
   runId: string;
   agentId: string;
-  proj: string;
+  /** Project the change applies to; null for workspace-level changes (an agent's prompt or model). */
+  proj: string | null;
+  /** The standing rule that produced it, when a rule did. */
+  ruleId: string | null;
   action: ProposalAction;
   rationale: string;
   state: ProposalState;
@@ -432,6 +467,9 @@ export interface AppState {
   proposals: Proposal[];
   /** Scores for the runs in `runs`. */
   scores: RunScore[];
+  rules: Rule[];
+  /** Prompt changes people and the tuner made, newest first. */
+  promptVersions: PromptVersion[];
   /** Newest first, trailing EVENT_WINDOW_DAYS. */
   events: Event[];
   calendar: CalendarEvent[];

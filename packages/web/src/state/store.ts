@@ -5,8 +5,8 @@
 // reloads from the server and surfaces the error.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Agent, AgentRun, AppState, CalendarEvent, GovernanceItem, ImpactPair, Milestone, Project, Proposal, Release, Workspace } from "@valueflow/domain";
-import type { ProjectInput, RunAgentInput } from "@valueflow/shared";
+import type { Agent, AgentRun, AppState, CalendarEvent, GovernanceItem, ImpactPair, Milestone, Project, Proposal, Release, Rule, Workspace } from "@valueflow/domain";
+import type { ProjectInput, RuleInput, RunAgentInput } from "@valueflow/shared";
 import { api } from "../api/client.ts";
 
 export interface Store {
@@ -37,6 +37,12 @@ export interface Store {
   judgeRun: (id: string) => Promise<void>;
   /** Start a benchmark; resolves when the server has finished it (polls). */
   runBenchmark: (agentId?: string) => Promise<void>;
+  /** Benchmark candidate models against the current one; resolves when the scout has reported (polls). */
+  runScout: (agentId?: string) => Promise<void>;
+  /** Set an agent's extra instructions; records a prompt version. */
+  setAgentPrompt: (agentId: string, prompt: string | null) => Promise<void>;
+  saveRule: (rule: Rule | null, input: RuleInput) => Promise<void>;
+  deleteRule: (id: string) => Promise<void>;
   saveCalendar: (ev: CalendarEvent, isNew: boolean) => Promise<void>;
   deleteCalendar: (id: string) => Promise<void>;
   saveWorkspace: (w: Workspace) => Promise<void>;
@@ -235,7 +241,7 @@ export const useStore = (): Store => {
       const placeholder: AgentRun = {
         id: `pending-${Date.now()}`,
         agentId: input.agentId,
-        proj: input.proj,
+        proj: input.proj ?? null,
         tab: input.tab ?? "value",
         state: "working",
         startedAt: new Date().toISOString(),
@@ -315,21 +321,71 @@ export const useStore = (): Store => {
     [fail],
   );
 
+  const awaitJob = useCallback(async () => {
+    for (let i = 0; i < 1200; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const st = await api.benchmarkStatus();
+      if (!st.running) break;
+      if (i % 5 === 4) void reload();
+    }
+    await reload();
+  }, [reload]);
   const runBenchmark = useCallback(
     async (agentId?: string) => {
       try {
         await api.benchmark(agentId);
-        for (let i = 0; i < 600; i++) {
-          await new Promise((r) => setTimeout(r, 3000));
-          const st = await api.benchmarkStatus();
-          if (!st.running) break;
-        }
+        await awaitJob();
+      } catch (e) {
+        fail(e);
+      }
+    },
+    [awaitJob, fail],
+  );
+  const runScout = useCallback(
+    async (agentId?: string) => {
+      try {
+        await api.scout(agentId ? { agentId } : {});
+        await awaitJob();
+      } catch (e) {
+        fail(e);
+      }
+    },
+    [awaitJob, fail],
+  );
+  const setAgentPrompt = useCallback(
+    async (agentId: string, prompt: string | null) => {
+      setState((s) => (s ? { ...s, agents: s.agents.map((a) => (a.id === agentId ? { ...a, prompt } : a)) } : s));
+      try {
+        await api.setAgentPrompt(agentId, prompt);
         await reload();
       } catch (e) {
         fail(e);
       }
     },
     [fail, reload],
+  );
+  const saveRule = useCallback(
+    async (rule: Rule | null, input: RuleInput) => {
+      if (rule) setState((s) => (s ? { ...s, rules: s.rules.map((r) => (r.id === rule.id ? { ...r, ...input } : r)) } : s));
+      try {
+        if (rule) await api.updateRule(rule.id, input);
+        else {
+          const created = await api.createRule(input);
+          setState((s) => (s ? { ...s, rules: [...s.rules, created] } : s));
+        }
+      } catch (e) {
+        fail(e);
+      }
+    },
+    [fail],
+  );
+  const deleteRule = useCallback(
+    (id: string) =>
+      commit(
+        (s) => ({ ...s, rules: s.rules.filter((r) => r.id !== id) }),
+        () => api.deleteRule(id),
+      ),
+    [commit],
   );
 
   const saveCalendar = useCallback(
@@ -383,6 +439,10 @@ export const useStore = (): Store => {
       rateRun,
       judgeRun,
       runBenchmark,
+      runScout,
+      setAgentPrompt,
+      saveRule,
+      deleteRule,
       saveCalendar,
       deleteCalendar,
       saveWorkspace,
@@ -410,6 +470,10 @@ export const useStore = (): Store => {
       rateRun,
       judgeRun,
       runBenchmark,
+      runScout,
+      setAgentPrompt,
+      saveRule,
+      deleteRule,
       saveCalendar,
       deleteCalendar,
       saveWorkspace,
