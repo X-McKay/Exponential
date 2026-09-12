@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { createApp } from "./app.ts";
 import { webhookDelivery } from "./brief.ts";
 import { runDue } from "./runner.ts";
+import type { Skipped } from "./runner.ts";
 import { sourceFromEnv } from "./connectors/index.ts";
 import { llmFromEnv } from "./llm.ts";
 import { openDb } from "./db.ts";
@@ -40,12 +41,15 @@ if (llm) {
     })
     .catch((e: unknown) => console.error("LLM unreachable:", e instanceof Error ? e.message : e));
   if (process.env.AGENT_SCHEDULE !== "off") {
-    const tick = () =>
-      runDue(db, llm, now(), { deliverBrief })
+    const tick = () => {
+      const skipped: Skipped[] = [];
+      return runDue(db, llm, now(), { deliverBrief }, skipped)
         .then((runs) => {
           if (runs.length) console.log(`scheduled agents: ${runs.length} run${runs.length === 1 ? "" : "s"}, ${runs.filter((r) => r.state === "failed").length} failed`);
+          if (skipped.length) console.log(`scheduled agents: ${skipped.length} run${skipped.length === 1 ? "" : "s"} held back by budget (${skipped[0]?.reason})`);
         })
         .catch((e: unknown) => console.error("scheduled agents failed", e));
+    };
     setTimeout(tick, 60_000);
     setInterval(tick, 30 * 60_000);
   }

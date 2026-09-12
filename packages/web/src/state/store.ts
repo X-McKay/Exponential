@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { describeAction } from "@valueflow/domain";
-import type { Agent, AgentRun, AppState, CalendarEvent, GovernanceItem, ImpactPair, Milestone, Project, Proposal, Release, Rule, Workspace } from "@valueflow/domain";
+import type { Agent, AgentRun, AppState, Budget, CalendarEvent, GovernanceItem, ImpactPair, Milestone, Project, Proposal, Release, Rule, Workspace } from "@valueflow/domain";
 import type { ProjectInput, RuleInput, RunAgentInput } from "@valueflow/shared";
 import { api } from "../api/client.ts";
 import type { JobStatus } from "../api/client.ts";
@@ -60,6 +60,9 @@ export interface Store {
   markGlanceSeen: () => Promise<void>;
   /** Ask the curator for a fresh daily brief now. */
   curateGlance: () => Promise<void>;
+  /** The project's brief: written when missing or stale (once per visit), rewritten when forced. */
+  curateProject: (pid: string, force: boolean) => Promise<void>;
+  saveBudgets: (budgets: Budget[]) => Promise<void>;
   saveCalendar: (ev: CalendarEvent, isNew: boolean) => Promise<void>;
   deleteCalendar: (id: string) => Promise<void>;
   saveWorkspace: (w: Workspace) => Promise<void>;
@@ -103,6 +106,8 @@ export const useStore = (): Store => {
   const [live, setLive] = useState<Record<string, LiveRun>>({});
   const noticeSeq = useRef(0);
   const polling = useRef(false);
+  /** Projects whose brief this session already asked for, so an overview visit asks once. */
+  const askedBrief = useRef(new Set<string>());
   const pending = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const dismissNotice = useCallback((id: number) => setNotices((n) => n.filter((x) => x.id !== id)), []);
@@ -486,6 +491,32 @@ export const useStore = (): Store => {
       fail(e);
     }
   }, [fail, notify, reload]);
+  const curateProject = useCallback(
+    async (pid: string, force: boolean) => {
+      if (!force && askedBrief.current.has(pid)) return;
+      askedBrief.current.add(pid);
+      try {
+        const { run } = await api.projectBrief(pid, force);
+        if (!run) return;
+        if (run.state === "failed") setError(`${run.summary}: ${run.error ?? "unknown error"}`);
+        else if (force) notify(`Brief rewritten: ${run.summary}`, "good");
+        await reload();
+      } catch (e) {
+        // A quiet refresh that is refused (over budget, already writing) is not worth a toast; a click is.
+        if (force) fail(e);
+        else console.warn("project brief", e instanceof Error ? e.message : e);
+      }
+    },
+    [fail, notify, reload],
+  );
+  const saveBudgets = useCallback(
+    (budgets: Budget[]) =>
+      commit(
+        (s) => ({ ...s, budgets }),
+        () => api.setBudgets(budgets),
+      ),
+    [commit],
+  );
   const deleteRule = useCallback(
     (id: string) =>
       commit(
@@ -557,6 +588,8 @@ export const useStore = (): Store => {
       deleteRule,
       markGlanceSeen,
       curateGlance,
+      curateProject,
+      saveBudgets,
       saveCalendar,
       deleteCalendar,
       saveWorkspace,
@@ -595,6 +628,8 @@ export const useStore = (): Store => {
       deleteRule,
       markGlanceSeen,
       curateGlance,
+      curateProject,
+      saveBudgets,
       saveCalendar,
       deleteCalendar,
       saveWorkspace,

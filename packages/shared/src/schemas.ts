@@ -4,7 +4,7 @@
 // inferred types are used by the client so both sides share one contract.
 
 import { z } from "zod";
-import { AGENT_KINDS, GOV_STATUSES, MILESTONE_STATUSES, PROJECT_TABS, YEAR_MONTH } from "@valueflow/domain";
+import { AGENT_KINDS, BUDGET_SCOPES, GOV_STATUSES, MILESTONE_STATUSES, PROJECT_TABS, YEAR_MONTH } from "@valueflow/domain";
 
 const pct = z.number().finite().min(0).max(100);
 const id = z.string().trim().min(1).max(64);
@@ -181,6 +181,16 @@ export const RuleInputSchema = z.object({
 export type RuleInput = z.infer<typeof RuleInputSchema>;
 
 export const AgentPromptInputSchema = z.object({ prompt: z.string().trim().max(4000).nullable() });
+
+/** Monthly ceilings; the whole list is replaced on write. */
+export const BudgetInputSchema = z.object({
+  scope: enumOf(BUDGET_SCOPES),
+  ref: z.string().trim().max(64).default(""),
+  monthlyTokens: z.number().int().min(0).nullable().default(null),
+  monthlyUsd: z.number().finite().min(0).nullable().default(null),
+});
+export const BudgetsInputSchema = z.array(BudgetInputSchema).max(60);
+export type BudgetsInput = z.infer<typeof BudgetsInputSchema>;
 export type AgentPromptInput = z.infer<typeof AgentPromptInputSchema>;
 export type BenchmarkInput = z.infer<typeof BenchmarkInputSchema>;
 

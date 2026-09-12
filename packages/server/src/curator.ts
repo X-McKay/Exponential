@@ -11,15 +11,15 @@
 // rule-scored, judged, rated on the page, and benchmarked.
 
 import type { Database } from "bun:sqlite";
-import { BRIEF_GROUPS, WIDGET_TYPES, blocksHash, calendarOf, composeGlance, describeBlock, factIndex, nextRunId, parseAction, parseWidget, widgetMarkdown } from "@valueflow/domain";
-import type { Agent, AgentRun, AppState, Block, BriefSection, DailyBrief } from "@valueflow/domain";
+import { BRIEF_GROUPS, WIDGET_TYPES, blocksHash, calendarOf, composeGlance, describeBlock, factIndex, nextRunId, parseAction, parseWidget, projectView, widgetMarkdown } from "@valueflow/domain";
+import type { Agent, AgentRun, AppState, Block, BriefSection, DailyBrief, Project } from "@valueflow/domain";
 import { clip } from "./agents.ts";
 import { ruleScores } from "./evals.ts";
 import { extractJson } from "./llm.ts";
 import type { ChatMessage, Llm } from "./llm.ts";
 import { replyDetail, trace } from "./live.ts";
 import { promptVersion } from "./prompts.ts";
-import { insertBrief, insertRun, loadState, updateRun, upsertScore } from "./repo.ts";
+import { NotFound, insertBrief, insertRun, loadState, updateRun, upsertScore } from "./repo.ts";
 
 export const MAX_SECTIONS = 7;
 export const MAX_WIDGETS = 3;
@@ -48,12 +48,13 @@ export const sentenceCase = (headline: string, keep: string[] = []): string => {
 };
 
 /** The reader, the signals the composer found, and the ids a widget may point at. */
-export const curatorContext = (state: AppState, blocks: Block[]): string => {
+export const curatorContext = (state: AppState, blocks: Block[], project: Project | null = null): string => {
   const user = state.workspace.user;
   const owned = state.projects.flatMap((p) => p.governance.filter((g) => g.owner === user.ini && g.status !== "approved" && g.status !== "na").map((g) => `${p.name}: ${g.name} (${g.status})`));
   const pending = state.proposals.filter((p) => p.state === "pending");
   return [
     `# Reader: ${user.name} (${user.ini}), as of ${state.asOf.slice(0, 10)}${state.workspace.lastGlanceAt ? `; last opened Glance ${state.workspace.lastGlanceAt.slice(0, 16).replace("T", " ")}` : "; first visit"}`,
+    ...(project ? [`This brief is about one project only: ${project.name} (${project.key}), stage ${project.stage}, AI risk tier ${project.tier ?? "untiered"}. ${project.description}`] : []),
     `Owns ${owned.length} open governance item${owned.length === 1 ? "" : "s"}${owned.length ? `: ${owned.slice(0, 6).join("; ")}` : ""}. ${pending.length} proposal${pending.length === 1 ? "" : "s"} waiting on a decision.`,
     `\n# Signals the composer found (${blocks.length}), most urgent first. Every number you write must come from here.`,
     ...blocks.map((b) => `- ${describeBlock(b)}`),
@@ -114,11 +115,11 @@ const BRIEF_SCHEMA = {
   },
 };
 
-export const buildCuratorMessages = (agent: Agent, state: AppState, blocks: Block[]): ChatMessage[] => [
+export const buildCuratorMessages = (agent: Agent, state: AppState, blocks: Block[], project: Project | null = null): ChatMessage[] => [
   {
     role: "system",
     content: [
-      `You are ${agent.name}, who writes one person's daily brief in ValueFlow, an AI-project delivery platform. It reads like a good personal digest: short items a busy person scans in a minute, each one saying the thing and the number that matters, from the signals a deterministic composer found. You never invent a number, a name, or a fact.`,
+      `You are ${agent.name}, who writes one person's daily brief ${project ? `on one project, ${project.name}, ` : ""}in ValueFlow, an AI-project delivery platform. It reads like a good personal digest: short items a busy person scans in a minute, each one saying the thing and the number that matters, from the signals a deterministic composer found. You never invent a number, a name, or a fact.${project ? " Do not name the project in every item; the reader is already on its page." : ""}`,
       `Write a headline (one plain sentence, under 100 characters) and ${MAX_SECTIONS} items at most. Group "top" holds what needs the reader today (decisions, blocked or at-risk releases, gates under threshold, failing CI on release-critical work, Tier 1 gaps), most urgent first; "fyi" holds what moved and what is coming. One item per subject; never repeat a fact across items.`,
       "Each item: text of one or two plain sentences, at most 35 words, no markdown; a tip of one sentence on what to do, or null; an action link with a two- or three-word verb label to the project tab that holds the evidence (proj \"inbox\" for proposals).",
       `Add a widget only when a visual says it better than the sentence, at most ${MAX_WIDGETS} in the whole brief, otherwise {"type":"none"}. Widgets: ${WIDGET_TYPES.join(", ")}. Gates under threshold → gates or metric; a blocked release → release; missing governance → governance; value against target → value; proposals → proposals with their ids; a failing PR → ci; several dated things → upcoming; several things that moved → activity; a table only for a comparison the others cannot show, with cells repeating figures from the signals exactly. Widget ids must come from the id list; a widget that points at nothing is dropped.`,
@@ -126,29 +127,34 @@ export const buildCuratorMessages = (agent: Agent, state: AppState, blocks: Bloc
       'Reply with a JSON object: {"headline": string, "sections": [{"group": "top|fyi", "text": string, "tip": string|null, "action": {"label","proj","tab"}|null, "widget": {...}}]}.',
     ].join("\n"),
   },
-  { role: "user", content: curatorContext(state, blocks) },
+  { role: "user", content: curatorContext(state, blocks, project) },
 ];
 
 export interface CurateOptions {
   benchmark?: string | undefined;
+  /** Write the brief for one project instead of the workspace. */
+  proj?: string | undefined;
 }
 
-/** Write the reader's daily brief; returns the run, with the brief stored when it succeeded. */
+/** Write the reader's daily brief (for the workspace, or one project); returns the run, with the brief stored when it succeeded. */
 export const curateGlance = async (db: Database, llm: Llm, agent: Agent, now: Date, options: CurateOptions = {}): Promise<AgentRun> => {
-  const state = loadState(db, now);
+  const whole = loadState(db, now);
+  const project = options.proj ? (whole.projects.find((p) => p.id === options.proj) ?? null) : null;
+  if (options.proj && !project) throw new NotFound(`project ${options.proj} not found`);
+  const state = project ? projectView(whole, project.id) : whole;
   const blocks = composeGlance(state, calendarOf(state));
-  const messages = buildCuratorMessages(agent, state, blocks);
+  const messages = buildCuratorMessages(agent, state, blocks, project);
   const briefing = messages[1]?.content ?? "";
   const started = Date.now();
   const run: AgentRun = {
-    id: nextRunId(state.runs),
+    id: nextRunId(whole.runs),
     agentId: agent.id,
-    proj: null,
+    proj: project?.id ?? null,
     tab: "overview",
     state: "working",
     startedAt: now.toISOString(),
     finishedAt: null,
-    instruction: `Daily brief for ${state.workspace.user.name}`,
+    instruction: project ? `Daily brief on ${project.name} for ${state.workspace.user.name}` : `Daily brief for ${state.workspace.user.name}`,
     summary: `${agent.name} is writing the brief…`,
     output: "",
     model: null,
@@ -165,7 +171,7 @@ export const curateGlance = async (db: Database, llm: Llm, agent: Agent, now: Da
   const t = trace(db, run);
   t.step("briefing", `${blocks.length} signal${blocks.length === 1 ? "" : "s"} from the composer, the reader's context, and the id index`);
   if (blocks.length === 0) {
-    const done: AgentRun = { ...run, state: "done", finishedAt: new Date().toISOString(), summary: "Nothing to brief: the composer found no signals", output: "The workspace has no signals today, so Glance shows the empty state.", latencyMs: Date.now() - started };
+    const done: AgentRun = { ...run, state: "done", finishedAt: new Date().toISOString(), summary: "Nothing to brief: the composer found no signals", output: `${project ? project.name : "The workspace"} has no signals today, so the brief shows the empty state.`, latencyMs: Date.now() - started };
     updateRun(db, done);
     t.step("done", "no signals; no model call");
     t.finished("done");
@@ -215,8 +221,8 @@ export const curateGlance = async (db: Database, llm: Llm, agent: Agent, now: Da
     t.step("parsed", `${sections.length} item${sections.length === 1 ? "" : "s"}, ${widgetsKept} widget${widgetsKept === 1 ? "" : "s"} kept of ${widgetsReturned}`);
     if (!options.benchmark) {
       const brief: DailyBrief = { runId: run.id, at: finished.finishedAt ?? now.toISOString(), stateHash: blocksHash(blocks), headline, sections, model: res.model };
-      insertBrief(db, state.workspace.user.ini, brief);
-      t.step("delivered", "stored as today's brief for Glance");
+      insertBrief(db, state.workspace.user.ini, brief, project?.id ?? null);
+      t.step("delivered", project ? `stored as today's brief on ${project.name}` : "stored as today's brief for Glance");
     }
     const scores = ruleScores({ run: finished, briefing, proposalsReturned: 0, proposalsKept: 0, placements: { returned: widgetsReturned, kept: widgetsKept } }, finished.finishedAt ?? now.toISOString());
     for (const s of scores) upsertScore(db, s);
@@ -233,7 +239,7 @@ export const curateGlance = async (db: Database, llm: Llm, agent: Agent, now: Da
   }
 };
 
-/** Whether the stored brief still matches what the composer finds now. */
+/** Whether the stored brief still matches what the composer finds now (pass a `projectView` for a project's). */
 export const briefIsCurrent = (state: AppState): boolean => {
   if (!state.brief) return false;
   return state.brief.stateHash === blocksHash(composeGlance(state, calendarOf(state)));

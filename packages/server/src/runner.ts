@@ -5,7 +5,7 @@
 // tuner, and scout work over the whole workspace.
 
 import type { Database } from "bun:sqlite";
-import { isDue } from "@valueflow/domain";
+import { isDue, overBudget } from "@valueflow/domain";
 import type { AgentRun } from "@valueflow/domain";
 import type { RunAgentInput } from "@valueflow/shared";
 import { runAgent, rulesFor } from "./agents.ts";
@@ -49,10 +49,28 @@ export const runAny = async (db: Database, llm: Llm, input: RunAgentInput, now: 
   }
 };
 
-/** Run every scheduled agent that is due. Project kinds run once per project; the rest once. */
-export const runDue = async (db: Database, llm: Llm, now: Date, options: RunnerOptions = {}): Promise<AgentRun[]> => {
+/** Which scheduled runs were held back this tick and why, for the log. */
+export interface Skipped {
+  agentId: string;
+  proj: string | null;
+  reason: string;
+}
+
+/**
+ * Run every scheduled agent that is due. Project kinds run once per project;
+ * the rest once. A run whose workspace, agent, or project budget is used up
+ * is skipped (reported in `skipped`), so a schedule can never overspend.
+ */
+export const runDue = async (db: Database, llm: Llm, now: Date, options: RunnerOptions = {}, skipped: Skipped[] = []): Promise<AgentRun[]> => {
   const state = loadState(db, now);
   const out: AgentRun[] = [];
+  const prices = llm.describe().prices;
+  /** Budgets are checked against the runs so far, including this tick's, so one tick cannot blow through a ceiling. */
+  const allowed = (agentId: string, proj: string | null): boolean => {
+    const reason = overBudget(loadState(db, now), prices, agentId, proj);
+    if (reason) skipped.push({ agentId, proj, reason });
+    return reason === null;
+  };
   for (const agent of state.agents) {
     if (!isDue(agent, state.runs, now.toISOString())) continue;
     switch (agent.kind) {
@@ -62,25 +80,27 @@ export const runDue = async (db: Database, llm: Llm, now: Date, options: RunnerO
       case "comms":
       case "ideation":
       case "audit":
-        for (const p of state.projects) out.push(await runAgent(db, llm, { agentId: agent.id, proj: p.id }, now));
+        for (const p of state.projects) if (allowed(agent.id, p.id)) out.push(await runAgent(db, llm, { agentId: agent.id, proj: p.id }, now));
         break;
       case "rules":
-        for (const p of state.projects) if (rulesFor(state, p).length) out.push(await runAgent(db, llm, { agentId: agent.id, proj: p.id }, now));
+        for (const p of state.projects) if (rulesFor(state, p).length && allowed(agent.id, p.id)) out.push(await runAgent(db, llm, { agentId: agent.id, proj: p.id }, now));
         break;
       case "brief":
-        out.push(await runBrief(db, llm, agent, now, { deliver: options.deliverBrief ?? null }));
+        if (allowed(agent.id, null)) out.push(await runBrief(db, llm, agent, now, { deliver: options.deliverBrief ?? null }));
         break;
       case "tuner": {
         // Only agents with enough measured runs; the tuner says so itself otherwise, and that would be weekly noise.
         const eligible = tunable(state).filter((t) => state.runs.filter((r) => r.agentId === t.id && (r.state === "done" || r.state === "attention" || r.state === "failed")).length >= TUNER_MIN_RUNS);
-        for (const t of eligible) out.push(await tuneAgent(db, llm, agent, t.id, now));
+        for (const t of eligible) if (allowed(agent.id, null)) out.push(await tuneAgent(db, llm, agent, t.id, now));
         break;
       }
       case "scout":
-        if (llm.describe().models.length >= 2) out.push(await scoutModels(db, llm, agent, now, {}));
+        if (llm.describe().models.length >= 2 && allowed(agent.id, null)) out.push(await scoutModels(db, llm, agent, now, {}));
         break;
       case "curator":
-        out.push(await curateGlance(db, llm, agent, now));
+        // The workspace brief, then one per project, so every overview opens with today's note.
+        if (allowed(agent.id, null)) out.push(await curateGlance(db, llm, agent, now));
+        for (const p of state.projects) if (allowed(agent.id, p.id)) out.push(await curateGlance(db, llm, agent, now, { proj: p.id }));
         break;
     }
   }

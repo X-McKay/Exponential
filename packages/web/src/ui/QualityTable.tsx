@@ -1,6 +1,7 @@
-import { EVAL_CASES, agentScorecard, promptVersion } from "@valueflow/domain";
-import type { Agent, AgentRun, AgentScorecard, LlmInfo, PromptVersion, Proposal, RunScore } from "@valueflow/domain";
+import { EVAL_CASES, agentScorecard, budgetLine, promptVersion } from "@valueflow/domain";
+import type { Agent, AgentRun, AgentScorecard, Budget, LlmInfo, PromptVersion, Proposal, RunScore } from "@valueflow/domain";
 import { AgentQuality } from "./AgentQuality.tsx";
+import { SpendCell } from "./Spend.tsx";
 import { Caret, Tip, ghostBtn, reset } from "./primitives.tsx";
 import { C } from "../theme.ts";
 
@@ -41,7 +42,7 @@ function Num({ v, bold }: { v: number | null; bold?: boolean }) {
 
 /**
  * One row per agent: what the rules and the judge measure, what people
- * decided, what it costs, and the latest benchmark against the previous one.
+ * decided, what it spent this month, and the latest benchmark against the previous one.
  * Expanding a row shows prompt versions and models for that agent.
  */
 export function QualityTable({
@@ -50,6 +51,7 @@ export function QualityTable({
   scores,
   proposals,
   versions,
+  budgets,
   asOf,
   llm,
   busy,
@@ -65,6 +67,7 @@ export function QualityTable({
   scores: RunScore[];
   proposals: Proposal[];
   versions: PromptVersion[];
+  budgets: Budget[];
   asOf: string;
   llm: LlmInfo | null;
   busy: string | null;
@@ -89,7 +92,7 @@ export function QualityTable({
             <th style={th}>Trend</th>
             <th style={th}>Accepted</th>
             <th style={th}>Rated</th>
-            <th style={th}>Cost</th>
+            <th style={th}>Spend · month</th>
             <th style={th}>Benchmark</th>
             <th style={{ ...th, paddingRight: 14 }} />
           </tr>
@@ -138,9 +141,8 @@ export function QualityTable({
                   <td style={td}>
                     <span style={{ color: c.ratings.up ? C.green : C.dim }}>👍 {c.ratings.up}</span> <span style={{ color: c.ratings.down ? C.red : C.dim }}>👎 {c.ratings.down}</span>
                   </td>
-                  <td style={{ ...td, color: C.mut }}>
-                    {c.latencyMedianMs === null ? "—" : `${(c.latencyMedianMs / 1000).toFixed(0)}s`}
-                    {c.tokensMean === null ? "" : ` · ${Math.round(c.tokensMean / 100) / 10}k`}
+                  <td style={td}>
+                    <SpendCell line={budgetLine({ runs, budgets, asOf }, llm?.prices ?? {}, "agent", a.id)} tip={`Median latency ${c.latencyMedianMs === null ? "—" : `${(c.latencyMedianMs / 1000).toFixed(0)}s`} · mean ${c.tokensMean === null ? "—" : `${Math.round(c.tokensMean / 100) / 10}k`} tokens per run`} />
                   </td>
                   <td style={td}>
                     {latest ? (

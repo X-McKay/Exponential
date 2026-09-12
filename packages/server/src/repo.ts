@@ -5,8 +5,8 @@
 
 import type { Database } from "bun:sqlite";
 import { EVENT_WINDOW_DAYS, GSTATUS_LABEL, RUN_WINDOW_DAYS, deriveDevEvents } from "@valueflow/domain";
-import type { Agent, AgentRun, AppState, Build, CalendarEvent, Criterion, DevFacts, Event, DailyBrief, GovernanceItem, RunEvent, Metric, MetricReading, Milestone, MilestoneStatus, Project, PromptVersion, Proposal, ProposalAction, PullRequest, Release, RiskTier, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
-import type { AgentsInput, CalendarEventInput, GovernanceInput, GovernanceItemInput, MilestoneInput, ProjectInput, ReleaseInput, RuleInput, TargetsInput, WorkspaceInput } from "@valueflow/shared";
+import type { Agent, AgentRun, AppState, Budget, Build, CalendarEvent, Criterion, DevFacts, Event, DailyBrief, GovernanceItem, RunEvent, Metric, MetricReading, Milestone, MilestoneStatus, Project, PromptVersion, Proposal, ProposalAction, PullRequest, Release, RiskTier, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
+import type { AgentsInput, BudgetsInput, CalendarEventInput, GovernanceInput, GovernanceItemInput, MilestoneInput, ProjectInput, ReleaseInput, RuleInput, TargetsInput, WorkspaceInput } from "@valueflow/shared";
 
 export class NotFound extends Error {
   override name = "NotFound";
@@ -62,6 +62,8 @@ interface LatestRow {
   milestone_id: string;
   metric_id: string;
   value: number;
+  recorded_at: string;
+  source: "eval" | "manual";
 }
 interface GovRow {
   project_id: string;
@@ -245,7 +247,7 @@ interface ReadingRow {
 }
 
 const LATEST_SQL = `
-  SELECT r.project_id, r.milestone_id, r.metric_id, r.value
+  SELECT r.project_id, r.milestone_id, r.metric_id, r.value, r.recorded_at, r.source
   FROM metric_readings r
   WHERE r.seq = (
     SELECT r2.seq FROM metric_readings r2
@@ -284,7 +286,7 @@ export const loadState = (db: Database, now: Date = new Date()): AppState => {
   const members = groupBy(db.query<MemberRow, []>("SELECT * FROM team_members ORDER BY sort").all(), (r) => r.project_id);
   const milestones = groupBy(db.query<MilestoneRow, []>("SELECT * FROM milestones ORDER BY sort").all(), (r) => r.project_id);
   const metrics = groupBy(db.query<MetricRow, []>("SELECT * FROM metrics ORDER BY sort").all(), (r) => `${r.project_id} ${r.milestone_id}`);
-  const latest = new Map(db.query<LatestRow, []>(LATEST_SQL).all().map((r) => [key3(r.project_id, r.milestone_id, r.metric_id), r.value]));
+  const latest = new Map(db.query<LatestRow, []>(LATEST_SQL).all().map((r) => [key3(r.project_id, r.milestone_id, r.metric_id), r]));
   const gov = groupBy(db.query<GovRow, []>("SELECT * FROM governance_items ORDER BY sort").all(), (r) => r.project_id);
   const releases = groupBy(db.query<ReleaseRow, []>("SELECT * FROM releases ORDER BY sort").all(), (r) => r.project_id);
   const relMs = groupBy(db.query<RelMsRow, []>("SELECT * FROM release_milestones ORDER BY sort").all(), (r) => `${r.project_id} ${r.release_id}`);
@@ -306,6 +308,8 @@ export const loadState = (db: Database, now: Date = new Date()): AppState => {
     rules: loadRules(db),
     promptVersions: loadPromptVersions(db),
     brief: loadBrief(db, loadWorkspace(db).user.ini),
+    projectBriefs: loadProjectBriefs(db, loadWorkspace(db).user.ini),
+    budgets: loadBudgets(db),
     events: loadEvents(db, now),
     calendar: loadCalendar(db),
   };
@@ -317,7 +321,10 @@ export const loadState = (db: Database, now: Date = new Date()): AppState => {
       month: m.month,
       impact: { base: { fte: m.base_fte, time: m.base_time }, stretch: { fte: m.stretch_fte, time: m.stretch_time } },
       metrics: (metrics.get(`${p.id} ${m.id}`) ?? []).map(
-        (x): Metric => ({ id: x.id, label: x.label, base: x.base, stretch: x.stretch, current: latest.get(key3(p.id, m.id, x.id)) ?? 0 }),
+        (x): Metric => {
+          const l = latest.get(key3(p.id, m.id, x.id));
+          return { id: x.id, label: x.label, base: x.base, stretch: x.stretch, current: l?.value ?? 0, readAt: l?.recorded_at ?? null, readSource: l?.source ?? null };
+        },
       ),
     }));
     const project: Project = {
@@ -728,6 +735,7 @@ export const recordGlanceView = (db: Database, ini: string, at: string): void =>
 interface BriefRow {
   run_id: string;
   user_ini: string;
+  project_id: string | null;
   state_hash: string;
   headline: string;
   sections: string;
@@ -737,14 +745,46 @@ interface BriefRow {
 
 const toBrief = (r: BriefRow): DailyBrief => ({ runId: r.run_id, at: r.at, stateHash: r.state_hash, headline: r.headline, sections: JSON.parse(r.sections) as DailyBrief["sections"], model: r.model });
 
-/** The newest daily brief for a user, or null. */
-export const loadBrief = (db: Database, ini: string): DailyBrief | null => {
-  const r = db.query<BriefRow, [string]>("SELECT * FROM daily_briefs WHERE user_ini = ? ORDER BY at DESC LIMIT 1").get(ini);
+/** The newest daily brief for a user (the workspace one, or one project's), or null. */
+export const loadBrief = (db: Database, ini: string, proj: string | null = null): DailyBrief | null => {
+  const r = proj
+    ? db.query<BriefRow, [string, string]>("SELECT * FROM daily_briefs WHERE user_ini = ? AND project_id = ? ORDER BY at DESC LIMIT 1").get(ini, proj)
+    : db.query<BriefRow, [string]>("SELECT * FROM daily_briefs WHERE user_ini = ? AND project_id IS NULL ORDER BY at DESC LIMIT 1").get(ini);
   return r ? toBrief(r) : null;
 };
 
-export const insertBrief = (db: Database, ini: string, b: DailyBrief): void => {
-  db.query("INSERT OR REPLACE INTO daily_briefs (run_id, user_ini, state_hash, headline, sections, model, at) VALUES (?,?,?,?,?,?,?)").run(b.runId, ini, b.stateHash, b.headline, JSON.stringify(b.sections), b.model, b.at);
+/** The newest project brief per project for a user. */
+export const loadProjectBriefs = (db: Database, ini: string): Record<string, DailyBrief> => {
+  const out: Record<string, DailyBrief> = {};
+  for (const r of db.query<BriefRow, [string]>("SELECT * FROM daily_briefs WHERE user_ini = ? AND project_id IS NOT NULL ORDER BY at DESC").all(ini)) {
+    if (r.project_id && !out[r.project_id]) out[r.project_id] = toBrief(r);
+  }
+  return out;
+};
+
+export const insertBrief = (db: Database, ini: string, b: DailyBrief, proj: string | null = null): void => {
+  db.query("INSERT OR REPLACE INTO daily_briefs (run_id, user_ini, project_id, state_hash, headline, sections, model, at) VALUES (?,?,?,?,?,?,?,?)").run(b.runId, ini, proj, b.stateHash, b.headline, JSON.stringify(b.sections), b.model, b.at);
+};
+
+interface BudgetRow {
+  scope: Budget["scope"];
+  ref: string;
+  monthly_tokens: number | null;
+  monthly_usd: number | null;
+}
+
+export const loadBudgets = (db: Database): Budget[] =>
+  db
+    .query<BudgetRow, []>("SELECT * FROM budgets ORDER BY scope, ref")
+    .all()
+    .map((r) => ({ scope: r.scope, ref: r.ref, monthlyTokens: r.monthly_tokens, monthlyUsd: r.monthly_usd }));
+
+/** Replace every budget; a line with no ceiling is dropped. */
+export const setBudgets = (db: Database, budgets: BudgetsInput): void => {
+  db.transaction(() => {
+    db.query("DELETE FROM budgets").run();
+    for (const b of budgets) if (b.monthlyTokens !== null || b.monthlyUsd !== null) db.query("INSERT OR REPLACE INTO budgets (scope, ref, monthly_tokens, monthly_usd) VALUES (?,?,?,?)").run(b.scope, b.scope === "workspace" ? "" : b.ref, b.monthlyTokens, b.monthlyUsd);
+  })();
 };
 
 export const setWorkspace = (db: Database, w: WorkspaceInput): void => {

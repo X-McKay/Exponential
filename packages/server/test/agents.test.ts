@@ -21,7 +21,7 @@ const fakeLlm = (reply: (messages: ChatMessage[]) => string | Error): Llm => ({
     const r = reply(messages);
     return r instanceof Error ? Promise.reject(r) : Promise.resolve({ content: r, model: "fake-model", usage: { prompt: 10, completion: 5 }, truncated: false });
   },
-  describe: () => ({ baseUrl: "http://fake", model: "fake-model", models: ["fake-model"], judgeModel: null }),
+  describe: () => ({ baseUrl: "http://fake", model: "fake-model", models: ["fake-model"], judgeModel: null, prices: {} }),
 });
 
 const NOW = new Date("2026-09-10T12:00:00Z");
@@ -68,7 +68,7 @@ describe("runAgent", () => {
     const app = createApp(db, { now: () => NOW, llm });
     const state = (await (await app.handleApi(new Request("http://x/api/state")))!.json()) as AppState;
     expect(state.runs[0]).toEqual(run);
-    expect(state.llm).toEqual({ baseUrl: "http://fake", model: "fake-model", models: ["fake-model"], judgeModel: null });
+    expect(state.llm).toEqual({ baseUrl: "http://fake", model: "fake-model", models: ["fake-model"], judgeModel: null, prices: {} });
   });
 
   test("a reply wrapped in prose still parses; an unusable reply or a failing model records a failed run", async () => {
@@ -108,8 +108,8 @@ describe("runAgent", () => {
     const llm = fakeLlm(() => JSON.stringify({ summary: "Nightly scan clean", attention: false, body: "No findings." }));
     const later = new Date(SEED_NOW.getTime() + 30 * 3_600_000);
     const first = await runDue(db, llm, later);
-    // Nightly: Audie and Sentry per project. Weekly, never run: Monday once, Coach once per agent with enough measured runs; Scout skips with a single model.
-    expect(first.map((r) => `${r.agentId}/${r.proj ?? "workspace"}`)).toEqual(["audie/onboarding", "audie/ima", "audie/sector", "sentry/onboarding", "sentry/ima", "sentry/sector", "monday/workspace", "coach/workspace", "coach/workspace", "coach/workspace", "curator/workspace"]);
+    // Nightly: Audie and Sentry per project, the curator for the workspace and per project. Weekly, never run: Monday once, Coach once per agent with enough measured runs; Scout skips with a single model.
+    expect(first.map((r) => `${r.agentId}/${r.proj ?? "workspace"}`)).toEqual(["audie/onboarding", "audie/ima", "audie/sector", "sentry/onboarding", "sentry/ima", "sentry/sector", "monday/workspace", "coach/workspace", "coach/workspace", "coach/workspace", "curator/workspace", "curator/onboarding", "curator/ima", "curator/sector"]);
     expect(first.filter((r) => r.agentId === "coach").map((r) => r.instruction)).toEqual(["Tune Slider", "Tune Nova", "Tune Audie"]);
     expect(await runDue(db, llm, later)).toEqual([]);
   });
@@ -134,6 +134,6 @@ describe("llm client", () => {
     expect(body.model).toBe("m1");
     expect(body.chat_template_kwargs).toEqual({ enable_thinking: false });
     expect((body.response_format as { type: string }).type).toBe("json_schema");
-    expect(llm.describe()).toEqual({ baseUrl: "http://llm.test/v1", model: "m1", models: ["m1"], judgeModel: null });
+    expect(llm.describe()).toEqual({ baseUrl: "http://llm.test/v1", model: "m1", models: ["m1"], judgeModel: null, prices: {} });
   });
 });

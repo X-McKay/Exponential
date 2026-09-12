@@ -1,5 +1,6 @@
-import { blockers, readiness, realized, shippedCount } from "@valueflow/domain";
+import { blockers, explainReadiness, explainRealized, readiness, realized, shippedCount } from "@valueflow/domain";
 import type { Project } from "@valueflow/domain";
+import { Why } from "../ui/Explain.tsx";
 import { Avatar, Chip, Ring, TierBadge, ghostBtn, reset } from "../ui/primitives.tsx";
 import { C, readinessColor } from "../theme.ts";
 
@@ -41,9 +42,9 @@ export function PortfolioPage({ projects, onOpen, onNew, onSetup, canSetup }: { 
           const b = blockers(p);
           const fte = realized(p, "fte");
           const time = realized(p, "time");
-          const bars: [string, number, number][] = [
-            ["FTE", fte, p.targets.fte],
-            ["Time", time, p.targets.time],
+          const bars: [string, number, number, "fte" | "time"][] = [
+            ["FTE", fte, p.targets.fte, "fte"],
+            ["Time", time, p.targets.time, "time"],
           ];
           return (
             <button
@@ -70,13 +71,13 @@ export function PortfolioPage({ projects, onOpen, onNew, onSetup, canSetup }: { 
               </div>
               <div style={{ fontSize: 15, fontWeight: 500, letterSpacing: "-0.01em", marginBottom: 10 }}>{p.name}</div>
               <div style={{ display: "flex", gap: 18, marginBottom: 12 }}>
-                {bars.map(([l, v, tg]) => (
+                {bars.map(([l, v, tg, d]) => (
                   <div key={l} style={{ flex: 1 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.dim, marginBottom: 4 }}>
                       <span>{l}</span>
-                      <span style={{ color: C.indigoHi }}>
+                      <Why e={() => explainRealized(p, d)} style={{ color: C.indigoHi }}>
                         {v}% / {tg}%
-                      </span>
+                      </Why>
                     </div>
                     <div style={{ height: 5, borderRadius: 4, background: C.field }}>
                       <div style={{ height: "100%", width: `${tg > 0 ? Math.min(100, (v / tg) * 100) : 0}%`, background: "linear-gradient(90deg,#5C6AF0,#7B87F5)", borderRadius: 4 }} />
@@ -86,7 +87,9 @@ export function PortfolioPage({ projects, onOpen, onNew, onSetup, canSetup }: { 
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <Ring pct={r} size={26} stroke={3} color={readinessColor(r)} />
-                <span style={{ fontSize: 12, color: C.mut }}>{Math.round(r * 100)}% governance ready</span>
+                <Why e={() => explainReadiness(p)} style={{ fontSize: 12, color: C.mut }}>
+                  {Math.round(r * 100)}% governance ready
+                </Why>
                 <span style={{ flex: 1 }} />
                 {b > 0 ? <Chip tone="bad">{b} missing</Chip> : <Chip tone="good">no gaps</Chip>}
               </div>

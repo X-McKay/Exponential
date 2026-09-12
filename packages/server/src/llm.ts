@@ -10,6 +10,11 @@
 //                  an entry may be "name@https://other-host/v1" to reach a
 //                  second endpoint (same API key)
 //   EVAL_JUDGE_MODEL  optional model for the judge (defaults to LLM_MODEL)
+//   LLM_PRICES     optional "model=in/out,…" USD per million tokens, so spend
+//                  can be shown in money and budgets set in dollars
+
+import { parsePrices } from "@valueflow/domain";
+import type { PriceList } from "@valueflow/domain";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -40,7 +45,7 @@ export interface Llm {
   /** Model name in use (resolved lazily when LLM_MODEL is unset). */
   model: () => Promise<string>;
   chat: (messages: ChatMessage[], options?: ChatOptions) => Promise<ChatResult>;
-  describe: () => { baseUrl: string; model: string | null; models: string[]; judgeModel: string | null };
+  describe: () => { baseUrl: string; model: string | null; models: string[]; judgeModel: string | null; prices: PriceList };
 }
 
 export class LlmError extends Error {
@@ -60,6 +65,8 @@ export interface LlmOptions {
   /** Candidate models beyond the default. */
   candidates?: string[];
   judgeModel?: string | undefined;
+  /** USD per million tokens by model. */
+  prices?: PriceList;
   fetch?: (input: string, init?: RequestInit) => Promise<Response>;
 }
 
@@ -184,7 +191,7 @@ export const createLlm = (options: LlmOptions): Llm => {
   };
 
   const candidates = (options.candidates ?? []).map((c) => c.trim()).filter(Boolean);
-  const describe = () => ({ baseUrl: base, model: resolved, models: [...new Set([...(resolved ? [resolved] : []), ...candidates])], judgeModel: options.judgeModel ?? null });
+  const describe = () => ({ baseUrl: base, model: resolved, models: [...new Set([...(resolved ? [resolved] : []), ...candidates])], judgeModel: options.judgeModel ?? null, prices: options.prices ?? {} });
   return { model, chat, describe };
 };
 
@@ -197,6 +204,7 @@ export const llmFromEnv = (env: Record<string, string | undefined>): Llm | null 
     thinking: env.LLM_THINKING === "on",
     candidates: (env.LLM_MODELS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
     judgeModel: env.EVAL_JUDGE_MODEL,
+    prices: parsePrices(env.LLM_PRICES),
   });
 };
 

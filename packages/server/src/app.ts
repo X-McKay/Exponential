@@ -4,7 +4,7 @@
 // exercised in tests without opening a port.
 
 import type { Database } from "bun:sqlite";
-import { composeGlancePage } from "@valueflow/domain";
+import { blocksHash, composeGlance, composeGlancePage, calendarOf, overBudget, projectView } from "@valueflow/domain";
 import {
   AgentsInputSchema,
   CalendarEventInputSchema,
@@ -16,6 +16,7 @@ import {
   ReleaseInputSchema,
   AgentPromptInputSchema,
   BenchmarkInputSchema,
+  BudgetsInputSchema,
   ChatInputSchema,
   RateRunInputSchema,
   RuleInputSchema,
@@ -40,8 +41,10 @@ import {
   findMilestone,
   findProject,
   listReadings,
+  loadBudgets,
   loadState,
   loadWorkspace,
+  setBudgets,
   recordReading,
   setAgentPrompt,
   setAgents,
@@ -203,6 +206,14 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     return benchmarkStatus;
   };
   const state = () => ({ ...loadState(db, now()), syncSource: source?.name ?? null, llm: llm ? llm.describe() : null });
+  /** A run that would take a budget past its ceiling is refused with the reason. */
+  const withinBudget = (agentId: string, proj: string | null): void => {
+    if (!llm) return;
+    const reason = overBudget(state(), llm.describe().prices, agentId, proj);
+    if (reason) throw new HttpError(409, `over budget: ${reason}`);
+  };
+  /** One project brief at a time per project; a stale one is rewritten only when asked (the page asks on open). */
+  const curatingProjects = new Set<string>();
   const routes: Route[] = [];
   const on = (method: Method, pattern: string, handler: Handler): void => {
     routes.push({ method, segments: pattern.split("/").filter(Boolean), handler });
@@ -223,9 +234,43 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
     const curator = state().agents.find((a) => a.kind === "curator");
     if (!curator) throw new HttpError(409, "no curator agent is installed");
+    withinBudget(curator.id, null);
     const run = await curateGlance(db, llm, curator, now());
     if (run.state !== "failed") judgeLater(run.id);
     return json({ run, brief: state().brief });
+  });
+  // The project brief: `?force=1` rewrites; otherwise a brief that still matches the facts is returned as is, without a model call.
+  on("POST", patterns.projectBrief, async (req, params) => {
+    if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
+    const s = state();
+    const project = findProject(s, p(params, "pid"));
+    const curator = s.agents.find((a) => a.kind === "curator");
+    if (!curator) throw new HttpError(409, "no curator agent is installed");
+    const force = new URL(req.url).searchParams.get("force") === "1";
+    const view = projectView(s, project.id);
+    const current = view.brief && view.brief.stateHash === blocksHash(composeGlance(view, calendarOf(view)));
+    if (current && !force) return json({ run: null, brief: view.brief });
+    if (curatingProjects.has(project.id)) throw new HttpError(409, `${curator.name} is already writing the brief on ${project.name}`);
+    withinBudget(curator.id, project.id);
+    curatingProjects.add(project.id);
+    try {
+      const run = await curateGlance(db, llm, curator, now(), { proj: project.id });
+      if (run.state !== "failed") judgeLater(run.id);
+      return json({ run, brief: state().projectBriefs[project.id] ?? null });
+    } finally {
+      curatingProjects.delete(project.id);
+    }
+  });
+  on("GET", patterns.budgets, () => json(loadBudgets(db)));
+  on("PUT", patterns.budgets, async (req) => {
+    const body = await parseBody(req, BudgetsInputSchema);
+    const s = state();
+    for (const b of body) {
+      if (b.scope === "agent" && !s.agents.some((a) => a.id === b.ref)) throw new HttpError(400, `agent ${b.ref} not found`);
+      if (b.scope === "project" && !s.projects.some((pr) => pr.id === b.ref)) throw new HttpError(400, `project ${b.ref} not found`);
+    }
+    setBudgets(db, body);
+    return json(loadBudgets(db));
   });
 
   on("PUT", patterns.workspace, async (req) => {
@@ -413,6 +458,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   on("POST", patterns.agentRuns, async (req, params) => {
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
     const body = await parseBody(req, RunAgentInputSchema.omit({ agentId: true }));
+    withinBudget(p(params, "aid"), body.proj ?? null);
     const runs = await runAny(db, llm, { ...body, agentId: p(params, "aid") }, now(), { deliverBrief });
     for (const run of runs) if (run.state !== "failed" && run.model !== null) judgeLater(run.id);
     const run = runs[0];
@@ -422,6 +468,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   on("POST", patterns.chat, async (req) => {
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
     const body = await parseBody(req, ChatInputSchema);
+    withinBudget(state().agents.find((a) => a.kind === "chat")?.id ?? "ask", body.proj);
     const reply = await askWorkspace(db, llm, body, now());
     judgeLater(reply.runId);
     return json(reply);
@@ -441,6 +488,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   on("POST", patterns.benchmark, async (req) => {
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
     const body = await parseBody(req, BenchmarkInputSchema);
+    withinBudget(body.agentId ?? "", null);
     const model = llm;
     return json(startJob("benchmark", (progress) => runBenchmark(db, model, now(), body.agentId, progress)), 202);
   });
@@ -449,6 +497,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     const body = await parseBody(req, ScoutInputSchema);
     const scout = state().agents.find((a) => a.kind === "scout");
     if (!scout) throw new HttpError(409, "no scout agent is installed");
+    withinBudget(scout.id, null);
     const model = llm;
     return json(startJob("scout", (progress) => scoutModels(db, model, scout, now(), { agentId: body.agentId, models: body.models, onProgress: progress })), 202);
   });

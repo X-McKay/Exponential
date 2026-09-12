@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { monthLabel, nextRelease, releaseState } from "@valueflow/domain";
+import { explainRelease, monthLabel, nextRelease, releaseState } from "@valueflow/domain";
 import type { Calendar, Project, Release } from "@valueflow/domain";
 import { RoadmapTimeline } from "../charts/RoadmapTimeline.tsx";
 import { ReleaseEditor } from "../editors/ReleaseEditor.tsx";
+import { Why } from "../ui/Explain.tsx";
 import { Caret, Chip, Kpi, SectionCard, Tip, ghostBtn, reset } from "../ui/primitives.tsx";
 import { C, releaseToneColor } from "../theme.ts";
 
@@ -86,9 +87,9 @@ export function RoadmapPage({
                   {monthLabel(r.month, cal.todayYm)} · {r.milestoneIds.join(", ")}
                 </span>
               </span>
-              <span style={{ fontSize: 12, color: C.mut, fontVariantNumeric: "tabular-nums" }}>
+              <Why e={() => explainRelease(p, r, cal)} style={{ fontSize: 12, color: C.mut, fontVariantNumeric: "tabular-nums" }}>
                 {st.met}/{st.total} criteria
-              </span>
+              </Why>
               <Chip tone={st.label === "Ready" || st.label === "Shipped" ? "good" : st.label === "Blocked" ? "bad" : "warn"}>{st.label}</Chip>
               <Tip label="Edit release">
                 <span

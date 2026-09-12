@@ -18,6 +18,8 @@ import { attentionRuns, latestRunOfKind } from "./agents.ts";
 import { deriveUpcoming, recentEvents } from "./feed.ts";
 import type { FeedItem, Upcoming } from "./feed.ts";
 import { PROJECT_TABS } from "./types.ts";
+import { BUDGET_WARN_AT, budgetLabel, budgetLine, fmtTokens, fmtUsd } from "./spend.ts";
+import type { BudgetLine } from "./spend.ts";
 import type { AgentRun, AppState, BriefAction, BriefSection, Build, Dim, GovStatus, Metric, Milestone, Project, ProjectTab, Proposal, PullRequest, Release, Widget } from "./types.ts";
 
 export type Tone = "bad" | "warn" | "good" | "info";
@@ -54,7 +56,8 @@ export type Block =
   | (BlockBase & { kind: "brief"; run: AgentRun; agentName: string })
   | (BlockBase & { kind: "upcoming"; items: Upcoming[]; more: number })
   | (BlockBase & { kind: "activity"; items: FeedItem[]; more: number })
-  | (BlockBase & { kind: "decisions"; proposals: Proposal[]; more: number });
+  | (BlockBase & { kind: "decisions"; proposals: Proposal[]; more: number })
+  | (BlockBase & { kind: "budget"; line: BudgetLine; name: string });
 
 export type BlockKind = Block["kind"];
 
@@ -97,6 +100,8 @@ export interface Signals {
   flags: AgentRun[];
   /** This week's brief, when one has run. */
   brief: AgentRun | null;
+  /** Budgets at or past the warning line, most used first. */
+  budgets: { line: BudgetLine; name: string }[];
   bestValue: Project | null;
   upcoming: Upcoming[];
   recent: FeedItem[];
@@ -165,6 +170,11 @@ export const detectSignals = (state: AppState, cal: Calendar = calendarOf(state)
   const brief = latestRunOfKind("brief", state.agents, state.runs, cal.asOf);
   const ratio = (p: Project): number => (p.targets.fte > 0 ? realized(p, "fte") / p.targets.fte : 0);
   const bestValue = [...state.projects].sort((a, b) => ratio(b) - ratio(a))[0] ?? null;
+  const prices = state.llm?.prices ?? {};
+  const budgets = state.budgets
+    .map((b) => ({ line: budgetLine(state, prices, b.scope, b.ref), name: b.scope === "workspace" ? "Agent spend" : b.scope === "agent" ? (state.agents.find((a) => a.id === b.ref)?.name ?? b.ref) : (state.projects.find((p) => p.id === b.ref)?.name ?? b.ref) }))
+    .filter((x) => x.line.used !== null && x.line.used >= BUDGET_WARN_AT)
+    .sort((a, b) => (b.line.used ?? 0) - (a.line.used ?? 0));
 
   // "Know" starts where the reader left off; without a last visit, the trailing 48 hours.
   const since = state.workspace.lastGlanceAt;
@@ -184,6 +194,7 @@ export const detectSignals = (state: AppState, cal: Calendar = calendarOf(state)
     t1gaps,
     flags,
     brief,
+    budgets,
     bestValue,
     upcoming: deriveUpcoming(state, cal),
     recent,
@@ -350,6 +361,24 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
       title: run.summary,
       run,
       agentName: agent?.name ?? run.agentId,
+    });
+  }
+
+  for (const { line, name } of s.budgets.slice(0, 1)) {
+    const spent = line.against === "usd" ? fmtUsd(line.spend.usd ?? 0) : `${fmtTokens(line.spend.tokens)} tokens`;
+    blocks.push({
+      id: `budget:${line.scope}:${line.ref}`,
+      kind: "budget",
+      priority: line.state === "over" ? 85 : 68,
+      span: 1,
+      tone: line.state === "over" ? "bad" : "warn",
+      tag: line.state === "over" ? "Budget reached" : "Budget nearly used",
+      proj: line.scope === "project" ? line.ref : (state.projects[0]?.id ?? ""),
+      tab: "overview",
+      projName: line.scope === "project" ? short(line.ref) : null,
+      title: `${name}: ${spent} of the ${line.budget ? budgetLabel(line.budget) : ""} monthly budget used (${Math.round((line.used ?? 0) * 100)}%)`,
+      line,
+      name,
     });
   }
 
@@ -608,7 +637,7 @@ export const parseAction = (raw: unknown, state: Pick<AppState, "projects">): Br
   const label = str(o.label);
   const proj = str(o.proj);
   if (!label || !proj) return null;
-  if (proj === "inbox") return { label: label.slice(0, 32), proj: "inbox", tab: "overview" };
+  if (proj === "inbox" || proj === "agents") return { label: label.slice(0, 32), proj, tab: "overview" };
   if (!state.projects.some((p) => p.id === proj)) return null;
   const tab = (PROJECT_TABS as readonly string[]).includes(String(o.tab)) ? (o.tab as ProjectTab) : "overview";
   return { label: label.slice(0, 32), proj, tab };
@@ -659,8 +688,9 @@ export const widgetMarkdown = (w: Widget): string => {
  * curator has not run yet: one section per signal that matters, each with
  * the widget that shows it.
  */
-export const defaultBrief = (state: AppState, cal: Calendar = calendarOf(state)): { headline: string; sections: BriefSection[] } => {
+export const defaultBrief = (state: AppState, cal: Calendar = calendarOf(state), scope: "workspace" | "project" = "workspace"): { headline: string; sections: BriefSection[] } => {
   const s = detectSignals(state, cal);
+  const where = scope === "project" ? "on this project" : "in the portfolio";
   const narrative = writeNarrativeFor(state, s);
   const sections: BriefSection[] = [];
   const pending = state.proposals.filter((p) => p.state === "pending");
@@ -672,12 +702,16 @@ export const defaultBrief = (state: AppState, cal: Calendar = calendarOf(state))
     const unmet = r.criteria.filter((_, i) => !st.evals[i]?.ok).map((c) => c.label);
     sections.push({ group: "top", text: `${r.id} ${r.name} on ${p.name} is blocked with ${st.met} of ${st.total} go-live criteria met, targeting ${monthLabel(r.month, cal.todayYm)}.`, tip: unmet.length ? `Unmet: ${unmet.slice(0, 3).join("; ")}.` : null, action: { label: "View release", proj: p.id, tab: "roadmap" }, widget: { type: "release", proj: p.id, rid: r.id } });
   }
-  for (const { p, m, gap, worst } of s.shortfalls.slice(0, 1)) sections.push({ group: "top", text: `${worst.label} on ${m.name} (${p.name}) sits ${gap}pt${gap === 1 ? "" : "s"} under its base gate, the closest fix in the portfolio.`, tip: null, action: { label: "View gates", proj: p.id, tab: "value" }, widget: { type: "gates", proj: p.id, mid: m.id } });
+  for (const { p, m, gap, worst } of s.shortfalls.slice(0, 1)) sections.push({ group: "top", text: `${worst.label} on ${m.name} (${p.name}) sits ${gap}pt${gap === 1 ? "" : "s"} under its base gate, the closest fix ${where}.`, tip: null, action: { label: "View gates", proj: p.id, tab: "value" }, widget: { type: "gates", proj: p.id, mid: m.id } });
   for (const { pid, pr } of s.failPRs.slice(0, 1)) {
     const p = state.projects.find((x) => x.id === pid);
     if (p) sections.push({ group: "top", text: `CI is failing on ${pr.repo} #${pr.number} (${p.name}), open ${pr.title ? `for "${pr.title}"` : "now"}.`, tip: null, action: { label: "View PR", proj: p.id, tab: "development" }, widget: null });
   }
   for (const p of s.t1gaps.slice(0, 1)) sections.push({ group: "top", text: `${p.name} is Tier 1 with ${blockers(p)} governance item${blockers(p) === 1 ? "" : "s"} still missing.`, tip: `Missing: ${p.governance.filter((g) => g.status === "missing").map((g) => g.name).slice(0, 3).join(", ")}.`, action: { label: "View governance", proj: p.id, tab: "governance" }, widget: null });
+  for (const { line, name } of s.budgets.slice(0, 1)) {
+    const spent = line.against === "usd" ? fmtUsd(line.spend.usd ?? 0) : `${fmtTokens(line.spend.tokens)} tokens`;
+    sections.push({ group: line.state === "over" ? "top" : "fyi", text: `${name} has used ${spent} of its ${line.budget ? budgetLabel(line.budget) : ""} monthly budget (${Math.round((line.used ?? 0) * 100)}%).`, tip: line.state === "over" ? "Runs are refused until the budget is raised on the Agents page or the month turns." : "Scheduled runs pause once the ceiling is reached.", action: { label: "View spend", proj: "agents", tab: "overview" }, widget: null });
+  }
   if (s.brief) sections.push({ group: "fyi", text: `This week's brief by ${state.agents.find((a) => a.id === s.brief?.agentId)?.name ?? "Monday"}: ${s.brief.summary}`, tip: null, action: null, widget: null });
   const next = s.upcoming[0];
   if (next) sections.push({ group: "fyi", text: `Next on the calendar: ${next.text} on ${next.date}${next.sub ? ` (${next.sub})` : ""}.`, tip: null, action: { label: "View calendar", proj: next.proj, tab: next.tab }, widget: s.upcoming.length > 1 ? { type: "upcoming", days: 56 } : null });
@@ -729,8 +763,28 @@ export const describeBlock = (b: Block): string => {
       return `${head} — ${b.items.map((i) => i.text).join("; ")}`;
     case "decisions":
       return `${head} — ${b.proposals.map((p) => `${p.id} from ${p.agentId}`).join(", ")}`;
+    case "budget":
+      return `${head} — ${b.line.spend.runs} runs this month${b.line.state === "over" ? "; scheduled runs are paused until the budget is raised or the month turns" : ""}`;
   }
 };
+
+/**
+ * The workspace seen from one project: only its facts, proposals, runs,
+ * events, and calendar, with its own brief in the brief slot. The composer
+ * and curator then work unchanged, one project at a time.
+ */
+export const projectView = (state: AppState, pid: string): AppState => ({
+  ...state,
+  projects: state.projects.filter((p) => p.id === pid),
+  releases: { [pid]: state.releases[pid] ?? [] },
+  dev: state.dev[pid] ? { [pid]: state.dev[pid] } : {},
+  runs: state.runs.filter((r) => r.proj === pid),
+  proposals: state.proposals.filter((p) => p.proj === pid),
+  rules: state.rules.filter((r) => r.proj === null || r.proj === pid),
+  brief: state.projectBriefs[pid] ?? null,
+  events: state.events.filter((e) => e.proj === pid),
+  calendar: state.calendar.filter((c) => c.proj === pid),
+});
 
 /** The single entry point: full state in, ranked typed blocks out. */
 export const composeGlance = (state: AppState, cal: Calendar = calendarOf(state)): Block[] => rankBlocks(detectSignals(state, cal), state);

@@ -390,6 +390,18 @@ const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (run_id, seq)
   );
   `,
+  // Budgets are facts (a ceiling someone set); spend is derived from runs.
+  // A daily brief may be about one project.
+  `
+  CREATE TABLE budgets (
+    scope TEXT NOT NULL CHECK (scope IN ('workspace','agent','project')),
+    ref TEXT NOT NULL DEFAULT '',
+    monthly_tokens INTEGER,
+    monthly_usd REAL,
+    PRIMARY KEY (scope, ref)
+  );
+  ALTER TABLE daily_briefs ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE CASCADE;
+  `,
 ];
 
 export const migrate = (db: Database): void => {

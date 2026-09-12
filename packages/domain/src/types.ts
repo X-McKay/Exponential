@@ -37,6 +37,9 @@ export interface Metric {
   stretch: number;
   /** Latest recorded reading (derived from metric_readings server-side; 0 when none). */
   current: number;
+  /** When and how the latest reading was recorded, when the server knows. */
+  readAt?: string | null;
+  readSource?: "eval" | "manual" | null;
 }
 
 export interface MetricReading {
@@ -316,6 +319,25 @@ export interface LlmInfo {
   models: string[];
   /** Model the judge uses when it differs from the default. */
   judgeModel: string | null;
+  /** USD per million tokens by model (LLM_PRICES); spend is derived from runs' token counts. */
+  prices: Record<string, ModelPrice>;
+}
+
+/** What a model costs, in USD per million tokens in and out. */
+export interface ModelPrice {
+  input: number;
+  output: number;
+}
+
+/** A monthly ceiling on agent spend for the workspace, one agent, or one project; enforced, never averaged. */
+export type BudgetScope = "workspace" | "agent" | "project";
+export const BUDGET_SCOPES: readonly BudgetScope[] = ["workspace", "agent", "project"];
+export interface Budget {
+  scope: BudgetScope;
+  /** Agent or project id; "" for the workspace. */
+  ref: string;
+  monthlyTokens: number | null;
+  monthlyUsd: number | null;
 }
 
 // ---- project setup drafts ---------------------------------------------------
@@ -544,6 +566,10 @@ export interface AppState {
   promptVersions: PromptVersion[];
   /** The latest daily brief for the signed-in user, or null for the composer's own. */
   brief: DailyBrief | null;
+  /** The latest project brief per project id, for the project overview. */
+  projectBriefs: Record<string, DailyBrief>;
+  /** Monthly spend ceilings; runs are refused once one is reached. */
+  budgets: Budget[];
   /** Newest first, trailing EVENT_WINDOW_DAYS. */
   events: Event[];
   calendar: CalendarEvent[];

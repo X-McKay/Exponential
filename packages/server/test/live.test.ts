@@ -29,7 +29,7 @@ const streaming = (): Llm => ({
     if (options.onToken) for (const piece of [reply.slice(0, 20), reply.slice(20, 60), reply.slice(60)]) options.onToken(piece);
     return Promise.resolve({ content: reply, model: "fake", usage: { prompt: 500, completion: 120 }, truncated: false });
   },
-  describe: () => ({ baseUrl: "http://fake", model: "fake", models: ["fake"], judgeModel: null }),
+  describe: () => ({ baseUrl: "http://fake", model: "fake", models: ["fake"], judgeModel: null, prices: {} }),
 });
 
 describe("run logs and the live channel", () => {

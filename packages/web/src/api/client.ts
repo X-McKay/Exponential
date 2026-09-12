@@ -1,6 +1,6 @@
 // ================= typed API client =================
 
-import type { Agent, AgentRun, CalendarEvent, DevFacts, DailyBrief, GovernanceItem, RunEvent, ImpactPair, Metric, MetricReading, Milestone, Project, ProjectTab, Proposal, Release, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
+import type { Agent, AgentRun, Budget, CalendarEvent, DevFacts, DailyBrief, GovernanceItem, RunEvent, ImpactPair, Metric, MetricReading, Milestone, Project, ProjectTab, Proposal, Release, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import type {
   AgentsInput,
@@ -99,6 +99,10 @@ export const api = {
   rules: () => request<Rule[]>("GET", routes.rules()),
   glanceSeen: () => request<Workspace>("POST", routes.glanceSeen()),
   curateGlance: () => request<{ run: AgentRun; brief: DailyBrief | null }>("POST", routes.glanceCurate()),
+  /** The project's brief: rewritten when stale or forced, otherwise returned as is with run null. */
+  projectBrief: (pid: string, force: boolean) => request<{ run: AgentRun | null; brief: DailyBrief | null }>("POST", `${routes.projectBrief(pid)}${force ? "?force=1" : ""}`),
+  budgets: () => request<Budget[]>("GET", routes.budgets()),
+  setBudgets: (body: Budget[]) => request<Budget[]>("PUT", routes.budgets(), body),
   createRule: (body: RuleInput) => request<Rule>("POST", routes.rules(), body),
   updateRule: (id: string, body: RuleInput) => request<Rule>("PUT", routes.rule(id), body),
   deleteRule: (id: string) => request<Ok>("DELETE", routes.rule(id)),

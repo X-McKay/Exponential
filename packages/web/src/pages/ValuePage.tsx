@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { STATUS_LABEL, attainment, impactOf, isMeasurable, monthLabel, realized, tierOf } from "@valueflow/domain";
+import { STATUS_LABEL, attainment, explainGatesCleared, explainRealized, explainTier, impactOf, isMeasurable, monthLabel, realized, tierOf } from "@valueflow/domain";
 import type { Calendar, Dim, ImpactPair, Milestone, Project } from "@valueflow/domain";
 import { Burnup } from "../charts/Burnup.tsx";
 import { EvalScatter } from "../charts/EvalScatter.tsx";
 import { levelColor } from "../charts/small.tsx";
 import { MilestoneEditor } from "../editors/MilestoneEditor.tsx";
 import { TargetsEditor } from "../editors/TargetsEditor.tsx";
+import { Why } from "../ui/Explain.tsx";
 import { Btn, Caret, Chip, Kpi, Ring, SectionCard, StatusIcon, Tip, ghostBtn, reset } from "../ui/primitives.tsx";
 import { C, STATUS_COLOR } from "../theme.ts";
 
@@ -48,7 +49,7 @@ function MilestoneRow({
             <StatusIcon status={m.status} /> {STATUS_LABEL[m.status]} · {monthLabel(m.month, cal.todayYm)}
           </span>
         </span>
-        <span style={{ display: "flex", gap: 5 }}>
+        <Why e={() => explainTier({ id: projectId }, m)} style={{ display: "flex", gap: 5, borderBottom: "none" }}>
           {measurable && t > 0 ? (
             <>
               <Chip tone={t === 2 ? "good" : "accent"}>FTE −{impactOf(m, "fte")}%</Chip>
@@ -61,7 +62,7 @@ function MilestoneRow({
               −{m.impact.base.fte}–{m.impact.stretch.fte}% / −{m.impact.base.time}–{m.impact.stretch.time}%
             </Chip>
           )}
-        </span>
+        </Why>
         <Tip label="Edit milestone">
           <span
             role="button"
@@ -193,9 +194,9 @@ export function ValuePage({
   return (
     <div style={{ paddingBottom: 30 }}>
       <section style={{ display: "flex", gap: 12, padding: "16px 20px 4px", flexWrap: "wrap" }}>
-        <Kpi label="FTE reduction realized" value={`${fte}%`} sub={`of ${p.targets.fte}% target`} color={C.indigoHi} ring={p.targets.fte ? fte / p.targets.fte : 0} />
-        <Kpi label="Time reduction realized" value={`${time}%`} sub={`of ${p.targets.time}% target`} color={C.indigoHi} ring={p.targets.time ? time / p.targets.time : 0} />
-        <Kpi label="Gates cleared" value={`${gates}/${measurable}`} sub="measurable milestones" color={C.green} />
+        <Kpi label="FTE reduction realized" value={<Why e={() => explainRealized(p, "fte")}>{`${fte}%`}</Why>} sub={`of ${p.targets.fte}% target`} color={C.indigoHi} ring={p.targets.fte ? fte / p.targets.fte : 0} />
+        <Kpi label="Time reduction realized" value={<Why e={() => explainRealized(p, "time")}>{`${time}%`}</Why>} sub={`of ${p.targets.time}% target`} color={C.indigoHi} ring={p.targets.time ? time / p.targets.time : 0} />
+        <Kpi label="Gates cleared" value={<Why e={() => explainGatesCleared(p)}>{`${gates}/${measurable}`}</Why>} sub="measurable milestones" color={C.green} />
       </section>
       <section style={{ padding: "14px 20px 6px" }}>
         <SectionCard

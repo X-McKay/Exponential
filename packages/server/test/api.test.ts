@@ -10,7 +10,10 @@ describe("seed", () => {
     const app = testApp();
     const { status, body } = await app.get<AppState>(routes.state());
     expect(status).toBe(200);
-    expect(body).toEqual(seedState());
+    // The server knows when each reading was taken; the fixtures do not carry that.
+    const stripped: AppState = { ...body, projects: body.projects.map((p) => ({ ...p, milestones: p.milestones.map((m) => ({ ...m, metrics: m.metrics.map(({ readAt: _a, readSource: _s, ...x }) => x) })) })) };
+    expect(stripped).toEqual(seedState());
+    expect(body.projects.find((p) => p.id === "ima")?.milestones.find((m) => m.id === "MS-21")?.metrics[0]).toMatchObject({ readAt: expect.stringMatching(/^2026-/), readSource: "eval" });
   });
 
   test("seeds ~30 readings per measurable metric, ending at the mockup's current value", async () => {

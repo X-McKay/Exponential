@@ -5,6 +5,8 @@
 // what it produced. Status, run counts, success rates, and "last run" are
 // derived from runs and the clock, never stored.
 
+import { runCost } from "./spend.ts";
+import type { PriceList } from "./spend.ts";
 import type { Agent, AgentRun, AgentStatus, PromptVersion, Proposal, RunScore, RunState } from "./types.ts";
 
 const DAY = 86_400_000;
@@ -240,10 +242,12 @@ export interface ModelRow {
   grounding: number | null;
   latencyMedianMs: number | null;
   tokensMean: number | null;
+  /** Mean USD per run when the model is priced. */
+  costMean: number | null;
 }
 
 /** Benchmark results per model for one agent under one prompt version (or any version when null), best first. */
-export const modelComparison = (agent: Pick<Agent, "id">, runs: AgentRun[], scores: RunScore[], promptVersion: string | null): ModelRow[] => {
+export const modelComparison = (agent: Pick<Agent, "id">, runs: AgentRun[], scores: RunScore[], promptVersion: string | null, prices: PriceList = {}): ModelRow[] => {
   const mine = runs.filter((r) => r.agentId === agent.id && r.benchmark !== null && r.model !== null && (promptVersion === null || r.promptVersion === promptVersion));
   const byModel = new Map<string, AgentRun[]>();
   for (const r of mine) byModel.set(r.model ?? "", [...(byModel.get(r.model ?? "") ?? []), r]);
@@ -260,6 +264,7 @@ export const modelComparison = (agent: Pick<Agent, "id">, runs: AgentRun[], scor
         grounding: scoreOf(scores, ids, "rules", "grounding"),
         latencyMedianMs: medianOf(ok.map((r) => r.latencyMs).filter((x): x is number => x !== null)),
         tokensMean: mean(ok.map((r) => (r.promptTokens ?? 0) + (r.completionTokens ?? 0)).filter((x) => x > 0)),
+        costMean: mean(ok.map((r) => runCost(r, prices)).filter((x): x is number => x !== null)),
       };
     })
     .sort((a, b) => (b.overall ?? -1) - (a.overall ?? -1) || a.model.localeCompare(b.model));

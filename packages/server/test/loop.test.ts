@@ -29,7 +29,7 @@ type Handler = (messages: ChatMessage[], options: ChatOptions) => string;
 const fakeLlm = (handler: Handler, models = ["fake"]): Llm => ({
   model: () => Promise.resolve("fake"),
   chat: (messages, options = {}) => Promise.resolve({ content: handler(messages, options), model: options.model ?? "fake", usage: { prompt: 900, completion: 200 }, truncated: false }),
-  describe: () => ({ baseUrl: "http://fake", model: "fake", models, judgeModel: null }),
+  describe: () => ({ baseUrl: "http://fake", model: "fake", models, judgeModel: null, prices: {} }),
 });
 
 const sys = (m: ChatMessage[]) => m[0]?.content ?? "";
@@ -273,7 +273,7 @@ describe("model scouting", () => {
         return Promise.resolve(Response.json({ model: body.model, choices: [{ message: { content: "{}" }, finish_reason: "stop" }] }));
       },
     });
-    expect(llm.describe()).toEqual({ baseUrl: "http://a.test/v1", model: "m1", models: ["m1", "m2@http://b.test/v1"], judgeModel: "judge-x" });
+    expect(llm.describe()).toEqual({ baseUrl: "http://a.test/v1", model: "m1", models: ["m1", "m2@http://b.test/v1"], judgeModel: "judge-x", prices: {} });
     await llm.chat([{ role: "user", content: "hi" }]);
     const r = await llm.chat([{ role: "user", content: "hi" }], { model: "m2@http://b.test/v1" });
     expect(r.model).toBe("m2@http://b.test/v1");

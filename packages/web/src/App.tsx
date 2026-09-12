@@ -9,6 +9,7 @@ import { SetupWizard } from "./editors/SetupWizard.tsx";
 import { WorkspaceEditor } from "./editors/WorkspaceEditor.tsx";
 import { CmdK } from "./palette/CmdK.tsx";
 import { ChatPanel } from "./ui/ChatPanel.tsx";
+import { ExplainProvider } from "./ui/Explain.tsx";
 import { AgentsPage } from "./pages/AgentsPage.tsx";
 import { DataPage } from "./pages/DataPage.tsx";
 import { DevPage } from "./pages/DevPage.tsx";
@@ -233,6 +234,7 @@ export function App() {
   const themeLabel: Record<ThemeChoice, string> = { system: "Theme: follows the system", light: "Theme: light", dark: "Theme: dark" };
 
   return (
+    <ExplainProvider state={state} onOpen={openProject}>
     <div style={{ display: "flex", minHeight: "100vh", background: C.bg, color: C.text, fontFamily: FONT, fontSize: 14 }}>
       {palette && <CmdK projects={projects} go={go} onClose={() => setPalette(false)} />}
       {chat && state.llm && (
@@ -476,6 +478,7 @@ export function App() {
               scores={state.scores}
               rules={state.rules}
               promptVersions={state.promptVersions}
+              budgets={state.budgets}
               projects={projects}
               asOf={state.asOf}
               llm={state.llm}
@@ -497,6 +500,7 @@ export function App() {
               onSetPrompt={(id, prompt) => void store.setAgentPrompt(id, prompt)}
               onSaveRule={(rule, input) => void store.saveRule(rule, input)}
               onDeleteRule={(id) => void store.deleteRule(id)}
+              onSaveBudgets={(b) => void store.saveBudgets(b)}
             />
           </>
         ) : view.page === "portfolio" ? (
@@ -554,7 +558,20 @@ export function App() {
                 ))}
               </div>
             </header>
-            {view.tab === "overview" && <OverviewPage p={proj} onEdit={() => setEditor({ kind: "project", pid: proj.id })} />}
+            {view.tab === "overview" && (
+              <OverviewPage
+                p={proj}
+                state={state}
+                cal={cal}
+                onEdit={() => setEditor({ kind: "project", pid: proj.id })}
+                onOpen={openProject}
+                onOpenInbox={() => go("inbox", null)}
+                onOpenAgents={() => go("agents", null)}
+                onDecide={(id, d) => void store.decideProposal(id, d)}
+                onRate={(id, r) => void store.rateRun(id, r)}
+                onCurate={store.curateProject}
+              />
+            )}
             {view.tab === "value" && (
               <ValuePage
                 p={proj}
@@ -609,5 +626,6 @@ export function App() {
         onDismiss={(id) => (id === -1 ? store.clearError() : store.dismissNotice(id))}
       />
     </div>
+    </ExplainProvider>
   );
 }

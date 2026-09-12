@@ -7,7 +7,7 @@
 // needs no model call: it is arithmetic over stored runs and scores.
 
 import type { Database } from "bun:sqlite";
-import { EVAL_CASES, PROJECT_KINDS, modelComparison, nextProposalId, nextRunId } from "@valueflow/domain";
+import { EVAL_CASES, PROJECT_KINDS, fmtUsd, modelComparison, nextProposalId, nextRunId } from "@valueflow/domain";
 import type { Agent, AgentRun, ModelRow, Proposal } from "@valueflow/domain";
 import { runBenchmark } from "./evals.ts";
 import type { Llm } from "./llm.ts";
@@ -22,10 +22,11 @@ export interface ScoutOptions {
   onProgress?: ((done: number, total: number) => void) | undefined;
 }
 
-/** Better by a clear margin, or as good and clearly cheaper. */
+/** Better by a clear margin, or as good and clearly faster or cheaper. */
 export const SCOUT_MIN_GAIN = 0.05;
 export const SCOUT_TIE = 0.03;
 export const SCOUT_LATENCY_RATIO = 0.7;
+export const SCOUT_COST_RATIO = 0.7;
 
 export interface Verdict {
   agent: Agent;
@@ -45,11 +46,15 @@ export const verdict = (agent: Agent, current: string, rows: ModelRow[]): Omit<V
   for (const c of others) {
     const gain = (c.overall ?? 0) - cur.overall;
     const faster = c.latencyMedianMs !== null && cur.latencyMedianMs !== null && c.latencyMedianMs <= cur.latencyMedianMs * SCOUT_LATENCY_RATIO;
+    const cheaper = c.costMean !== null && cur.costMean !== null && cur.costMean > 0 && c.costMean <= cur.costMean * SCOUT_COST_RATIO;
     const failsMore = c.failed > cur.failed;
     if (failsMore) continue;
     if (gain >= SCOUT_MIN_GAIN && (best === null || (c.overall ?? 0) > (best.overall ?? 0))) {
       best = c;
       reason = `judge overall ${Math.round((c.overall ?? 0) * 100)}% vs ${Math.round(cur.overall * 100)}% on the same ${c.n} cases`;
+    } else if (best === null && Math.abs(gain) <= SCOUT_TIE && cheaper) {
+      best = c;
+      reason = `same quality (${Math.round((c.overall ?? 0) * 100)}% vs ${Math.round(cur.overall * 100)}%) at ${fmtUsd(c.costMean ?? 0)} instead of ${fmtUsd(cur.costMean ?? 0)} per run`;
     } else if (best === null && Math.abs(gain) <= SCOUT_TIE && faster) {
       best = c;
       reason = `same quality (${Math.round((c.overall ?? 0) * 100)}% vs ${Math.round(cur.overall * 100)}%) at ${Math.round(((cur.latencyMedianMs ?? 0) - (c.latencyMedianMs ?? 0)) / 1000)}s less median latency`;
@@ -64,9 +69,9 @@ const secs = (v: number | null) => (v === null ? "—" : `${(v / 1000).toFixed(0
 const table = (v: Verdict): string =>
   [
     `## ${v.agent.name} (current: ${v.current}, prompt ${promptVersion(v.agent.kind, v.agent.prompt)})`,
-    "| model | cases | judge | expectations | grounding | latency | tokens | failed |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- |",
-    ...v.rows.map((r) => `| ${r.model}${r.model === v.current ? " (current)" : ""} | ${r.n} | ${pct(r.overall)} | ${pct(r.expectations)} | ${pct(r.grounding)} | ${secs(r.latencyMedianMs)} | ${r.tokensMean === null ? "—" : Math.round(r.tokensMean)} | ${r.failed} |`),
+    "| model | cases | judge | expectations | grounding | latency | tokens | cost/run | failed |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ...v.rows.map((r) => `| ${r.model}${r.model === v.current ? " (current)" : ""} | ${r.n} | ${pct(r.overall)} | ${pct(r.expectations)} | ${pct(r.grounding)} | ${secs(r.latencyMedianMs)} | ${r.tokensMean === null ? "—" : Math.round(r.tokensMean)} | ${r.costMean === null ? "—" : fmtUsd(r.costMean)} | ${r.failed} |`),
     v.recommend ? `**Recommend switching to ${v.recommend.model}**: ${v.reason}.` : `No switch: ${v.reason}.`,
   ].join("\n");
 
@@ -75,6 +80,7 @@ export const scoutModels = async (db: Database, llm: Llm, scout: Agent, now: Dat
   const state0 = loadState(db, now);
   const candidates = [...new Set((options.models ?? llm.describe().models).map((m) => m.trim()).filter(Boolean))];
   const defaultModel = llm.describe().model ?? (await llm.model());
+  const prices = llm.describe().prices;
   const targets = state0.agents.filter((a) => PROJECT_KINDS.includes(a.kind) && EVAL_CASES.some((c) => c.agentId === a.id) && (!options.agentId || a.id === options.agentId));
   const started = Date.now();
   const run: AgentRun = {
@@ -113,7 +119,7 @@ export const scoutModels = async (db: Database, llm: Llm, scout: Agent, now: Dat
     const jobs: { agent: Agent; model: string }[] = [];
     for (const a of targets) {
       const version = promptVersion(a.kind, a.prompt);
-      const have = new Set(modelComparison(a, state0.runs, state0.scores, version).filter((r) => r.overall !== null).map((r) => r.model));
+      const have = new Set(modelComparison(a, state0.runs, state0.scores, version, prices).filter((r) => r.overall !== null).map((r) => r.model));
       const current = a.model ?? defaultModel;
       for (const m of [current, ...candidates]) if (!have.has(m) && !jobs.some((j) => j.agent.id === a.id && j.model === m)) jobs.push({ agent: a, model: m });
     }
@@ -129,7 +135,7 @@ export const scoutModels = async (db: Database, llm: Llm, scout: Agent, now: Dat
     const state = loadState(db, now);
     const verdicts: Verdict[] = targets.map((a) => {
       const fresh = state.agents.find((x) => x.id === a.id) ?? a;
-      return verdict(fresh, fresh.model ?? defaultModel, modelComparison(fresh, state.runs, state.scores, promptVersion(fresh.kind, fresh.prompt)));
+      return verdict(fresh, fresh.model ?? defaultModel, modelComparison(fresh, state.runs, state.scores, promptVersion(fresh.kind, fresh.prompt), prices));
     });
     const switches = verdicts.filter((v) => v.recommend);
     const finished: AgentRun = {
@@ -137,7 +143,7 @@ export const scoutModels = async (db: Database, llm: Llm, scout: Agent, now: Dat
       state: "done",
       finishedAt: new Date().toISOString(),
       summary: switches.length ? `${switches.length} model switch${switches.length === 1 ? "" : "es"} worth taking: ${switches.map((v) => `${v.agent.name} → ${v.recommend?.model}`).join(", ")}` : `Compared ${candidates.length} models on ${targets.length} agents; the current model holds`,
-      output: `Candidates: ${candidates.join(", ")}. Judge: ${llm.describe().judgeModel ?? defaultModel}. Same cases, same judge; a candidate needs +${Math.round(SCOUT_MIN_GAIN * 100)} points, or equal quality at ≤${Math.round(SCOUT_LATENCY_RATIO * 100)}% of the latency, to be proposed.\n\n${verdicts.map(table).join("\n\n")}`,
+      output: `Candidates: ${candidates.join(", ")}. Judge: ${llm.describe().judgeModel ?? defaultModel}. Same cases, same judge; a candidate needs +${Math.round(SCOUT_MIN_GAIN * 100)} points, or equal quality at ≤${Math.round(SCOUT_COST_RATIO * 100)}% of the cost per run or ≤${Math.round(SCOUT_LATENCY_RATIO * 100)}% of the latency, to be proposed.\n\n${verdicts.map(table).join("\n\n")}`,
       latencyMs: Date.now() - started,
     };
     updateRun(db, finished);

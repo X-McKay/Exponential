@@ -157,6 +157,17 @@ body {
 
 /* ---- hover / active states ------------------------------------------- */
 
+/* A number that can explain itself. */
+.vf-why {
+  border-bottom: 1px dotted var(--vf-line3);
+  cursor: help;
+  transition: border-color 0.12s;
+}
+.vf-why:hover,
+.vf-why:focus-visible {
+  border-bottom-color: var(--vf-indigo-hi);
+  outline: none;
+}
 .vf-row:hover {
   background: var(--vf-panel2) !important;
 }

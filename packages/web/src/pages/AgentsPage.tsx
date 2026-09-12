@@ -1,14 +1,16 @@
 import { useState } from "react";
-import { AGENT_KIND_LABEL, AGENT_STATUS_LABEL, RUN_STATE_ICON, STEP_LABEL, agentStats, pendingProposals, relTime, runsOf } from "@valueflow/domain";
-import type { Agent, AgentRun, LlmInfo, Project, ProjectTab, PromptVersion, Proposal, Rule, RunScore } from "@valueflow/domain";
+import { AGENT_KIND_LABEL, AGENT_STATUS_LABEL, RUN_STATE_ICON, STEP_LABEL, agentStats, budgetLine, explainRuns, fmtTokens, fmtUsd, pendingProposals, relTime, runsInScope, runsOf, spendOf } from "@valueflow/domain";
+import type { Agent, AgentRun, Budget, LlmInfo, Project, ProjectTab, PromptVersion, Proposal, Rule, RunScore } from "@valueflow/domain";
 import type { RuleInput, RunAgentInput } from "@valueflow/shared";
 import { RunAgentEditor, RunViewer } from "../editors/RunAgent.tsx";
 import type { LiveRun } from "../state/live.ts";
 import { elapsed, useTicker } from "../ui/RunLive.tsx";
 import type { AgentsSection } from "../router.ts";
 import { AGENTS_SECTIONS } from "../router.ts";
+import { Why } from "../ui/Explain.tsx";
 import { QualityTable } from "../ui/QualityTable.tsx";
 import { RulesPanel } from "../ui/RulesPanel.tsx";
+import { BudgetEditor, SpendBar, budgetColor } from "../ui/Spend.tsx";
 import { Avatar, Caret, Chip, Kbd, Kpi, ListRow, SectionCard, Tip, ghostBtn, reset } from "../ui/primitives.tsx";
 import { AGENT_STATUS, C, RUN_COLOR } from "../theme.ts";
 
@@ -47,6 +49,7 @@ export function AgentsPage({
   scores,
   rules,
   promptVersions,
+  budgets,
   projects,
   asOf,
   llm,
@@ -68,6 +71,7 @@ export function AgentsPage({
   onSetPrompt,
   onSaveRule,
   onDeleteRule,
+  onSaveBudgets,
 }: {
   agents: Agent[];
   runs: AgentRun[];
@@ -75,6 +79,7 @@ export function AgentsPage({
   scores: RunScore[];
   rules: Rule[];
   promptVersions: PromptVersion[];
+  budgets: Budget[];
   projects: Project[];
   asOf: string;
   llm: LlmInfo | null;
@@ -97,7 +102,13 @@ export function AgentsPage({
   onSetPrompt: (agentId: string, prompt: string | null) => void;
   onSaveRule: (rule: Rule | null, input: RuleInput) => void;
   onDeleteRule: (id: string) => void;
+  onSaveBudgets: (budgets: Budget[]) => void;
 }) {
+  const prices = llm?.prices ?? {};
+  const workspaceSpend = budgetLine({ runs, budgets, asOf }, prices, "workspace", "");
+  const monthRuns = runsInScope(runs, "workspace", "", asOf);
+  const [editingBudgets, setEditingBudgets] = useState(false);
+  const spendValue = workspaceSpend.spend.tokens ? (workspaceSpend.spend.usd !== null ? fmtUsd(workspaceSpend.spend.usd) : fmtTokens(workspaceSpend.spend.tokens)) : "—";
   const inbox = pendingProposals({ proposals });
   const anyWorking = runs.some((r) => r.state === "working" || r.state === "queued");
   useTicker(anyWorking);
@@ -150,6 +161,24 @@ export function AgentsPage({
           color={workingAgents.length ? C.indigoHi : C.dim}
         />
         <Kpi label="Attention flags · 30d" value={attention} sub={auditors.length ? `from ${auditors.join(", ")}` : "none raised"} color={attention ? C.amber : C.dim} />
+        <Kpi
+          label="Spend · month"
+          value={
+            <Why
+              e={() =>
+                explainRuns("Agent spend this month", spendValue, `every run since the first of the month; tokens from the model's usage report${Object.keys(prices).length ? ", dollars from LLM_PRICES" : " (set LLM_PRICES to see dollars)"}`, monthRuns, { agents }, (r) => {
+                  const sp = spendOf([r], prices);
+                  return `${sp.usd !== null ? `${fmtUsd(sp.usd)} · ` : ""}${fmtTokens(sp.tokens)} tokens`;
+                })
+              }
+            >
+              {spendValue}
+            </Why>
+          }
+          sub={workspaceSpend.budget ? `${Math.round((workspaceSpend.used ?? 0) * 100)}% of the monthly budget${workspaceSpend.state === "over" ? " · runs paused" : ""}` : `${fmtTokens(workspaceSpend.spend.tokens)} tokens · no budget set`}
+          color={workspaceSpend.spend.tokens ? budgetColor(workspaceSpend) : C.dim}
+          ring={workspaceSpend.used === null ? undefined : Math.min(1, workspaceSpend.used)}
+        />
         <Kpi
           label="Waiting on you"
           value={inbox.length}
@@ -372,12 +401,21 @@ export function AgentsPage({
             </span>
           }
         >
+          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 14px", borderBottom: `1px solid ${C.line}`, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 260 }}>
+              <SpendBar line={workspaceSpend} label="Month to date" />
+            </div>
+            <button type="button" className="vf-ghost" onClick={() => setEditingBudgets(true)} style={{ ...ghostBtn, height: 24 }}>
+              {budgets.length ? `Budgets (${budgets.length})` : "Set budgets…"}
+            </button>
+          </div>
           <QualityTable
             agents={agents}
             runs={runs}
             scores={scores}
             proposals={proposals}
             versions={promptVersions}
+            budgets={budgets}
             asOf={asOf}
             llm={llm}
             busy={jobLabel}
@@ -397,6 +435,19 @@ export function AgentsPage({
         Every run briefs the agent with live state and stores the result; runs flagged for attention surface on Glance. Audie and Sentry run nightly. Monday writes the weekly brief, Coach proposes prompt changes from measured runs, and Scout compares candidate models, all weekly, all as proposals you decide on in the inbox.
       </div>
 
+      {editingBudgets && (
+        <BudgetEditor
+          budgets={budgets}
+          agents={agents}
+          projects={projects}
+          prices={prices}
+          onSave={(b) => {
+            onSaveBudgets(b);
+            setEditingBudgets(false);
+          }}
+          onClose={() => setEditingBudgets(false)}
+        />
+      )}
       {running && (
         <RunAgentEditor
           agent={running}

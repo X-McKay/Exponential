@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { GSTATUS_LABEL, govCounts, readiness } from "@valueflow/domain";
+import { GSTATUS_LABEL, explainOpenItems, explainReadiness, govCounts, readiness } from "@valueflow/domain";
 import type { GovernanceItem, Project } from "@valueflow/domain";
 import { GovEditor } from "../editors/GovEditor.tsx";
+import { Why } from "../ui/Explain.tsx";
 import { Avatar, Caret, Chip, Kpi, SectionCard, ghostBtn, reset } from "../ui/primitives.tsx";
 import { C, GSTATUS_COLOR, TIER_COLOR, govChipTone, readinessColor } from "../theme.ts";
 
@@ -25,14 +26,14 @@ export function GovernancePage({
   return (
     <div style={{ padding: "16px 20px 30px" }}>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
-        <Kpi label="Governance readiness" value={`${Math.round(r * 100)}%`} sub="approved / required items" color={readinessColor(r)} ring={r} />
+        <Kpi label="Governance readiness" value={<Why e={() => explainReadiness(p)}>{`${Math.round(r * 100)}%`}</Why>} sub="approved / required items" color={readinessColor(r)} ring={r} />
         <Kpi
           label="AI risk tier"
           value={p.tier ? `Tier ${p.tier}` : "—"}
           sub={p.committee ? `Committee ${p.committee.date} · ${p.committee.ref}` : "committee review pending"}
           color={p.tier ? TIER_COLOR[p.tier] : C.dim}
         />
-        <Kpi label="Open items" value={openItems} sub={`${counts.missing} missing · ${counts.draft} draft · ${counts.in_review} in review`} color={counts.missing > 0 ? C.red : C.amber} />
+        <Kpi label="Open items" value={<Why e={() => explainOpenItems(p)}>{openItems}</Why>} sub={`${counts.missing} missing · ${counts.draft} draft · ${counts.in_review} in review`} color={counts.missing > 0 ? C.red : C.amber} />
       </div>
 
       {p.tier === 1 && (

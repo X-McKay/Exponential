@@ -84,6 +84,7 @@ Settings come from the environment. Bun loads `.env` from its working directory;
 | `LLM_MODELS` | unset | Comma-separated candidate models the scout benchmarks against the current one. An entry may be `name@https://other-host/v1` to reach a second endpoint (same API key). |
 | `BRIEF_WEBHOOK_URL` | unset (in-app only) | Also POST the weekly brief as JSON (`{ text, title, summary, body, runId, to }`) to Slack, Teams, Zapier, or your own endpoint. |
 | `GLANCE_CURATE` | on | `off` keeps Glance in the composer's default order instead of re-curating in the background when the cards change. |
+| `LLM_PRICES` | unset (spend in tokens only) | `model=in/out,…` in USD per million tokens, e.g. `Qwen3.6-35B-A3B-NVFP4=0.20/0.60`. Turns every run's token counts into money on the Agents page and lets budgets be set in dollars. |
 | `NODE_ENV` | unset | `production` serves the built bundle instead of bundling on the fly. `bun run start` sets it. |
 
 ### Changing dependencies
@@ -172,6 +173,10 @@ An agent is a definition (kind, model, owner, schedule); a run is a fact. A run 
 
 **Better models where it matters: the scout.** With candidate models in `LLM_MODELS`, Scout runs every benchmark case on each candidate under the agent's current prompt version, judges them with the same rubric, and writes a comparison table (judge, expectations, grounding, latency, tokens). It proposes a switch only when a candidate is at least five points better, or equal within three points and at 70% of the latency or less. Accepting sets the agent's model; the judge can run on its own model via `EVAL_JUDGE_MODEL`. Scout runs weekly when candidates exist, or from *Scout models* on the Quality section.
 
+**Cost governance.** Every run records the tokens it used; with `LLM_PRICES` those become dollars. The Agents page shows month-to-date spend for the workspace (a KPI that explains itself run by run), per agent in the Quality table, and per project on its overview. *Budgets…* sets a monthly ceiling, in dollars or tokens, for the workspace, any agent, or any project; the tighter one counts. From 80% the bar turns amber and Glance carries a *Budget nearly used* signal; at the ceiling the signal turns red, scheduled runs for that scope are held back (the log says so), and manual runs, the Ask panel, the curator, benchmarks, and the scout are refused with the reason until the month turns or the budget is raised. Budgets are facts (`budgets`); spend is derived. The scout also counts cost: a candidate as good as the current model at 70% of the cost per run or less earns a proposal.
+
+**Provenance on every number.** Derived numbers carry a dotted underline. Clicking one opens where it comes from: the value, the rule that produced it, and its inputs, down to the facts, each with *open* and who last changed it (an accepted proposal names the agent and the rule; a metric names its latest reading). Readiness, missing and open items, realized value per dimension, gates cleared, each milestone's gate, each release's state and criteria, and agent spend explain themselves this way. The trees come from `packages/domain/src/explain.ts`, the same pure functions as the derivations, so an explanation can never disagree with the number.
+
 **Setting up a project from documents.** *Set up from documents…* on Portfolio hands a setup agent a name, a brief, pasted snippets, and uploaded Word, PowerPoint, or text files (a dependency-free zip reader pulls the text out of `.docx` and `.pptx`; PDFs are reported as unsupported). The agent drafts every field of the project record — stage, risk tier, committee approval, targets, team, repositories, milestones with gate metrics, governance items with evidence-based statuses, releases with criteria — each with a rationale, its source document, and a confidence. The review step lets you untick, edit, or ask the agent to change things (rows you edited survive a refinement), then creates everything in one transaction.
 
 ### Glance: a daily brief written from facts
@@ -179,6 +184,8 @@ An agent is a definition (kind, model, owner, schedule); a run is a fact. A run 
 Glance is a daily brief: a headline, a few paragraphs of need-to-know, and under a paragraph a widget wherever a visual says it better than prose. A deterministic composer finds every signal from facts (blocked releases, gates under threshold, failing CI, Tier 1 gaps, stretch within reach, the value trajectory, agent flags, proposals waiting, this week's brief, activity since you last looked, what is coming), each with a stable id. With a model configured, the **Curator** agent writes the brief from those signals and the reader's context (name, items they own, proposals pending, last visit). It returns, under a JSON schema, at most six sections, each with at most one typed widget: `metric`, `gates`, `release`, `governance`, `value`, `proposals`, `ci`, `upcoming`, `activity`, or a small `table`. Widgets point at facts by id and render from live state, so a brief written this morning shows this afternoon's numbers; a widget that points at nothing is dropped and counted against the run (`widgets_valid`), and every figure in the prose and in a table is checked against the signals by the grounding rule. The brief is a run like any other: judged, rated with the thumbs on the page, and benchmarked (`curator-morning` expects the blocked release with a release widget and the Tier 1 gaps to be covered). Without a model, the composer writes its own brief with the same widgets. The server rewrites in the background when the signals change (a fingerprint of their ids and titles, ignoring the visit-dependent activity count), never per page load; *Rewrite* asks for a fresh one now. The composer's cards remain under *All signals*.
 
 The proposals widget accepts and dismisses inline. "Since you last looked" starts at the reader's last visit, recorded after a few seconds on the page (`POST /api/glance/seen`).
+
+**Today on each project.** A project's overview opens with the same kind of brief about that project alone. `projectView(state, pid)` narrows the workspace to one project (its facts, proposals, runs, events, calendar), and the composer and curator work unchanged on it; the curator is told it is writing about one project and not to name it in every item. Project briefs are stored per project, written nightly with the workspace one, and refreshed when the overview is opened and the stored brief no longer matches the signals (`POST /api/projects/:pid/brief` returns the stored brief without a model call when it is current; `?force=1` rewrites).
 
 ### Glance as a composition contract
 
@@ -241,7 +248,7 @@ To start from a clean slate rather than the sample portfolio, delete the three s
 | POST | `/api/projects/:pid/sync` | |
 | GET | `/api/sync` | |
 | PUT | `/api/agents` | `Agent[]` |
-| POST | `/api/agents/:aid/runs` | `{ proj?, tab?, instruction?, target? }` (`proj` for project agents; `target` picks the agent to tune or scout) |
+| POST | `/api/agents/:aid/runs` | `{ proj?, tab?, instruction?, target? }` (`proj` for project agents; `target` picks the agent to tune or scout); 409 `over budget: …` when a ceiling is reached |
 | POST | `/api/proposals/:id/accept` · `/dismiss` | |
 | POST | `/api/chat` | `{ messages: [{ role, content }], proj? }` → `{ answer, links, proposals, runId, model }` |
 | POST | `/api/runs/:id/rate` | `{ rating: 1 \| -1 \| null, note? }` |
@@ -252,6 +259,8 @@ To start from a clean slate rather than the sample portfolio, delete the three s
 | POST | `/api/evals/scout` | `{ agentId?, models? }` → 202; same status endpoint |
 | POST | `/api/glance/seen` | records the reader's visit |
 | POST | `/api/glance/curate` | `{ run, brief }` from the curator now |
+| POST | `/api/projects/:pid/brief` | the project's brief: `{ run: null, brief }` when current, a fresh `{ run, brief }` when stale or `?force=1` |
+| GET / PUT | `/api/budgets` | `Budget[]` (`{ scope, ref, monthlyUsd, monthlyTokens }`; the list is replaced) |
 | POST | `/api/agents/:aid/prompt` | `{ prompt: string \| null }` records a prompt version |
 | GET / POST | `/api/rules` | `RuleInput` |
 | PUT / DELETE | `/api/rules/:id` | `RuleInput` |

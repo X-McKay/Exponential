@@ -4,7 +4,7 @@
 // is the fallback, and "since you last looked" starts at the reader's visit.
 
 import { describe, expect, test } from "bun:test";
-import { blocksHash, calendarOf, composeGlance, defaultBrief, parseWidget, resolveWidget } from "@valueflow/domain";
+import { blocksHash, calendarOf, composeGlance, defaultBrief, parseWidget, projectView, resolveWidget } from "@valueflow/domain";
 import type { AgentRun, AppState, DailyBrief, Workspace } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import { createApp } from "../src/app.ts";
@@ -21,7 +21,7 @@ const NOW = new Date("2026-09-10T12:00:00Z");
 const fakeLlm = (handler: (m: ChatMessage[], o: ChatOptions) => string): Llm => ({
   model: () => Promise.resolve("fake"),
   chat: (messages, options = {}) => Promise.resolve({ content: handler(messages, options), model: "fake", usage: { prompt: 700, completion: 150 }, truncated: false }),
-  describe: () => ({ baseUrl: "http://fake", model: "fake", models: ["fake"], judgeModel: null }),
+  describe: () => ({ baseUrl: "http://fake", model: "fake", models: ["fake"], judgeModel: null, prices: {} }),
 });
 
 /** A curator that writes three sections: a release widget, a table with one invented figure, and a widget pointing nowhere. */
@@ -164,5 +164,43 @@ describe("curator", () => {
     await new Promise((r) => setTimeout(r, 30));
     // A visit changes the activity title but no fact, so no rewrite.
     expect(calls).toBe(1);
+  });
+});
+
+describe("project briefs", () => {
+  test("a project's brief sees only that project, is stored per project, and the route rewrites only when stale or forced", async () => {
+    const seen: string[] = [];
+    const llm = fakeLlm((m) => {
+      seen.push(m[1]?.content ?? "");
+      return JSON.stringify({ headline: "R1 is blocked on recall", sections: [{ group: "top", text: "R1 Shadow mode is blocked: 1 of 4 criteria met.", tip: null, action: { label: "View release", proj: "ima", tab: "roadmap" }, widget: { type: "release", proj: "ima", rid: "R1" } }] });
+    });
+    const { db, call } = appWith(llm);
+    const view = projectView(loadState(db, NOW), "ima");
+    expect(view.projects.map((p) => p.id)).toEqual(["ima"]);
+    expect(Object.keys(view.releases)).toEqual(["ima"]);
+    expect(view.runs.every((r) => r.proj === "ima")).toBe(true);
+    expect(view.events.every((e) => e.proj === "ima")).toBe(true);
+    expect(composeGlance(view).every((b) => b.proj === "ima")).toBe(true);
+    expect(defaultBrief(view, calendarOf(view), "project").sections[0]?.text).toContain("blocked");
+
+    const first = await call<{ run: AgentRun | null; brief: DailyBrief | null }>("POST", routes.projectBrief("ima"));
+    expect(first.status).toBe(200);
+    expect(first.body.run?.proj).toBe("ima");
+    expect(first.body.run?.instruction).toBe("Daily brief on IMA compliance rule extraction for Al McKay");
+    expect(first.body.brief?.runId).toBe(first.body.run?.id);
+    expect(seen[0]).toContain("This brief is about one project only: IMA compliance rule extraction");
+    expect(seen[0]).not.toContain("Client onboarding");
+    const state = (await call<AppState>("GET", routes.state())).body;
+    expect(state.projectBriefs.ima?.runId).toBe(first.body.run?.id);
+    expect(state.brief).toBeNull();
+    // Still current: no model call, the stored brief comes back.
+    const again = await call<{ run: AgentRun | null; brief: DailyBrief | null }>("POST", routes.projectBrief("ima"));
+    expect(again.body.run).toBeNull();
+    expect(again.body.brief?.runId).toBe(first.body.run?.id);
+    expect(seen.length).toBe(1);
+    const forced = await call<{ run: AgentRun | null; brief: DailyBrief | null }>("POST", `${routes.projectBrief("ima")}?force=1`);
+    expect(forced.body.run?.id).not.toBe(first.body.run?.id);
+    expect(seen.length).toBe(2);
+    expect((await call("POST", routes.projectBrief("nope"))).status).toBe(404);
   });
 });
