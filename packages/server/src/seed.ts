@@ -49,8 +49,9 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
     project: db.query("INSERT INTO projects (id, key, name, stage, description, tier, committee_date, committee_ref, target_fte, target_time, sort) VALUES (?,?,?,?,?,?,?,?,?,?,?)"),
     repo: db.query("INSERT INTO project_repos (project_id, name, url, sort) VALUES (?,?,?,?)"),
     member: db.query("INSERT INTO team_members (project_id, ini, name, role, sort) VALUES (?,?,?,?,?)"),
-    milestone: db.query("INSERT INTO milestones (project_id, id, name, status, month, base_fte, base_time, stretch_fte, stretch_time, sort) VALUES (?,?,?,?,?,?,?,?,?,?)"),
+    milestone: db.query("INSERT INTO milestones (project_id, id, name, status, month, base_fte, base_time, stretch_fte, stretch_time, sort, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"),
     metric: db.query("INSERT INTO metrics (project_id, milestone_id, id, label, base, stretch, sort) VALUES (?,?,?,?,?,?,?)"),
+    snapshot: db.query("INSERT INTO milestone_snapshots (project_id, milestone_id, at, status, month, base_fte, base_time, stretch_fte, stretch_time, metrics) VALUES (?,?,?,?,?,?,?,?,?,?)"),
     reading: db.query("INSERT INTO metric_readings (project_id, milestone_id, metric_id, value, recorded_at, source) VALUES (?,?,?,?,?,?)"),
     gov: db.query("INSERT INTO governance_items (project_id, id, cat, name, status, owner, date, detail, link, sort) VALUES (?,?,?,?,?,?,?,?,?,?)"),
     release: db.query("INSERT INTO releases (project_id, id, name, month, sort) VALUES (?,?,?,?,?)"),
@@ -67,7 +68,7 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
       p.repos.forEach((r, i) => q.repo.run(p.id, r.name, r.url, i));
       p.team.forEach((t, i) => q.member.run(p.id, t.ini, t.name, t.role, i));
       p.milestones.forEach((m, mi) => {
-        q.milestone.run(p.id, m.id, m.name, m.status, ym(m.month), m.impact.base.fte, m.impact.base.time, m.impact.stretch.fte, m.impact.stretch.time, mi);
+        q.milestone.run(p.id, m.id, m.name, m.status, ym(m.month), m.impact.base.fte, m.impact.base.time, m.impact.stretch.fte, m.impact.stretch.time, mi, now.toISOString());
         m.metrics.forEach((x, xi) => {
           q.metric.run(p.id, m.id, x.id, x.label, x.base, x.stretch, xi);
           if (!isMeasurable(m) || x.current <= 0) return;
@@ -78,6 +79,18 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
             q.reading.run(p.id, m.id, x.id, v, at.toISOString(), "eval");
           });
         });
+        q.snapshot.run(
+          p.id,
+          m.id,
+          now.toISOString(),
+          m.status,
+          ym(m.month),
+          m.impact.base.fte,
+          m.impact.base.time,
+          m.impact.stretch.fte,
+          m.impact.stretch.time,
+          JSON.stringify(m.metrics.map((x) => ({ ...x, readAt: isMeasurable(m) && x.current > 0 ? now.toISOString() : null, readSource: isMeasurable(m) && x.current > 0 ? "eval" : null }))),
+        );
       });
       p.governance.forEach((g, i) => q.gov.run(p.id, g.id, g.cat, g.name, g.status, g.owner, g.date, g.detail, g.link ?? null, i));
       (state.releases[p.id] ?? []).forEach((r, ri) => {
@@ -120,7 +133,7 @@ export const ensureAgents = (db: Database): string[] => {
   const have = new Set(db.query<{ kind: string }, []>("SELECT kind FROM agents").all().map((r) => r.kind));
   const added: string[] = [];
   for (const a of AGENTS) {
-    if (have.has(a.kind) || !["chat", "rules", "brief", "tuner", "scout", "curator"].includes(a.kind)) continue;
+    if (a.id === "project-manager" ? !!db.query("SELECT id FROM agents WHERE id = ?").get(a.id) : have.has(a.kind) || !["chat", "rules", "brief", "tuner", "scout", "curator"].includes(a.kind)) continue;
     const sort = db.query<{ s: number }, []>("SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM agents").get()?.s ?? 0;
     db.query("INSERT INTO agents (id, sort, name, grad, purpose, kind, model, owner, caps, schedule, prompt) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run(a.id, sort, a.name, a.grad, a.purpose, a.kind, a.model, a.owner, JSON.stringify(a.caps), a.schedule, a.prompt);
     added.push(a.id);

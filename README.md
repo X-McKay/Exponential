@@ -1,6 +1,20 @@
 # ValueFlow
 
-ValueFlow is an AI-project delivery platform built on one idea: **claimed value is worthless until delivery proves it**. Every project states value targets (FTE reduction, time reduction). Every milestone carries an impact it *could* contribute and a set of eval metrics with base and stretch gates. A milestone only counts toward realized value once it has shipped **and** its eval metrics clear a gate; releases only go live when every criterion — performance gates, governance approvals, manual sign-offs — is met against live state. The Glance briefing is generated from the same facts, so what a sponsor reads in the morning is exactly what the eval suite and the governance register say.
+ValueFlow is an AI-project delivery platform built on one idea: **claimed value is worthless until delivery proves it**. Every project states value targets (FTE reduction, time reduction). Every milestone carries an impact it *could* contribute and a set of eval metrics with base and stretch gates. A milestone contributes to **eligible value estimates** once it has shipped **and** its recorded metrics clear a gate. Eligible estimates are not observed business benefits. Release readiness follows live criteria; passing criteria or reaching a planned date never proves deployment. The Glance briefing is generated from the same facts, so what a sponsor reads in the morning is exactly what the eval suite and the governance register say.
+
+## Security and evidence integrity
+
+The server binds to `127.0.0.1` by default. For shared hosting, build the app and place it behind a trusted authenticating proxy. Set `HOST`, a random `VALUEFLOW_ACCESS_TOKEN` of at least 32 characters, and exact comma-separated public `VALUEFLOW_ORIGINS`. The proxy must inject `Authorization: Bearer <token>` on authenticated upstream requests, including assets and event streams; keep the backend inaccessible directly. Do not put this token in frontend code. This is an instance access boundary, not per-user role-based access control.
+
+A URL-bearing model selection is permitted only when it is listed in server-side `LLM_MODELS`. Default `LLM_API_KEY` credentials apply only to the default API base. Configure alternate credentials using `LLM_PROVIDER_<NAME>_BASE_URL` and `LLM_PROVIDER_<NAME>_API_KEY`. Provider redirects are refused. Arbitrary model URLs sent through the API cannot authorize a new destination.
+
+Sliders are local scenarios, with a reset action. Recording a measurement is explicit and updates shared evidence. Historical charts use timestamped snapshots from this version onward; periods without trustworthy snapshots are unknown, not reconstructed from current facts. A release with no criteria is **Not configured**; passing criteria means **Ready**, regardless of its planned month. Eligible value is an estimate based on shipped milestones and passing gates, not observed savings.
+
+Proposals capture their input facts, expire after seven days, and are refused if those facts changed. Applying a proposal and recording its decision is atomic. Pending proposals from before this update lack an input snapshot: dismiss them and request fresh proposals. Automatic rules may create calendar reminders only after enough human decisions on the unchanged rule; approvals, milestone transitions, targets, models and prompts require a person.
+
+Budgets are **soft spending limits**. Each provider attempt—including retries, judges and document setup—records usage and reserves estimated input/output capacity before execution. Zero pauses that scope. Unknown usage, unknown prices for a dollar limit, and unreconciled interrupted calls hold further budgeted work. Provider-reported usage and token estimates cannot guarantee a hard billing cap. Reconcile uncertain calls with provider records before resuming; do not erase ledger rows to make room.
+
+Migrations preserve existing data and run on startup. Back up the database before upgrading as usual. Removing a metric retires its definition and retains its readings. Removing a milestone archives its readings and snapshots; its past chart contribution remains available. Explicit project deletion still removes the project and its child data.
 
 ## Setup
 
@@ -20,7 +34,7 @@ Bun is the runtime, package manager, bundler, and test runner: there is no Node,
 git clone https://github.com/X-McKay/Exponential.git
 cd Exponential
 cp .env.example .env   # optional: LLM endpoint, sync source, pinned clock
-just setup             # bun install --frozen-lockfile, then seed data/valueflow.sqlite
+just deps              # bun install --frozen-lockfile
 just dev               # dev server with HMR on http://localhost:3000
 ```
 
@@ -31,13 +45,20 @@ nix develop
 just dev
 ```
 
-Without `just`, the equivalent commands are `bun install`, `bun run seed`, and `bun run dev`.
+Without `just`, run `bun install --frozen-lockfile` followed by `bun run dev`. Startup creates sample data only when the database is empty and migrates existing databases in place. `bun run seed` resets the database to sample data; it is not needed for normal startup.
 
 If port 3000 is taken, every recipe honours `PORT`:
 
 ```sh
 PORT=3001 just dev
 ```
+
+### Review the AI team
+
+Open [Agents](http://localhost:3000/#/agents) and choose Project Manager or Communications Director. Assignments, conversations, and artifacts persist in the local SQLite database. Configure `LLM_BASE_URL` and any required provider credentials in `.env` to execute runs. Set `AGENT_SCHEDULE=off` for manual-only review; background assignments require scheduling enabled and opt-in settings on the assignment.
+
+- [Project Manager workflow](docs/project-manager-implementation.md)
+- [Communications Director workflow](docs/communications-director-implementation.md)
 
 ### Everyday commands
 
@@ -81,7 +102,7 @@ Settings come from the environment. Bun loads `.env` from its working directory;
 | `AGENT_SCHEDULE` | on | `off` disables the nightly scheduled runs. |
 | `EVAL_JUDGE` | on | `off` stops the LLM judge scoring every finished run in the background (rules scores are always recorded; *Judge this run* still works). |
 | `EVAL_JUDGE_MODEL` | unset (same as `LLM_MODEL`) | A different model for the judge, so agents are not graded by themselves. |
-| `LLM_MODELS` | unset | Comma-separated candidate models the scout benchmarks against the current one. An entry may be `name@https://other-host/v1` to reach a second endpoint (same API key). |
+| `LLM_MODELS` | unset | Comma-separated candidate models the scout benchmarks against the current one. An entry may be `name@https://other-host/v1` to reach a second endpoint (separate server-configured credentials; see security notes below). |
 | `BRIEF_WEBHOOK_URL` | unset (in-app only) | Also POST the weekly brief as JSON (`{ text, title, summary, body, runId, to }`) to Slack, Teams, Zapier, or your own endpoint. |
 | `GLANCE_CURATE` | on | `off` keeps Glance in the composer's default order instead of re-curating in the background when the cards change. |
 | `LLM_PRICES` | unset (spend in tokens only) | `model=in/out,…` in USD per million tokens, e.g. `Qwen3.6-35B-A3B-NVFP4=0.20/0.60`. Turns every run's token counts into money on the Agents page and lets budgets be set in dollars. |
@@ -126,7 +147,7 @@ packages/
                                           │
                      domain.* (same pure functions on server and client)
                                           ▼
-   realized value · gate tiers · readiness · release states · burn-up · calendar axis
+   eligible value · gate tiers · readiness · release states · burn-up · calendar axis
    dev stats · commit chart · contributors · feed · "coming up" · agent status · Glance
 ```
 
@@ -138,8 +159,8 @@ The database holds facts: the workspace user, projects with their team and repos
 
 Consequences you can see in the app:
 
-- A metric's `current` is the latest row in `metric_readings`. Dragging a slider or editing "Current" appends a reading; history is never rewritten.
-- Deleting a milestone or governance item leaves any release criterion that referenced it in place; it resolves to *not met* / *not tracked* at read time rather than crashing or silently disappearing.
+- A metric's `current` is the latest row in `metric_readings`. Sliders change a local scenario only. **Record measurement** appends a manual reading. Milestone metadata edits never replace existing readings.
+- Deleting an unmeasured milestone or governance item leaves any release criterion that referenced it in place; it resolves to *not met* / *not tracked* at read time rather than crashing or silently disappearing.
 - N/A governance items are excluded from readiness. A measurable milestone with no metrics can never clear a gate.
 - "3h ago", "Sep 14", "Jan '27", and every KPI tile are formatted from timestamps and counts at read time, against the server clock.
 
@@ -165,7 +186,7 @@ An agent is a definition (kind, model, owner, schedule); a run is a fact. A run 
 
 **Evals: measured, not felt.** Every finished run is scored on three layers, all stored in `run_scores` and never derived on the fly from prose. *Rules* run instantly: `format` (summary, body, and a non-empty reply), `grounding` (the share of ids, percentages, and larger numbers in the output that appear in the briefing), and `proposals_valid` (the share of returned proposals that survived validation). A *judge* (the same model, a separate prompt) grades groundedness, completeness, actionability, and clarity 1–5 with a note; groundedness counts double in the overall. *People* rate a run 👍 / 👎 with a note in the run viewer. The Quality section on Agents turns these into a scorecard per agent: rules, judge, human rating, proposals accepted, latency, and the prompt version (a hash of the system prompt, so a change in wording is visible as a new version). *Run benchmark* replays a fixed set of cases (`EVAL_CASES`) against each agent with expectations checked by the judge, so two prompt versions or two models can be compared on the same questions; benchmark runs are labelled, excluded from attention flags, and their proposals are scored but not queued. A reply the model cut off at the token budget is retried once with more room and a request to be terse.
 
-**Standing rules.** A person writes a rule in plain language on the Agents page ("If a Tier 1 project has a failing build for more than two days, add a calendar event for a fix-by decision and flag me"). Sentry, the rules agent, checks every enabled rule against each project's live state nightly, reports fires / does not fire with evidence, and turns what a fired rule asks for into proposals tagged with the rule's id. Anything a rule did not ask for is dropped. The rule's acceptance rate is derived from those proposals; after five decisions at 80% or better accepted the rule has *earned autonomy*, and the person can switch it to apply its proposals immediately (the proposal is still recorded, as accepted). The switch is always visible and always reversible.
+**Standing rules.** A person writes a rule in plain language on the Agents page ("If a Tier 1 project has a failing build for more than two days, add a calendar event for a fix-by decision and flag me"). Sentry, the rules agent, checks every enabled rule against each project's live state nightly, reports fires / does not fire with evidence, and turns what a fired rule asks for into proposals tagged with the rule's id. Anything a rule did not ask for is dropped. The rule's acceptance rate is derived from those proposals; after five decisions at 80% or better accepted the rule has *earned autonomy*, and the person can enable automatic calendar reminders on the unchanged rule. The server enforces eligibility; other changes remain pending for a person. Automatic decisions do not count toward earned autonomy. The switch is always visible and always reversible.
 
 **The weekly brief.** Monday, the brief agent, runs weekly (or on demand) over the whole workspace and writes one person's note: what moved, what is blocked, decisions waiting on them, proposals pending, with links to where to look. It is stored as a workspace-level run, shows on Glance as *Your week*, and is posted to `BRIEF_WEBHOOK_URL` when set. `just brief` prints it.
 
@@ -175,7 +196,7 @@ An agent is a definition (kind, model, owner, schedule); a run is a fact. A run 
 
 **Cost governance.** Every run records the tokens it used; with `LLM_PRICES` those become dollars. The Agents page shows month-to-date spend for the workspace (a KPI that explains itself run by run), per agent in the Quality table, and per project on its overview. *Budgets…* sets a monthly ceiling, in dollars or tokens, for the workspace, any agent, or any project; the tighter one counts. From 80% the bar turns amber and Glance carries a *Budget nearly used* signal; at the ceiling the signal turns red, scheduled runs for that scope are held back (the log says so), and manual runs, the Ask panel, the curator, benchmarks, and the scout are refused with the reason until the month turns or the budget is raised. Budgets are facts (`budgets`); spend is derived. The scout also counts cost: a candidate as good as the current model at 70% of the cost per run or less earns a proposal.
 
-**Provenance on every number.** Derived numbers carry a dotted underline. Clicking one opens where it comes from: the value, the rule that produced it, and its inputs, down to the facts, each with *open* and who last changed it (an accepted proposal names the agent and the rule; a metric names its latest reading). Readiness, missing and open items, realized value per dimension, gates cleared, each milestone's gate, each release's state and criteria, and agent spend explain themselves this way. The trees come from `packages/domain/src/explain.ts`, the same pure functions as the derivations, so an explanation can never disagree with the number.
+**Provenance on every number.** Derived numbers carry a dotted underline. Clicking one opens where it comes from: the value, the rule that produced it, and its inputs, down to the facts, each with *open* and who last changed it (an accepted proposal names the agent and the rule; a metric names its latest reading). Readiness, missing and open items, eligible value per dimension, gates cleared, each milestone's gate, each release's state and criteria, and agent spend explain themselves this way. The trees come from `packages/domain/src/explain.ts`, the same pure functions as the derivations, so an explanation can never disagree with the number.
 
 **Setting up a project from documents.** *Set up from documents…* on Portfolio hands a setup agent a name, a brief, pasted snippets, and uploaded Word, PowerPoint, or text files (a dependency-free zip reader pulls the text out of `.docx` and `.pptx`; PDFs are reported as unsupported). The agent drafts every field of the project record — stage, risk tier, committee approval, targets, team, repositories, milestones with gate metrics, governance items with evidence-based statuses, releases with criteria — each with a rationale, its source document, and a confidence. The review step lets you untick, edit, or ask the agent to change things (rows you edited survive a refinement), then creates everything in one transaction.
 
@@ -202,14 +223,14 @@ The proposals widget accepts and dismisses inline. "Since you last looked" start
 
 ## Editing data
 
-Nothing is hard-coded: every fact the app shows can be changed in the UI, and every change is optimistic with write-through to the API (on failure the client reloads server state and shows a toast).
+Nothing is hard-coded: every fact the app shows can be changed in the UI, and edits write through to the API; failed saves retain the editor draft and report the error.
 
 | What | Where |
 | --- | --- |
 | Project name, key, stage, description, risk tier, committee approval, team, repositories, targets | Overview → *Edit* on any card; *+ New project* on Portfolio; delete from the editor |
 | A whole new project from a charter, deck, or notes | Portfolio → *Set up from documents…*, then review the draft |
 | Changes an agent proposed | Inbox (sidebar, with a count; `g i`) grouped by project, or a run's viewer → *Accept* / *Dismiss* |
-| Milestones, eval gates, current readings | Value → *+ New milestone*, the pencil on a row, or drag a slider |
+| Milestones, eval gates, measurements | Value → *+ New milestone*, the pencil on a row, or **Record measurement**; sliders only simulate locally |
 | Governance items (add, rename, recategorise, status, owner, delete) | Governance → *+ New item*, *+ Add* per category, *Edit item* on an expanded row |
 | Releases: target month, milestones shipped, go-live criteria (gate / governance / manual) | Roadmap → *+ New release*, the pencil on a release |
 | Development activity | Synced, not edited: *Sync now* on Development or Data, `just sync`, or the timer |
@@ -224,7 +245,7 @@ Nothing is hard-coded: every fact the app shows can be changed in the UI, and ev
 | The weekly brief | Agents → Monday → *Run…*, or `just brief`; shows on Glance as *Your week* |
 | Signed-in user (sidebar, Glance greeting, default owner) | Click your name at the bottom of the sidebar, or *Data → Workspace* |
 
-Ids are generated for you: milestones `MS-n`, releases `Rn`, project keys `PRJ-n`, runs `run-n`; URL ids, governance ids, and calendar ids are slugs of the name. Deleting a milestone or governance item leaves any release criterion that referenced it in place; it resolves to *not met* / *not tracked* at read time. Deleting a project removes everything under it.
+Ids are generated for you: milestones `MS-n`, releases `Rn`, project keys `PRJ-n`, runs `run-n`; URL ids, governance ids, and calendar ids are slugs of the name. Deleting an unmeasured milestone or governance item leaves any release criterion that referenced it in place; it resolves to *not met* / *not tracked* at read time. Deleting a project removes everything under it.
 
 To start from a clean slate rather than the sample portfolio, delete the three seeded projects; the default agents stay.
 
@@ -290,7 +311,7 @@ What is already production-shaped, and what to decide when connecting real syste
 2. **Eval suites.** Have the nightly eval job `PUT` its results to the readings endpoint with `source: "eval"`. That is the whole integration: gates, release criteria, the feed, and Glance follow.
 3. **The model.** Any OpenAI-compatible endpoint works. For production, set `LLM_API_KEY`, pin `LLM_MODEL`, and consider `LLM_THINKING=on` for audit runs if latency allows. Runs are synchronous today (the request waits for the model); if runs grow long, queue them and poll `runs` in state.
 4. **The database.** SQLite through `bun:sqlite` in WAL mode is fine for a single server. Every read and write goes through `packages/server/src/repo.ts`, so a Postgres move is contained to that file plus `migrations.ts` and `seed.ts`; the schema uses only portable SQL (text ids, ISO timestamps, JSON in text columns).
-5. **Identity.** The workspace user is a single stored record. Put an authenticating proxy in front and map its identity onto that record, or add a users table alongside it; nothing else assumes a single user.
+5. **Identity.** The workspace user is a single stored record. The server binds to loopback by default. Shared hosting requires a trusted authenticating proxy plus the access token and origin settings below. This remains a single-workspace identity model; per-user roles and independent approval authority need a separate identity design.
 6. **Operations.** Back up the SQLite file (or its WAL checkpoint), watch the server log for `sync … failed` and `scheduled agents failed`, and run `just check` in CI on every change.
 
 ## Deviations from the mockup

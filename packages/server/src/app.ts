@@ -20,6 +20,8 @@ import {
   ChatInputSchema,
   RateRunInputSchema,
   RuleInputSchema,
+  CommsAssignmentCreateSchema, CommsAssignmentUpdateSchema, CommsRunInputSchema, CommsArtifactApprovalSchema,
+  PMAssignmentCreateSchema, PMAssignmentUpdateSchema, PMRunInputSchema,
   RunAgentInputSchema,
   ScoutInputSchema,
   SetupCreateInputSchema,
@@ -61,7 +63,7 @@ import type { Rule } from "@valueflow/domain";
 import { askWorkspace } from "./chat.ts";
 import { briefIsCurrent, curateGlance } from "./curator.ts";
 import { liveResponse } from "./live.ts";
-import { loadRunEvents } from "./repo.ts";
+import { getRun, loadRunEvents } from "./repo.ts";
 import { recordGlanceView } from "./repo.ts";
 import type { BriefDelivery } from "./brief.ts";
 import { promptVersion } from "./prompts.ts";
@@ -77,6 +79,10 @@ import { analyzeSetup, createFromSetup, refineSetup } from "./setup.ts";
 import type { RepoSource } from "./connectors/index.ts";
 import type { Llm } from "./llm.ts";
 import { syncProject } from "./sync.ts";
+import { UsageBudgetError } from "./usage.ts";
+import { currentRuleStats } from "./proposal-guard.ts";
+import * as comms from "./comms.ts";
+import { listAssignments, getAssignment, createAssignment, updateAssignment, listRuns, runAssignment } from "./pm.ts";
 
 type Params = Record<string, string>;
 type Handler = (req: Request, params: Params) => Promise<Response> | Response;
@@ -153,12 +159,18 @@ export interface JobStatus {
   done: number;
   total: number;
   startedAt: string | null;
+  error: string | null;
 }
 
 export const createApp = (db: Database, options: AppOptions = {}): App => {
   const now = options.now ?? (() => new Date());
   const source = options.source ?? null;
   const llm = options.llm ?? null;
+  const validateModel = (spec: string | null | undefined): void => {
+    if (spec?.includes("@") && !llm?.validateModel) throw new HttpError(400, "model endpoints must be configured on the server");
+    try { llm?.validateModel?.(spec); }
+    catch (e) { throw new HttpError(400, e instanceof Error ? e.message : "invalid model selection"); }
+  };
   const autoJudge = options.autoJudge ?? true;
   const judgeLater = (runId: string) => {
     if (!llm || !autoJudge) return;
@@ -189,23 +201,26 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
         });
     }, 0);
   };
-  let benchmarkStatus: JobStatus = { running: false, kind: null, done: 0, total: 0, startedAt: null };
+  let benchmarkStatus: JobStatus = { running: false, kind: null, done: 0, total: 0, startedAt: null, error: null };
   /** Long evaluation jobs run one at a time in the background; the status is polled. */
   const startJob = (kind: "benchmark" | "scout", job: (progress: (done: number, total: number) => void) => Promise<unknown>): JobStatus => {
     if (benchmarkStatus.running) throw new HttpError(409, `a ${benchmarkStatus.kind ?? "job"} is already running`);
-    benchmarkStatus = { running: true, kind, done: 0, total: 0, startedAt: now().toISOString() };
+    benchmarkStatus = { running: true, kind, done: 0, total: 0, startedAt: now().toISOString(), error: null };
     setTimeout(() => {
       job((done, total) => {
         benchmarkStatus = { ...benchmarkStatus, done, total };
       })
-        .catch((e: unknown) => console.error(`${kind} failed`, e instanceof Error ? e.message : e))
+        .catch((e: unknown) => {
+          benchmarkStatus = { ...benchmarkStatus, error: e instanceof Error ? e.message : String(e) };
+          console.error(`${kind} failed`, benchmarkStatus.error);
+        })
         .finally(() => {
           benchmarkStatus = { ...benchmarkStatus, running: false };
         });
     }, 0);
     return benchmarkStatus;
   };
-  const state = () => ({ ...loadState(db, now()), syncSource: source?.name ?? null, llm: llm ? llm.describe() : null });
+  const state = () => ({ ...loadState(db, now(), llm?.describe().prices), syncSource: source?.name ?? null, llm: llm ? llm.describe() : null });
   /** A run that would take a budget past its ceiling is refused with the reason. */
   const withinBudget = (agentId: string, proj: string | null): void => {
     if (!llm) return;
@@ -224,6 +239,41 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     const s = state();
     curateLater(s);
     return json(s);
+  });
+  on("GET", patterns.commsAssignments, () => json(comms.listAssignments(db)));
+  on("POST", patterns.commsAssignments, async req => json(comms.createAssignment(db, await parseBody(req, CommsAssignmentCreateSchema), now()), 201));
+  on("GET", patterns.commsAssignment, (_req, params) => json(comms.getDetail(db, p(params, "id"))));
+  on("PUT", patterns.commsAssignment, async (req, params) => json(comms.updateAssignment(db, p(params, "id"), await parseBody(req, CommsAssignmentUpdateSchema), now())));
+  on("POST", patterns.commsRun, async (req, params) => {
+    if (!llm) throw new HttpError(409, "No model configured. Connect a model to draft communications.");
+    const body = await parseBody(req, CommsRunInputSchema);
+    return json(await comms.runAssignment(db, llm, p(params, "id"), now(), "manual", body.instruction, body.mode), 201);
+  });
+  on("GET", patterns.commsArtifacts, req => json(comms.listArtifacts(db, new URL(req.url).searchParams.get("projectId") ?? undefined)));
+  on("PUT", patterns.commsArtifact, async (req, params) => {
+    const body = await parseBody(req, CommsArtifactApprovalSchema);
+    return json(comms.approveArtifact(db, p(params, "id"), body.status, now()));
+  });
+  on("GET", patterns.commsDownload, (req, params) => {
+    const artifact = comms.getArtifact(db, p(params, "id"));
+    const format = new URL(req.url).searchParams.get("format") ?? "md";
+    if (format !== "md" && format !== "txt") throw new HttpError(400, "Choose md or txt format.");
+    const filename = `${artifact.format}-v${artifact.version}-${artifact.id.replace(/[^a-zA-Z0-9-]/g, "")}.${format}`;
+    return new Response(artifact.body, { headers: {
+      "content-type": format === "md" ? "text/markdown; charset=utf-8" : "text/plain; charset=utf-8",
+      "content-disposition": `attachment; filename="${filename}"`,
+      "x-content-type-options": "nosniff", "cache-control": "private, no-store",
+    } });
+  });
+  on("GET", patterns.pmAssignments, () => json(listAssignments(db)));
+  on("POST", patterns.pmAssignments, async (req) => json(createAssignment(db, await parseBody(req, PMAssignmentCreateSchema), now()), 201));
+  on("GET", patterns.pmAssignment, (_req, params) => json(getAssignment(db, p(params, "id"))));
+  on("PUT", patterns.pmAssignment, async (req, params) => json(updateAssignment(db, p(params, "id"), await parseBody(req, PMAssignmentUpdateSchema), now())));
+  on("GET", patterns.pmRuns, (_req, params) => json(listRuns(db, p(params, "id"))));
+  on("POST", patterns.pmRun, async (req, params) => {
+    if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
+    const body = await parseBody(req, PMRunInputSchema);
+    return json(await runAssignment(db, llm, p(params, "id"), now(), "manual", body.instruction), 201);
   });
   on("GET", patterns.glance, () => json(composeGlancePage(state())));
   on("POST", patterns.glanceSeen, () => {
@@ -297,24 +347,24 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   on("GET", patterns.readings, (_req, params) => json(listReadings(db, p(params, "pid"), p(params, "mid"), p(params, "xid"))));
   on("PUT", patterns.readings, async (req, params) => {
     const body = await parseBody(req, ReadingInputSchema);
-    const reading = recordReading(db, p(params, "pid"), p(params, "mid"), p(params, "xid"), body.value, body.source);
+    const reading = recordReading(db, p(params, "pid"), p(params, "mid"), p(params, "xid"), body.value, body.source, now());
     const metric = findMilestone(state(), p(params, "pid"), p(params, "mid")).metrics.find((x) => x.id === p(params, "xid"));
     return json({ reading, metric }, 201);
   });
 
   on("POST", patterns.milestones, async (req, params) => {
     const body = await parseBody(req, MilestoneInputSchema);
-    upsertMilestone(db, p(params, "pid"), body, "create");
+    upsertMilestone(db, p(params, "pid"), body, "create", now());
     return json(findMilestone(state(), p(params, "pid"), body.id), 201);
   });
   on("PUT", patterns.milestone, async (req, params) => {
     const body = await parseBody(req, MilestoneInputSchema);
     if (body.id !== p(params, "mid")) throw new HttpError(400, "milestone id in body must match the URL");
-    upsertMilestone(db, p(params, "pid"), body, "update");
+    upsertMilestone(db, p(params, "pid"), body, "update", now());
     return json(findMilestone(state(), p(params, "pid"), body.id));
   });
   on("DELETE", patterns.milestone, (_req, params) => {
-    deleteMilestone(db, p(params, "pid"), p(params, "mid"));
+    deleteMilestone(db, p(params, "pid"), p(params, "mid"), now());
     return json({ ok: true });
   });
 
@@ -370,23 +420,25 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   });
   on("PUT", patterns.agents, async (req) => {
     const body = await parseBody(req, AgentsInputSchema);
+    for (const agent of body) validateModel(agent.model);
     const before = new Map(state().agents.map((a) => [a.id, a]));
     setAgents(db, body);
     // Hand-edited instructions are a prompt version too.
-    for (const a of body) if ((before.get(a.id)?.prompt ?? null) !== (a.prompt ?? null)) setAgentPrompt(db, a.id, a.prompt ?? null, promptVersion(a.kind, a.prompt ?? null), "person", now().toISOString());
+    for (const a of body) if ((before.get(a.id)?.prompt ?? null) !== (a.prompt ?? null)) setAgentPrompt(db, a.id, a.prompt ?? null, promptVersion(a.kind, a.prompt ?? null, a.id), "person", now().toISOString());
     return json(state().agents);
   });
   on("POST", patterns.agentPrompt, async (req, params) => {
     const body = await parseBody(req, AgentPromptInputSchema);
     const agent = state().agents.find((a) => a.id === p(params, "aid"));
     if (!agent) throw new NotFound(`agent ${p(params, "aid")} not found`);
-    setAgentPrompt(db, agent.id, body.prompt, promptVersion(agent.kind, body.prompt), "person", now().toISOString());
+    setAgentPrompt(db, agent.id, body.prompt, promptVersion(agent.kind, body.prompt, agent.id), "person", now().toISOString());
     return json(state().agents.find((a) => a.id === agent.id));
   });
 
   on("GET", patterns.rules, () => json(loadRules(db)));
   on("POST", patterns.rules, async (req) => {
     const body = await parseBody(req, RuleInputSchema);
+    if (body.auto) throw new HttpError(409, "new rules require human review before autonomy can be enabled");
     if (body.proj && !state().projects.some((pr) => pr.id === body.proj)) throw new HttpError(400, `project ${body.proj} not found`);
     const rule: Rule = { id: nextRuleId(loadRules(db)), text: body.text, proj: body.proj, enabled: body.enabled, auto: body.auto, owner: body.owner, createdAt: now().toISOString() };
     insertRule(db, rule);
@@ -394,6 +446,12 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   });
   on("PUT", patterns.rule, async (req, params) => {
     const body = await parseBody(req, RuleInputSchema);
+    const s = state();
+    const previous = s.rules.find((r) => r.id === p(params, "id"));
+    if (!previous) throw new NotFound("rule not found");
+    if (body.auto && (!currentRuleStats(db, previous, s.proposals).earnedAutonomy || previous.text !== body.text || previous.proj !== body.proj)) {
+      throw new HttpError(409, "autonomy requires enough human decisions on the unchanged rule; save edited rules with autonomy off");
+    }
     if (body.proj && !state().projects.some((pr) => pr.id === body.proj)) throw new HttpError(400, `project ${body.proj} not found`);
     updateRule(db, p(params, "id"), body);
     return json(loadRules(db).find((r) => r.id === p(params, "id")));
@@ -416,6 +474,8 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     const key = form.get("key");
     const brief = String(form.get("brief") ?? "");
     const sources: ExtractedSource[] = [];
+    if (form.getAll("snippet").length + form.getAll("file").length > 20) throw new HttpError(400, "at most 20 sources per setup");
+    if (name.length > 160 || brief.length > 40_000) throw new HttpError(400, "setup name or brief is too long");
     for (const [i, snippet] of form.getAll("snippet").entries()) {
       const text = String(snippet).trim();
       if (text) sources.push({ name: `snippet ${i + 1}`, kind: "text", text: text.slice(0, 40_000), chars: text.length, error: null, truncated: text.length > 40_000 });
@@ -445,7 +505,9 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   });
 
   on("POST", patterns.proposalAccept, (_req, params) => {
-    const accepted = acceptProposal(db, findProposal(db, p(params, "id"), now()), now());
+    const proposal = findProposal(db, p(params, "id"), now());
+    if (proposal.action.type === "agent_model") validateModel(proposal.action.model);
+    const accepted = acceptProposal(db, proposal, now());
     // A new prompt version gets its numbers straight away, so the version table never shows a blank row for long.
     if (accepted.action.type === "agent_prompt" && llm && !benchmarkStatus.running) {
       const model = llm;
@@ -473,6 +535,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     judgeLater(reply.runId);
     return json(reply);
   });
+  on("GET", patterns.run, (_req, params) => json(getRun(db, p(params, "id"))));
   on("GET", patterns.runEvents, (_req, params) => json(loadRunEvents(db, p(params, "id"))));
   on("GET", patterns.live, () => liveResponse());
   on("POST", patterns.runRate, async (req, params) => {
@@ -495,6 +558,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   on("POST", patterns.scout, async (req) => {
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
     const body = await parseBody(req, ScoutInputSchema);
+    for (const spec of body.models ?? []) validateModel(spec);
     const scout = state().agents.find((a) => a.kind === "scout");
     if (!scout) throw new HttpError(409, "no scout agent is installed");
     withinBudget(scout.id, null);
@@ -534,6 +598,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
         if (err instanceof NotFound) return json({ error: err.message }, 404);
         if (err instanceof Conflict) return json({ error: err.message }, 409);
         if (err instanceof ProposalRejected) return json({ error: err.message }, 409);
+        if (err instanceof UsageBudgetError) return json({ error: err.message }, 409);
         console.error(err);
         return json({ error: "internal error" }, 500);
       }

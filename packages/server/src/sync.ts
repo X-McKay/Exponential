@@ -10,7 +10,7 @@ import type { Project, SyncRun } from "@valueflow/domain";
 import type { RepoSnapshot, RepoSource } from "./connectors/index.ts";
 import { loadState, recordDevEvents, recordSyncRun, replaceDevFacts } from "./repo.ts";
 
-export const syncProject = async (db: Database, source: RepoSource, project: Project, now: Date, sinceDays = ACTIVITY_DAYS): Promise<SyncRun> => {
+const performSync = async (db: Database, source: RepoSource, project: Project, now: Date, sinceDays = ACTIVITY_DAYS): Promise<SyncRun> => {
   const startedAt = now.toISOString();
   try {
     const snapshots: RepoSnapshot[] = [];
@@ -36,6 +36,18 @@ export const syncProject = async (db: Database, source: RepoSource, project: Pro
     recordSyncRun(db, project.id, run);
     return run;
   }
+};
+
+// Coalesce overlapping requests so a slower old snapshot cannot overwrite a newer one.
+const inFlight = new WeakMap<Database, Map<string, Promise<SyncRun>>>();
+export const syncProject = (db: Database, source: RepoSource, project: Project, now: Date, sinceDays = ACTIVITY_DAYS): Promise<SyncRun> => {
+  let projects = inFlight.get(db);
+  if (!projects) { projects = new Map(); inFlight.set(db, projects); }
+  const existing = projects.get(project.id);
+  if (existing) return existing;
+  const task = performSync(db, source, project, now, sinceDays).finally(() => projects.delete(project.id));
+  projects.set(project.id, task);
+  return task;
 };
 
 /** Sync every project; returns one run per project id. */

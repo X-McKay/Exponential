@@ -18,6 +18,7 @@ export const spendText = (line: BudgetLine): string => {
   if (line.spend.usd !== null) parts.push(fmtUsd(line.spend.usd));
   parts.push(`${fmtTokens(line.spend.tokens)} tokens`);
   parts.push(`${line.spend.runs} run${line.spend.runs === 1 ? "" : "s"}`);
+  if (line.spend.unknown > 0) parts.push(`${line.spend.unknown} unknown`);
   if (line.spend.unpriced > 0 && line.spend.usd !== null) parts.push(`${line.spend.unpriced} unpriced`);
   return parts.join(" · ");
 };
@@ -68,7 +69,7 @@ const numOrNull = (s: string): number | null => {
 const fmtIn = (v: number | null, tokens: boolean): string => (v === null ? "" : tokens ? (v >= 1_000_000 ? `${v / 1_000_000}M` : v >= 1000 ? `${v / 1000}k` : String(v)) : String(v));
 
 /** Ceilings per month for the workspace, each agent, and each project; blank means no ceiling. */
-export function BudgetEditor({ budgets, agents, projects, prices, onSave, onClose }: { budgets: Budget[]; agents: Agent[]; projects: Project[]; prices: PriceList; onSave: (budgets: Budget[]) => void; onClose: () => void }) {
+export function BudgetEditor({ budgets, agents, projects, prices, onSave, onClose }: { budgets: Budget[]; agents: Agent[]; projects: Project[]; prices: PriceList; onSave: (budgets: Budget[]) => Promise<unknown>; onClose: () => void }) {
   const find = (scope: BudgetScope, ref: string) => budgets.find((b) => b.scope === scope && b.ref === ref);
   const initial: Row[] = [
     { scope: "workspace", ref: "", name: "Whole workspace", usd: fmtIn(find("workspace", "")?.monthlyUsd ?? null, false), tokens: fmtIn(find("workspace", "")?.monthlyTokens ?? null, true) },
@@ -78,8 +79,14 @@ export function BudgetEditor({ budgets, agents, projects, prices, onSave, onClos
   const [rows, setRows] = useState<Row[]>(initial);
   const priced = Object.keys(prices).length > 0;
   const set = (i: number, patch: Partial<Row>) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-  const submit = () => {
-    onSave(rows.map((r) => ({ scope: r.scope, ref: r.ref, monthlyUsd: numOrNull(r.usd), monthlyTokens: r.tokens.trim() ? Math.round(numOrNull(r.tokens) ?? 0) || null : null })).filter((b) => b.monthlyUsd !== null || b.monthlyTokens !== null));
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const submit = async () => {
+    if (saving) return;
+    setSaving(true); setSaveError(null);
+    try { await onSave(rows.map((r) => ({ scope: r.scope, ref: r.ref, monthlyUsd: numOrNull(r.usd), monthlyTokens: r.tokens.trim() ? Math.round(numOrNull(r.tokens) ?? 0) || null : null })).filter((b) => b.monthlyUsd !== null || b.monthlyTokens !== null)); }
+    catch (e) { setSaveError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
   };
   const group = (scope: BudgetScope) => rows.map((r, i) => [r, i] as const).filter(([r]) => r.scope === scope);
   const section = (title: string, scope: BudgetScope) => (
@@ -98,18 +105,19 @@ export function BudgetEditor({ budgets, agents, projects, prices, onSave, onClos
     <Modal
       title="Monthly budgets"
       onClose={onClose}
-      onSubmit={submit}
+      onSubmit={() => void submit()}
       footer={
         <>
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn tone="primary" onClick={submit}>
-            Save budgets
+          <Btn tone="primary" disabled={saving} onClick={() => void submit()}>
+            {saving ? "Saving…" : "Save budgets"}
           </Btn>
         </>
       }
     >
+      {saveError && <div role="alert" style={{ color: C.redHi, fontSize: 12, margin: "8px 0" }}>Could not save: {saveError}</div>}
       <div style={{ fontSize: 12, color: C.mut, lineHeight: 1.55, marginTop: 8 }}>
-        A ceiling per calendar month, in dollars or tokens or both; the tighter one counts. Once a ceiling is reached, scheduled runs for that scope pause and manual runs are refused until the month turns or the budget is raised. Spend is derived from every run's token counts
+        Soft spending limits apply per calendar month, in dollars or tokens or both; the tighter one counts. Calls reserve estimated input/output capacity before running, then provider usage is reconciled afterward. Unknown usage or pricing holds further budgeted calls, and a zero limit pauses that scope. Spend is derived from every run's token counts
         {priced ? ` and the prices for ${Object.keys(prices).join(", ")}.` : "; set LLM_PRICES (model=in/out USD per million tokens) to see dollars."}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 120px", gap: 8, marginTop: 14, fontSize: 10.5, color: C.dim, letterSpacing: "0.05em", textTransform: "uppercase" }}>

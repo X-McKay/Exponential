@@ -8,7 +8,7 @@ export function EvalScatter({ projectId, milestoneId, metric }: { projectId: str
   const [readings, setReadings] = useState<MetricReading[] | null>(null);
   useEffect(() => {
     let live = true;
-    // Small delay so a debounced slider write lands before we read history back.
+    // Keep history reads slightly out of the render path while scenario values change locally.
     const t = setTimeout(() => {
       api
         .readings(projectId, milestoneId, metric.id)

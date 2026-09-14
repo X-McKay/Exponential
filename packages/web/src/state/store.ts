@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { describeAction } from "@valueflow/domain";
-import type { Agent, AgentRun, AppState, Budget, CalendarEvent, GovernanceItem, ImpactPair, Milestone, Project, Proposal, Release, Rule, Workspace } from "@valueflow/domain";
+import type { Agent, AgentRun, AppState, Budget, CalendarEvent, GovernanceItem, ImpactPair, MetricReading, Milestone, Project, Proposal, Release, Rule, Workspace } from "@valueflow/domain";
 import type { ProjectInput, RuleInput, RunAgentInput } from "@valueflow/shared";
 import { api } from "../api/client.ts";
 import type { JobStatus } from "../api/client.ts";
@@ -27,23 +27,24 @@ export interface Store {
   notify: (text: string, tone?: Notice["tone"]) => void;
   dismissNotice: (id: number) => void;
   reload: () => Promise<void>;
-  setMetric: (pid: string, mid: string, xid: string, value: number) => void;
-  saveMilestone: (pid: string, ms: Milestone, isNew: boolean) => Promise<void>;
-  deleteMilestone: (pid: string, mid: string) => Promise<void>;
-  saveTargets: (pid: string, targets: ImpactPair) => Promise<void>;
-  saveProject: (input: ProjectInput, isNew: boolean) => Promise<void>;
-  deleteProject: (pid: string) => Promise<void>;
-  saveGovernance: (pid: string, item: GovernanceItem, isNew: boolean) => Promise<void>;
-  deleteGovernance: (pid: string, gid: string) => Promise<void>;
-  saveRelease: (pid: string, rel: Release, isNew: boolean) => Promise<void>;
-  deleteRelease: (pid: string, rid: string) => Promise<void>;
+  /** Record an observed manual measurement. Scenario edits never call this. */
+  recordReading: (pid: string, mid: string, xid: string, value: number) => Promise<MetricReading>;
+  saveMilestone: (pid: string, ms: Milestone, isNew: boolean) => Promise<Milestone>;
+  deleteMilestone: (pid: string, mid: string) => Promise<unknown>;
+  saveTargets: (pid: string, targets: ImpactPair) => Promise<ImpactPair>;
+  saveProject: (input: ProjectInput, isNew: boolean) => Promise<unknown>;
+  deleteProject: (pid: string) => Promise<unknown>;
+  saveGovernance: (pid: string, item: GovernanceItem, isNew: boolean) => Promise<unknown>;
+  deleteGovernance: (pid: string, gid: string) => Promise<unknown>;
+  saveRelease: (pid: string, rel: Release, isNew: boolean) => Promise<unknown>;
+  deleteRelease: (pid: string, rid: string) => Promise<unknown>;
   /** Pull fresh development facts for a project from the configured source. */
   syncProject: (pid: string) => Promise<void>;
-  saveAgents: (agents: Agent[]) => Promise<void>;
+  saveAgents: (agents: Agent[]) => Promise<unknown>;
   /** Start an agent run; a working placeholder shows until the model replies. */
   runAgent: (input: RunAgentInput) => Promise<void>;
   /** Apply or discard an agent's proposal; accepting reloads state so every derivation follows. */
-  decideProposal: (id: string, decision: "accept" | "dismiss") => Promise<void>;
+  decideProposal: (id: string, decision: "accept" | "dismiss") => Promise<{ error?: string }>;
   /** Proposals that arrived outside the store (a chat turn); reloads so the run and scores show too. */
   addProposals: (proposals: Proposal[]) => void;
   rateRun: (id: string, rating: 1 | -1 | null, note?: string) => Promise<void>;
@@ -54,18 +55,18 @@ export interface Store {
   runScout: (agentId?: string) => Promise<void>;
   /** Set an agent's extra instructions; records a prompt version. */
   setAgentPrompt: (agentId: string, prompt: string | null) => Promise<void>;
-  saveRule: (rule: Rule | null, input: RuleInput) => Promise<void>;
-  deleteRule: (id: string) => Promise<void>;
+  saveRule: (rule: Rule | null, input: RuleInput) => Promise<unknown>;
+  deleteRule: (id: string) => Promise<unknown>;
   /** The reader opened Glance: "since you last looked" starts now (applied on the next load, not this one). */
   markGlanceSeen: () => Promise<void>;
   /** Ask the curator for a fresh daily brief now. */
   curateGlance: () => Promise<void>;
   /** The project's brief: written when missing or stale (once per visit), rewritten when forced. */
   curateProject: (pid: string, force: boolean) => Promise<void>;
-  saveBudgets: (budgets: Budget[]) => Promise<void>;
-  saveCalendar: (ev: CalendarEvent, isNew: boolean) => Promise<void>;
-  deleteCalendar: (id: string) => Promise<void>;
-  saveWorkspace: (w: Workspace) => Promise<void>;
+  saveBudgets: (budgets: Budget[]) => Promise<unknown>;
+  saveCalendar: (ev: CalendarEvent, isNew: boolean) => Promise<unknown>;
+  deleteCalendar: (id: string) => Promise<unknown>;
+  saveWorkspace: (w: Workspace) => Promise<unknown>;
 }
 
 /** A working run the server has not named yet. */
@@ -96,8 +97,6 @@ const updateProject = (s: AppState, pid: string, fn: (p: Project) => Project): A
   projects: s.projects.map((p) => (p.id === pid ? fn(p) : p)),
 });
 
-const METRIC_DEBOUNCE_MS = 180;
-
 export const useStore = (): Store => {
   const [state, setState] = useState<AppState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -108,7 +107,6 @@ export const useStore = (): Store => {
   const polling = useRef(false);
   /** Projects whose brief this session already asked for, so an overview visit asks once. */
   const askedBrief = useRef(new Set<string>());
-  const pending = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const dismissNotice = useCallback((id: number) => setNotices((n) => n.filter((x) => x.id !== id)), []);
   const notify = useCallback(
@@ -133,12 +131,16 @@ export const useStore = (): Store => {
     if (polling.current) return;
     polling.current = true;
     let last: JobStatus | null = null;
+    let finished = false;
     try {
       for (let i = 0; i < 1200; i++) {
         const st = await api.benchmarkStatus();
         last = st;
         setJob(st.running ? st : null);
-        if (!st.running) break;
+        if (!st.running) {
+          finished = true;
+          break;
+        }
         if (i % 5 === 4) void reload();
         await new Promise((r) => setTimeout(r, 3000));
       }
@@ -146,7 +148,8 @@ export const useStore = (): Store => {
       polling.current = false;
     }
     await reload();
-    if (last) notify(last.kind === "scout" ? `Scout finished: ${last.done} model run${last.done === 1 ? "" : "s"} benchmarked. See the Quality tab and the inbox.` : `Benchmark finished: ${last.done} of ${last.total} cases judged.`, "good");
+    if (last?.error) notify(`${last.kind === "scout" ? "Scout" : "Benchmark"} failed: ${last.error}`, "bad");
+    else if (last && finished) notify(last.kind === "scout" ? `Scout finished: ${last.done} model run${last.done === 1 ? "" : "s"} benchmarked. See the Quality tab and the inbox.` : `Benchmark finished: ${last.done} of ${last.total} cases judged.`, "good");
   }, [notify, reload]);
 
   // The live channel: runs announce themselves, so even scheduled ones show up as they happen.
@@ -197,44 +200,32 @@ export const useStore = (): Store => {
     [reload],
   );
 
-  /** Apply an optimistic update, then run the write; reload on failure. */
+  /** Apply an optimistic update, then run the write; reject on failure so callers retain drafts. */
   const commit = useCallback(
-    async (apply: (s: AppState) => AppState, write: () => Promise<unknown>) => {
+    async <T,>(apply: (s: AppState) => AppState, write: () => Promise<T>, reconcile?: (s: AppState, result: T) => AppState): Promise<T> => {
       setState((s) => (s ? apply(s) : s));
       try {
-        await write();
+        const result = await write();
+        if (reconcile) setState((s) => (s ? reconcile(s, result) : s));
+        return result;
       } catch (e) {
         fail(e);
+        throw e;
       }
     },
     [fail],
   );
 
-  const setMetric = useCallback(
-    (pid: string, mid: string, xid: string, value: number) => {
-      setState((s) =>
-        s
-          ? updateProject(s, pid, (p) => ({
-              ...p,
-              milestones: p.milestones.map((m) =>
-                m.id !== mid ? m : { ...m, metrics: m.metrics.map((x) => (x.id === xid ? { ...x, current: value } : x)) },
-              ),
-            }))
-          : s,
+  const recordReading = useCallback(
+    async (pid: string, mid: string, xid: string, value: number): Promise<MetricReading> => {
+      const result = await commit(
+        (s) => updateProject(s, pid, (p) => ({ ...p, milestones: p.milestones.map((m) => (m.id === mid ? { ...m, metrics: m.metrics.map((x) => (x.id === xid ? { ...x, current: value } : x)) } : m)) })),
+        () => api.recordReading(pid, mid, xid, { value, source: "manual" }),
+        (s, response) => updateProject(s, pid, (p) => ({ ...p, milestones: p.milestones.map((m) => (m.id === mid ? { ...m, metrics: m.metrics.map((x) => (x.id === xid ? response.metric : x)) } : m)) })),
       );
-      // Slider drags fire many events; persist the latest value per metric.
-      const key = `${pid}/${mid}/${xid}`;
-      const prev = pending.current.get(key);
-      if (prev) clearTimeout(prev);
-      pending.current.set(
-        key,
-        setTimeout(() => {
-          pending.current.delete(key);
-          api.recordReading(pid, mid, xid, { value, source: "manual" }).catch(fail);
-        }, METRIC_DEBOUNCE_MS),
-      );
+      return result.reading;
     },
-    [fail],
+    [commit],
   );
 
   const saveMilestone = useCallback(
@@ -242,6 +233,7 @@ export const useStore = (): Store => {
       commit(
         (s) => updateProject(s, pid, (p) => ({ ...p, milestones: isNew ? [...p.milestones, ms] : p.milestones.map((m) => (m.id === ms.id ? ms : m)) })),
         () => (isNew ? api.createMilestone(pid, ms) : api.updateMilestone(pid, ms)),
+        (s, result) => updateProject(s, pid, (p) => ({ ...p, milestones: isNew ? [...p.milestones.filter((m) => m.id !== result.id), result] : p.milestones.map((m) => (m.id === result.id ? result : m)) })),
       ),
     [commit],
   );
@@ -249,7 +241,7 @@ export const useStore = (): Store => {
   const deleteMilestone = useCallback(
     (pid: string, mid: string) =>
       commit(
-        (s) => updateProject(s, pid, (p) => ({ ...p, milestones: p.milestones.filter((m) => m.id !== mid) })),
+        (s) => updateProject(s, pid, (p) => ({ ...p, historicalMilestones: [...(p.historicalMilestones ?? []), ...p.milestones.filter((m) => m.id === mid)], milestones: p.milestones.filter((m) => m.id !== mid) })),
         () => api.deleteMilestone(pid, mid),
       ),
     [commit],
@@ -260,6 +252,7 @@ export const useStore = (): Store => {
       commit(
         (s) => updateProject(s, pid, (p) => ({ ...p, targets })),
         () => api.setTargets(pid, targets),
+        (s, result) => updateProject(s, pid, (p) => ({ ...p, targets: result })),
       ),
     [commit],
   );
@@ -272,6 +265,7 @@ export const useStore = (): Store => {
             ? { ...s, projects: [...s.projects, { ...input, milestones: [], governance: [] }], releases: { ...s.releases, [input.id]: [] } }
             : updateProject(s, input.id, (p) => ({ ...p, ...input })),
         () => (isNew ? api.createProject(input) : api.updateProject(input)),
+        (s, result) => ({ ...s, projects: isNew ? [...s.projects.filter((p) => p.id !== result.id), result] : s.projects.map((p) => (p.id === result.id ? result : p)) }),
       ),
     [commit],
   );
@@ -299,6 +293,7 @@ export const useStore = (): Store => {
           const body = { cat: item.cat, name: item.name, status: item.status, owner: item.owner, date: item.date, detail: item.detail, ...(item.link ? { link: item.link } : {}) };
           return isNew ? api.createGovernance(pid, { id: item.id, ...body }) : api.updateGovernance(pid, item.id, body);
         },
+        (s, result) => updateProject(s, pid, (p) => ({ ...p, governance: isNew ? [...p.governance.filter((g) => g.id !== result.id), result] : p.governance.map((g) => (g.id === result.id ? result : g)) })),
       ),
     [commit],
   );
@@ -320,6 +315,7 @@ export const useStore = (): Store => {
           return { ...s, releases: { ...s.releases, [pid]: isNew ? [...list, rel] : list.map((r) => (r.id === rel.id ? rel : r)) } };
         },
         () => (isNew ? api.createRelease(pid, rel) : api.updateRelease(pid, rel)),
+        (s, result) => ({ ...s, releases: { ...s.releases, [pid]: isNew ? [...(s.releases[pid] ?? []).filter((r) => r.id !== result.id), result] : (s.releases[pid] ?? []).map((r) => (r.id === result.id ? result : r)) } }),
       ),
     [commit],
   );
@@ -350,6 +346,7 @@ export const useStore = (): Store => {
       commit(
         (s) => ({ ...s, agents }),
         () => api.setAgents(agents),
+        (s, result) => ({ ...s, agents: result }),
       ),
     [commit],
   );
@@ -374,20 +371,22 @@ export const useStore = (): Store => {
 
   const decideProposal = useCallback(
     async (id: string, decision: "accept" | "dismiss") => {
-      const next = decision === "accept" ? "accepted" : "dismissed";
       const target = state?.proposals.find((p) => p.id === id);
-      setState((s) => (s ? { ...s, proposals: s.proposals.map((p) => (p.id === id ? { ...p, state: next } : p)) } : s));
       try {
-        if (decision === "accept") {
-          await api.acceptProposal(id);
-          if (target && state) notify(`Applied: ${describeAction(target.action, state, target.proj)}${target.action.type === "agent_prompt" ? " · benchmarking the new version" : ""}`, "good");
-          await reload();
-          if (target?.action.type === "agent_prompt") void awaitJob();
-        } else {
-          await api.dismissProposal(id);
+        const decided = decision === "accept" ? await api.acceptProposal(id) : await api.dismissProposal(id);
+        setError(null);
+        setState((s) => (s ? { ...s, proposals: s.proposals.map((p) => p.id === id ? decided : p) } : s));
+        if (decision === "accept" && target && state) {
+          notify(`Applied: ${describeAction(target.action, state, target.proj)}${target.action.type === "agent_prompt" ? " · benchmarking the new version" : ""}`, "good");
+        } else if (decision === "dismiss") {
+          notify("Proposal dismissed.", "good");
         }
+        await reload();
+        if (decision === "accept" && target?.action.type === "agent_prompt") void awaitJob();
+        return {};
       } catch (e) {
         fail(e);
+        return { error: e instanceof Error ? e.message : String(e) };
       }
     },
     [awaitJob, fail, notify, reload, state],
@@ -455,6 +454,7 @@ export const useStore = (): Store => {
         await reload();
       } catch (e) {
         fail(e);
+        throw e;
       }
     },
     [fail, reload],
@@ -463,13 +463,17 @@ export const useStore = (): Store => {
     async (rule: Rule | null, input: RuleInput) => {
       if (rule) setState((s) => (s ? { ...s, rules: s.rules.map((r) => (r.id === rule.id ? { ...r, ...input } : r)) } : s));
       try {
-        if (rule) await api.updateRule(rule.id, input);
+        if (rule) {
+          const updated = await api.updateRule(rule.id, input);
+          setState((s) => (s ? { ...s, rules: s.rules.map((r) => (r.id === updated.id ? updated : r)) } : s));
+        }
         else {
           const created = await api.createRule(input);
           setState((s) => (s ? { ...s, rules: [...s.rules, created] } : s));
         }
       } catch (e) {
         fail(e);
+        throw e;
       }
     },
     [fail],
@@ -514,6 +518,7 @@ export const useStore = (): Store => {
       commit(
         (s) => ({ ...s, budgets }),
         () => api.setBudgets(budgets),
+        (s, result) => ({ ...s, budgets: result }),
       ),
     [commit],
   );
@@ -531,6 +536,7 @@ export const useStore = (): Store => {
       commit(
         (s) => ({ ...s, calendar: (isNew ? [...s.calendar, ev] : s.calendar.map((c) => (c.id === ev.id ? ev : c))).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)) }),
         () => (isNew ? api.createCalendarEvent(ev) : api.updateCalendarEvent(ev)),
+        (s, result) => ({ ...s, calendar: (isNew ? [...s.calendar.filter((c) => c.id !== result.id), result] : s.calendar.map((c) => (c.id === result.id ? result : c))).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)) }),
       ),
     [commit],
   );
@@ -547,6 +553,7 @@ export const useStore = (): Store => {
       commit(
         (s) => ({ ...s, workspace }),
         () => api.setWorkspace(workspace),
+        (s, result) => ({ ...s, workspace: result }),
       ),
     [commit],
   );
@@ -564,7 +571,7 @@ export const useStore = (): Store => {
       notify,
       dismissNotice,
       reload,
-      setMetric,
+      recordReading,
       saveMilestone,
       deleteMilestone,
       saveTargets,
@@ -604,7 +611,7 @@ export const useStore = (): Store => {
       notify,
       dismissNotice,
       reload,
-      setMetric,
+      recordReading,
       saveMilestone,
       deleteMilestone,
       saveTargets,

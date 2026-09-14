@@ -6,6 +6,7 @@ import { Markdown } from "../editors/RunAgent.tsx";
 import { partialField } from "../state/live.ts";
 import { Caret, reset } from "./primitives.tsx";
 import { C } from "../theme.ts";
+import { AgentRunIndicator, AgentDraftPlaceholder } from "./AgentRunIndicator.tsx";
 
 /** Re-render every `ms` while `on`, for elapsed-time counters. */
 export const useTicker = (on: boolean, ms = 1000): number => {
@@ -26,11 +27,7 @@ export const elapsed = (fromIso: string, toIso?: string | null): string => {
 const secsBetween = (a: string, b: string): string => `${((new Date(b).getTime() - new Date(a).getTime()) / 1000).toFixed(1)}s`;
 
 function Spinner({ color = C.indigoHi }: { color?: string }) {
-  return (
-    <svg className="vf-spin" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" style={{ display: "block" }}>
-      <path d="M6 1.5a4.5 4.5 0 1 1-4.5 4.5" />
-    </svg>
-  );
+  return <span style={{ color }}><AgentRunIndicator running size={16} /></span>;
 }
 
 /**
@@ -79,7 +76,7 @@ export function LiveOutput({ text, field }: { text: string; field: string }) {
           <span className="vf-caret" aria-hidden />
         </div>
       ) : (
-        <div style={{ fontSize: 12, color: C.dim }}>{text.length ? `${text.length.toLocaleString()} characters so far, structured fields first…` : "Waiting for the first token…"}</div>
+        <AgentDraftPlaceholder label={text.length ? "Preparing output · structured fields received" : "Waiting for the first token"} />
       )}
     </div>
   );

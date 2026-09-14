@@ -1,3 +1,4 @@
+import { callLlm } from "./usage.ts";
 // ================= project setup agent =================
 //
 // From a name, a short brief, and whatever documents the user has (charters,
@@ -299,7 +300,7 @@ export const analyzeSetup = async (db: Database, llm: Llm, input: { name: string
   const state = loadState(db, now);
   const key = input.key?.trim() || nextProjectKey(state.projects);
   const todayYm = ymOf(now);
-  const res = await llm.chat(buildSetupMessages(input.name, key, input.brief, input.sources, todayYm), { jsonSchema: DRAFT_SCHEMA, maxTokens: 6000, temperature: 0.2, timeoutMs: 240_000 });
+  const res = await callLlm(db, llm, { agentId: null, proj: null, runId: null }, buildSetupMessages(input.name, key, input.brief, input.sources, todayYm), { jsonSchema: DRAFT_SCHEMA, maxTokens: 6000, temperature: 0.2, timeoutMs: 240_000 }, now);
   const draft = normalizeDraft(extractJson(res.content), todayYm);
   const record: SetupDraft = {
     id: slugId(`${input.name}-${now.getTime().toString(36)}`, [], "draft"),
@@ -320,12 +321,12 @@ export const refineSetup = async (db: Database, llm: Llm, id: string, feedback: 
   const { draft: record, sources } = loadSetupDraft(db, id);
   const todayYm = ymOf(now);
   const allFeedback = [...record.feedback, feedback.trim()];
-  const res = await llm.chat(buildSetupMessages(record.name, record.key, record.brief, sources, todayYm, record.draft, allFeedback), {
+  const res = await callLlm(db, llm, { agentId: null, proj: null, runId: null }, buildSetupMessages(record.name, record.key, record.brief, sources, todayYm, record.draft, allFeedback), {
     jsonSchema: DRAFT_SCHEMA,
     maxTokens: 6000,
     temperature: 0.2,
     timeoutMs: 240_000,
-  });
+  }, now);
   const updated: SetupDraft = { ...record, draft: normalizeDraft(extractJson(res.content), todayYm), feedback: allFeedback, model: res.model };
   updateSetupDraft(db, updated);
   return updated;

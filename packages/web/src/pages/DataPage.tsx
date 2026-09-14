@@ -54,10 +54,10 @@ export function DataPage({
   onSync,
 }: {
   state: AppState;
-  onWorkspace: (w: Workspace) => void;
-  onAgents: (a: Agent[]) => void;
-  onCalendar: (ev: CalendarEvent, isNew: boolean) => void;
-  onDeleteCalendar: (id: string) => void;
+  onWorkspace: (w: Workspace) => Promise<unknown>;
+  onAgents: (a: Agent[]) => Promise<unknown>;
+  onCalendar: (ev: CalendarEvent, isNew: boolean) => Promise<unknown>;
+  onDeleteCalendar: (id: string) => Promise<unknown>;
   onSync: (pid: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<Editing>(null);
@@ -141,8 +141,8 @@ export function DataPage({
       {editing?.kind === "workspace" && (
         <WorkspaceEditor
           workspace={state.workspace}
-          onSave={(w) => {
-            onWorkspace(w);
+          onSave={async (w) => {
+            await onWorkspace(w);
             close();
           }}
           onClose={close}
@@ -154,8 +154,8 @@ export function DataPage({
           help={`One entry per workspace agent: kind is deck | comms | ideation | audit, schedule is null or "nightly", model null uses the workspace default. ${refHelp}`}
           value={state.agents}
           schema={AgentsInputSchema}
-          onSave={(a) => {
-            onAgents(a);
+          onSave={async (a) => {
+            await onAgents(a);
             close();
           }}
           onClose={close}
@@ -167,12 +167,12 @@ export function DataPage({
           projects={state.projects}
           existing={state.calendar}
           today={today}
-          onSave={(ev, isNew) => {
-            onCalendar(ev, isNew);
+          onSave={async (ev, isNew) => {
+            await onCalendar(ev, isNew);
             close();
           }}
-          onDelete={(id) => {
-            onDeleteCalendar(id);
+          onDelete={async (id) => {
+            await onDeleteCalendar(id);
             close();
           }}
           onClose={close}

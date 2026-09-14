@@ -5,27 +5,34 @@ import { Btn, Lbl, Modal, inpStyle } from "../ui/primitives.tsx";
 import { C } from "../theme.ts";
 
 /** Who is signed in: shown in the sidebar and greeted on Glance. */
-export function WorkspaceEditor({ workspace, onSave, onClose }: { workspace: Workspace; onSave: (w: Workspace) => void; onClose: () => void }) {
+export function WorkspaceEditor({ workspace, onSave, onClose }: { workspace: Workspace; onSave: (w: Workspace) => Promise<unknown>; onClose: () => void }) {
   const [name, setName] = useState(workspace.user.name);
   const [ini, setIni] = useState(workspace.user.ini);
   const valid = name.trim() !== "" && ini.trim() !== "";
-  const submit = () => {
-    if (valid) onSave({ ...workspace, user: { name: name.trim(), ini: ini.trim().toUpperCase() } });
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const submit = async () => {
+    if (!valid || saving) return;
+    setSaving(true); setSaveError(null);
+    try { await onSave({ ...workspace, user: { name: name.trim(), ini: ini.trim().toUpperCase() } }); }
+    catch (e) { setSaveError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
   };
   return (
     <Modal
       title="Workspace"
       onClose={onClose}
-      onSubmit={submit}
+      onSubmit={() => void submit()}
       footer={
         <>
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn tone="primary" disabled={!valid} onClick={submit}>
-            Save
+          <Btn tone="primary" disabled={!valid || saving} onClick={() => void submit()}>
+            {saving ? "Saving…" : "Save"}
           </Btn>
         </>
       }
     >
+      {saveError && <div role="alert" style={{ color: C.redHi, fontSize: 12, margin: "8px 0" }}>Could not save: {saveError}</div>}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 90px", gap: 10 }}>
         <div>
           <Lbl>Your name</Lbl>

@@ -43,8 +43,9 @@ describe("prices and cost", () => {
     expect(runCost(run({ model: "mystery" }), PRICES)).toBeNull();
     expect(runCost(run({ promptTokens: null, completionTokens: null }), PRICES)).toBeNull();
     const s = spendOf([run({}), run({ model: "mystery" }), run({ promptTokens: null, completionTokens: null })], PRICES);
-    expect(s).toEqual({ runs: 3, tokens: 3_000_000, usd: 0.5, unpriced: 1 });
+    expect(s).toEqual({ runs: 3, tokens: 3_000_000, usd: 0.5, unpriced: 1, unknown: 1 });
     expect(spendOf([run({ model: "mystery" })], {}).usd).toBeNull();
+    expect(runCost({ ...run({}), costUsd: 7 }, PRICES)).toBe(7);
   });
 });
 
@@ -77,5 +78,30 @@ describe("budgets", () => {
     const near: AppState = { ...s, budgets: [{ scope: "workspace", ref: "", monthlyUsd: 1.2, monthlyTokens: null }] };
     expect(budgetLine(near, PRICES, "workspace", "").state).toBe("warn");
     expect(overBudget(near, PRICES, "audie", null)).toBeNull();
+  });
+
+  test("zero dollar and token ceilings are enforced as exhausted", () => {
+    const s: AppState = { ...base(), budgets: [{ scope: "workspace", ref: "", monthlyUsd: 0, monthlyTokens: null }, { scope: "agent", ref: "audie", monthlyUsd: null, monthlyTokens: 0 }] };
+    expect(budgetLine(s, PRICES, "workspace", "")).toMatchObject({ state: "over", against: "usd", used: 1 });
+    expect(budgetLine(s, PRICES, "agent", "audie")).toMatchObject({ state: "over", against: "tokens", used: 1 });
+    expect(overBudget(s, PRICES, "audie", "ima")).toMatch(/^the workspace has used \$1\.00 of its \$0\.00 monthly budget/);
+  });
+
+  test("uses ledger-backed usage runs when the server supplies them", () => {
+    const s = { ...base(), budgets: [{ scope: "workspace" as const, ref: "", monthlyUsd: 1, monthlyTokens: null }], runs: [run({ promptTokens: 10_000_000, completionTokens: 0 })], usageRuns: [{ ...run({ promptTokens: 1, completionTokens: 1 }), costUsd: 0.000001 }] };
+    expect(budgetLine(s, PRICES, "workspace", "").spend.tokens).toBe(2);
+    expect(budgetLine(s, PRICES, "workspace", "").spend.usd).toBe(0.000001);
+  });
+
+  test("holds the applicable ceiling when usage is unknown, while unpriced known tokens remain usable for token budgets", () => {
+    const unknown = { ...run({ id: "unknown", promptTokens: null, completionTokens: null }), costUsd: null };
+    const s = { ...base(), budgets: [{ scope: "workspace" as const, ref: "", monthlyUsd: 10, monthlyTokens: 10_000_000 }], usageRuns: [unknown] };
+    expect(budgetLine(s, PRICES, "workspace", "")).toMatchObject({ state: "over", used: 1 });
+    expect(budgetLine(s, PRICES, "workspace", "").spend.unknown).toBe(1);
+
+    const unpriced = run({ id: "unpriced", model: "unknown-model" });
+    const tokenOnly = { ...base(), budgets: [{ scope: "workspace" as const, ref: "", monthlyUsd: null, monthlyTokens: 10_000_000 }], usageRuns: [unpriced] };
+    expect(budgetLine(tokenOnly, PRICES, "workspace", "").state).toBe("ok");
+    expect(budgetLine(tokenOnly, PRICES, "workspace", "").spend.unpriced).toBe(1);
   });
 });

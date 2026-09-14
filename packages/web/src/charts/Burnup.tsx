@@ -3,7 +3,7 @@ import { burnupSeries, monthIndex, monthLabel } from "@valueflow/domain";
 import type { Calendar, Dim, Milestone } from "@valueflow/domain";
 import { C, STATUS_COLOR } from "../theme.ts";
 
-export function Burnup({ milestones, dim, target, cal }: { milestones: Milestone[]; dim: Dim; target: number; cal: Calendar }) {
+export function Burnup({ milestones, historicalMilestones, dim, target, cal }: { milestones: Milestone[]; historicalMilestones?: Milestone[]; dim: Dim; target: number; cal: Calendar }) {
   const [hover, setHover] = useState<number | null>(null);
   const MONTHS = cal.months;
   const TODAY = cal.today;
@@ -20,7 +20,7 @@ export function Burnup({ milestones, dim, target, cal }: { milestones: Milestone
   const X = (i: number) => PL + (i / (MONTHS.length - 1)) * iw;
   const Y = (v: number) => PT + ih - (v / yMax) * ih;
 
-  const S = useMemo(() => burnupSeries(milestones, dim, cal), [milestones, dim, cal]);
+  const S = useMemo(() => burnupSeries(milestones, dim, cal, historicalMilestones), [milestones, historicalMilestones, dim, cal]);
 
   const path = (arr: (number | null)[], stop = MONTHS.length - 1) =>
     arr
@@ -29,6 +29,7 @@ export function Burnup({ milestones, dim, target, cal }: { milestones: Milestone
       .join(" ");
   const rp = path(S.real, TODAY);
   const realToday = S.real[TODAY] ?? 0;
+  const firstKnown = S.real.findIndex((v, i) => i <= TODAY && v !== null);
 
   return (
     <div style={{ position: "relative" }}>
@@ -68,7 +69,7 @@ export function Burnup({ milestones, dim, target, cal }: { milestones: Milestone
         </text>
         <path d={path(S.ceil)} fill="none" stroke={C.dim} strokeWidth="1.3" strokeDasharray="2 4" />
         <path d={path(S.com)} fill="none" stroke={C.indigoHi} strokeWidth="1.6" strokeDasharray="6 5" opacity="0.85" />
-        <path d={`${rp} L${X(TODAY)},${Y(0)} L${X(0)},${Y(0)} Z`} fill="url(#vfA)" />
+        {rp && firstKnown >= 0 && <path d={`${rp} L${X(TODAY)},${Y(0)} L${X(firstKnown)},${Y(0)} Z`} fill="url(#vfA)" />}
         <path d={rp} fill="none" stroke={C.indigo} strokeWidth="2.2" strokeLinejoin="round" pathLength="1" className="vf-draw" />
         <circle cx={X(TODAY)} cy={Y(realToday)} r="4" fill={C.indigoHi} stroke={C.bg} strokeWidth="2" />
         {milestones.map((m) => (
@@ -104,7 +105,7 @@ export function Burnup({ milestones, dim, target, cal }: { milestones: Milestone
           }}
         >
           <div style={{ fontSize: 11, color: C.mut, marginBottom: 4 }}>{monthLabel(MONTHS[hover] ?? cal.todayYm, cal.todayYm)}</div>
-          <div style={{ fontSize: 12, color: C.indigoHi }}>realized {S.real[Math.min(hover, TODAY)]}%</div>
+          <div style={{ fontSize: 12, color: C.indigoHi }}>{S.real[Math.min(hover, TODAY)] === null ? "eligible unknown" : `eligible ${S.real[Math.min(hover, TODAY)]}%`}</div>
           {S.com[hover] !== null && <div style={{ fontSize: 12, color: C.mut }}>committed {S.com[hover]}%</div>}
           <div style={{ fontSize: 12, color: C.dim }}>ceiling {S.ceil[hover]}%</div>
         </div>

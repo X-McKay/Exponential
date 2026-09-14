@@ -1,3 +1,6 @@
+import { callLlm } from "./usage.ts";
+import { nextStoredRunId, nextStoredProposalId } from "./ids.ts";
+import { registerProposalGuard } from "./proposal-guard.ts";
 // ================= prompt tuner =================
 //
 // Closes the loop between measurement and prompts. The tuner reads an agent's
@@ -8,7 +11,7 @@
 // numbers sit beside the last one's.
 
 import type { Database } from "bun:sqlite";
-import { PROJECT_KINDS, agentScorecard, nextProposalId, nextRunId, promptHistory } from "@valueflow/domain";
+import { PROJECT_KINDS, agentScorecard, promptHistory } from "@valueflow/domain";
 import type { Agent, AgentRun, AppState, Proposal } from "@valueflow/domain";
 import { clip } from "./agents.ts";
 import { ruleScores } from "./evals.ts";
@@ -28,7 +31,7 @@ const pct = (v: number | null) => (v === null ? "n/a" : `${Math.round(v * 100)}%
 /** The evidence pack: scorecard, version history, and the worst runs with what the judge and people said. */
 export const tunerContext = (state: AppState, target: Agent): string => {
   const card = agentScorecard(target, state.runs, state.scores, state.proposals, state.asOf);
-  const history = promptHistory(target, promptVersion(target.kind, target.prompt), state.runs, state.scores, state.promptVersions);
+  const history = promptHistory(target, promptVersion(target.kind, target.prompt, target.id), state.runs, state.scores, state.promptVersions);
   const finished = state.runs.filter((r) => r.agentId === target.id && (r.state === "done" || r.state === "attention" || r.state === "failed"));
   const overallOf = (id: string) => state.scores.find((s) => s.runId === id && s.scorer === "judge" && s.dimension === "overall")?.score ?? null;
   const worst = [...finished].sort((a, b) => (overallOf(a.id) ?? (a.state === "failed" ? -1 : 2)) - (overallOf(b.id) ?? (b.state === "failed" ? -1 : 2))).slice(0, 6);
@@ -51,7 +54,7 @@ export const tunerContext = (state: AppState, target: Agent): string => {
   return [
     `# ${target.name} (kind ${target.kind}) — evidence as of ${state.asOf.slice(0, 10)}`,
     `Built-in role: ${ROLE[target.kind].brief}\nBuilt-in task: ${ROLE[target.kind].task}`,
-    `Current extra instructions (version ${promptVersion(target.kind, target.prompt)}): ${target.prompt ? `\n"""\n${target.prompt}\n"""` : "none"}`,
+    `Current extra instructions (version ${promptVersion(target.kind, target.prompt, target.id)}): ${target.prompt ? `\n"""\n${target.prompt}\n"""` : "none"}`,
     `\n## Scorecard, last 30 days\n${card.runs} runs, ${card.failed} failed. Rules: format ${pct(card.rules.format)}, grounding ${pct(card.rules.grounding)}, proposals valid ${pct(card.rules.proposalsValid)}. Judge (${card.judge.judged} judged): groundedness ${pct(card.judge.groundedness)}, completeness ${pct(card.judge.completeness)}, actionability ${pct(card.judge.actionability)}, clarity ${pct(card.judge.clarity)}, overall ${pct(card.judge.overall)}. Ratings: ${card.ratings.up} up, ${card.ratings.down} down. Proposals accepted ${pct(card.proposals.acceptanceRate)} of ${card.proposals.total}.`,
     `\n## Prompt versions tried\n${history.map((h) => `- ${h.version}${h.current ? " (current)" : ""}, ${h.source}${h.since ? ` since ${h.since.slice(0, 10)}` : ""}: ${h.runs} runs, judge ${pct(h.judge)}, grounding ${pct(h.grounding)}, benchmark ${pct(h.benchmark.overall)} over ${h.benchmark.n} cases, expectations ${pct(h.benchmark.expectations)}, ${h.up} up / ${h.down} down${h.prompt ? ` — instructions: "${h.prompt.slice(0, 200)}"` : ""}`).join("\n") || "- none recorded"}`,
     `\n## Weakest runs\n${runLines.join("\n\n") || "none"}`,
@@ -94,7 +97,7 @@ export const tuneAgent = async (db: Database, llm: Llm, tuner: Agent, targetId: 
   const messages = buildTunerMessages(tuner, state, target);
   const started = Date.now();
   const run: AgentRun = {
-    id: nextRunId(state.runs),
+    id: nextStoredRunId(db),
     agentId: tuner.id,
     proj: null,
     tab: "overview",
@@ -127,7 +130,7 @@ export const tuneAgent = async (db: Database, llm: Llm, tuner: Agent, targetId: 
   try {
     t.step("request", `${tuner.model ?? llm.describe().model ?? "default model"}, JSON schema`);
     const asked = Date.now();
-    const res = await llm.chat(messages, { jsonSchema: TUNE_SCHEMA, maxTokens: 2500, temperature: 0.2, model: tuner.model, onToken: t.token });
+    const res = await callLlm(db, llm, { agentId: tuner.id, proj: null, runId: run.id }, messages, { jsonSchema: TUNE_SCHEMA, maxTokens: 2500, temperature: 0.2, model: tuner.model, onToken: t.token }, now);
     t.step("reply", replyDetail(res.usage, Date.now() - asked, res.truncated));
     const raw = extractJson(res.content);
     const o = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
@@ -141,8 +144,11 @@ export const tuneAgent = async (db: Database, llm: Llm, tuner: Agent, targetId: 
     updateRun(db, finished);
     t.step("parsed", finished.summary);
     if (proposes) {
-      const proposal: Proposal = { id: nextProposalId(loadState(db, now).proposals), runId: run.id, agentId: tuner.id, proj: null, ruleId: null, action: { type: "agent_prompt", agentId: target.id, prompt }, rationale: change || `Proposed by ${tuner.name} from ${measured} measured runs.`, state: "pending", createdAt: finished.finishedAt ?? now.toISOString(), decidedAt: null };
-      insertProposal(db, proposal);
+      const proposal: Proposal = { id: nextStoredProposalId(db), runId: run.id, agentId: tuner.id, proj: null, ruleId: null, action: { type: "agent_prompt", agentId: target.id, prompt }, rationale: change || `Proposed by ${tuner.name} from ${measured} measured runs.`, state: "pending", createdAt: now.toISOString(), decidedAt: null };
+      db.transaction(() => {
+        insertProposal(db, proposal);
+        registerProposalGuard(db, proposal, state);
+      })();
       t.step("proposals", `${proposal.id}: new instructions for ${target.name} (${prompt.split(/\s+/).length} words)`);
     } else t.step("proposals", "no change justified");
     const scores = ruleScores({ run: finished, briefing: messages[1]?.content ?? "", proposalsReturned: proposes ? 1 : 0, proposalsKept: proposes ? 1 : 0 }, finished.finishedAt ?? now.toISOString());

@@ -1,3 +1,5 @@
+import { callLlm } from "./usage.ts";
+import { nextStoredRunId } from "./ids.ts";
 // ================= the daily brief (Glance curator) =================
 //
 // Generative UI with a short leash. A deterministic composer finds every
@@ -11,7 +13,7 @@
 // rule-scored, judged, rated on the page, and benchmarked.
 
 import type { Database } from "bun:sqlite";
-import { BRIEF_GROUPS, WIDGET_TYPES, blocksHash, calendarOf, composeGlance, describeBlock, factIndex, nextRunId, parseAction, parseWidget, projectView, widgetMarkdown } from "@valueflow/domain";
+import { BRIEF_GROUPS, WIDGET_TYPES, blocksHash, calendarOf, composeGlance, describeBlock, factIndex, parseAction, parseWidget, projectView, widgetMarkdown } from "@valueflow/domain";
 import type { Agent, AgentRun, AppState, Block, BriefSection, DailyBrief, Project } from "@valueflow/domain";
 import { clip } from "./agents.ts";
 import { ruleScores } from "./evals.ts";
@@ -147,7 +149,7 @@ export const curateGlance = async (db: Database, llm: Llm, agent: Agent, now: Da
   const briefing = messages[1]?.content ?? "";
   const started = Date.now();
   const run: AgentRun = {
-    id: nextRunId(whole.runs),
+    id: nextStoredRunId(db),
     agentId: agent.id,
     proj: project?.id ?? null,
     tab: "overview",
@@ -180,7 +182,7 @@ export const curateGlance = async (db: Database, llm: Llm, agent: Agent, now: Da
   try {
     t.step("request", `${agent.model ?? llm.describe().model ?? "default model"}, JSON schema with widget shapes`);
     const asked = Date.now();
-    const res = await llm.chat(messages, { jsonSchema: BRIEF_SCHEMA, maxTokens: 2500, temperature: 0.2, model: agent.model, onToken: t.token });
+    const res = await callLlm(db, llm, { agentId: agent.id, proj: run.proj, runId: run.id }, messages, { jsonSchema: BRIEF_SCHEMA, maxTokens: 2500, temperature: 0.2, model: agent.model, onToken: t.token }, now);
     t.step("reply", replyDetail(res.usage, Date.now() - asked, res.truncated));
     const raw = extractJson(res.content);
     const o = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};

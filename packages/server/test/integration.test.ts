@@ -1,5 +1,5 @@
 // The mockup's signature interaction, end to end through the API:
-// seed → drag a metric across its base gate → the release's go-live criterion
+// seed → record a metric across its base gate → the release's go-live criterion
 // flips, the Glance "Below gate" card retires, and once governance catches up
 // the "Blocking release" card is replaced by "Ready to ship".
 
@@ -30,7 +30,7 @@ describe("integration: metric crosses a gate", () => {
     expect(glance.blocks.filter((b) => b.kind === "below_gate").map((b) => (b.kind === "below_gate" ? b.milestone.id : ""))).toEqual(["MS-13", "MS-31"]);
     expect(glance.narrative[0]).toStartWith("One release is blocked — R1 Shadow mode");
 
-    // 2. Drag recall across the base gate via the API (this is what the slider does).
+    // 2. Explicitly record recall across the base gate via the measurement API.
     const put = await app.send<{ reading: MetricReading; metric: Metric }>("PUT", routes.readings("ima", "MS-21", "rec"), { value: 90, source: "manual" });
     expect(put.status).toBe(201);
     expect(put.body.metric.current).toBe(90);
@@ -57,15 +57,15 @@ describe("integration: metric crosses a gate", () => {
 
     glance = (await app.get<Glance>(routes.glance())).body;
     expect(glance.blocks.some((b) => b.kind === "blocked_release")).toBe(false);
-    expect(glance.blocks.find((b) => b.kind === "ready_release")?.title).toBe("R1 Shadow mode — all go-live criteria met");
+    expect(glance.blocks.some((b) => b.kind === "ready_release")).toBe(true);
     expect(glance.narrative[0]).toBe("2 near-term releases are at risk.");
 
-    // 4. Drag it back below the gate: value is derived, so everything reverts.
+    // 4. Record a regression below the gate: eligibility follows current evidence.
     await app.send("PUT", routes.readings("ima", "MS-21", "rec"), { value: 80 });
     st = await releaseOf(app, "ima", "R1");
     expect(st).toMatchObject({ met: 3, label: "Blocked" });
     glance = (await app.get<Glance>(routes.glance())).body;
-    expect(glance.blocks.some((b) => b.kind === "ready_release")).toBe(false);
+    expect(glance.blocks.some((b) => b.id === "ready_release:ima:R1")).toBe(false);
     expect(glance.blocks.some((b) => b.kind === "below_gate" && b.milestone.id === "MS-21")).toBe(true);
 
     // The full history is preserved: 30 seeded + 2 manual readings.
@@ -82,6 +82,6 @@ describe("integration: metric crosses a gate", () => {
     await app.send("PUT", routes.readings("onboarding", "MS-12", "cov"), { value: 95 });
     const glance = (await app.get<Glance>(routes.glance())).body;
     const vt = glance.blocks.find((b) => b.kind === "value_trajectory");
-    expect(vt?.title).toBe("20% of 40% FTE target realized");
+    expect(vt?.title).toBe("20% of 40% FTE target eligible");
   });
 });

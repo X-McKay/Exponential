@@ -24,44 +24,55 @@ export function GovEditor({
   /** Category preset for a new item. */
   category?: string;
   defaultOwner: string;
-  onSave: (item: GovernanceItem, isNew: boolean) => void;
-  onDelete?: (gid: string) => void;
+  onSave: (item: GovernanceItem, isNew: boolean) => Promise<unknown>;
+  onDelete?: (gid: string) => Promise<unknown>;
   onClose: () => void;
 }) {
   const isNew = item === null;
   const [d, setD] = useState<GovernanceItem>(() => (item ? { ...item } : blank(category ?? project.governance[0]?.cat ?? "Governance", defaultOwner)));
   const [confirmDel, setConfirmDel] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const set = (patch: Partial<GovernanceItem>) => setD((x) => ({ ...x, ...patch }));
   const cats = [...new Set(project.governance.map((g) => g.cat))];
   const dateOk = d.date === null || d.date === "" || /^\d{4}-\d{2}-\d{2}$/.test(d.date);
   const valid = dateOk && d.owner.trim().length > 0 && d.name.trim().length > 0 && d.cat.trim().length > 0;
-  const submit = () => {
-    if (!valid) return;
+  const submit = async () => {
+    if (!valid || saving) return;
     const id = isNew ? slugId(d.name, project.governance.map((g) => g.id), "item") : d.id;
     const { link, ...rest } = d;
-    onSave({ ...rest, id, cat: d.cat.trim(), name: d.name.trim(), owner: d.owner.trim(), date: d.date || null, ...(link ? { link } : {}) }, isNew);
+    setSaving(true); setSaveError(null);
+    try { await onSave({ ...rest, id, cat: d.cat.trim(), name: d.name.trim(), owner: d.owner.trim(), date: d.date || null, ...(link ? { link } : {}) }, isNew); }
+    catch (e) { setSaveError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
+  };
+  const remove = async () => {
+    if (!onDelete || saving) return;
+    setSaving(true); setSaveError(null);
+    try { await onDelete(d.id); } catch (e) { setSaveError(e instanceof Error ? e.message : String(e)); setSaving(false); }
   };
   return (
     <Modal
       title={isNew ? "New governance item" : `Edit — ${item.name}`}
       onClose={onClose}
-      onSubmit={submit}
+      onSubmit={() => void submit()}
       footer={
         <>
           {!isNew && onDelete && (
             <span style={{ marginRight: "auto" }}>
-              <Btn tone="danger" onClick={() => (confirmDel ? onDelete(d.id) : setConfirmDel(true))}>
+              <Btn tone="danger" disabled={saving} onClick={() => (confirmDel ? void remove() : setConfirmDel(true))}>
                 {confirmDel ? "Confirm delete" : "Delete"}
               </Btn>
             </span>
           )}
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn tone="primary" disabled={!valid} onClick={submit}>
-            {isNew ? "Create item" : "Save changes"}
+          <Btn tone="primary" disabled={!valid || saving} onClick={() => void submit()}>
+            {saving ? "Saving…" : isNew ? "Create item" : "Save changes"}
           </Btn>
         </>
       }
     >
+      {saveError && <div role="alert" style={{ color: C.redHi, fontSize: 12, margin: "8px 0" }}>Could not save: {saveError}</div>}
       <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 10 }}>
         <div>
           <Lbl>Name</Lbl>

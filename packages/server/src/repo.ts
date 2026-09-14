@@ -5,8 +5,9 @@
 
 import type { Database } from "bun:sqlite";
 import { EVENT_WINDOW_DAYS, GSTATUS_LABEL, RUN_WINDOW_DAYS, deriveDevEvents } from "@valueflow/domain";
-import type { Agent, AgentRun, AppState, Budget, Build, CalendarEvent, Criterion, DevFacts, Event, DailyBrief, GovernanceItem, RunEvent, Metric, MetricReading, Milestone, MilestoneStatus, Project, PromptVersion, Proposal, ProposalAction, PullRequest, Release, RiskTier, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
+import type { Agent, AgentRun, AppState, Budget, Build, CalendarEvent, Criterion, DevFacts, Event, DailyBrief, GovernanceItem, RunEvent, Metric, MetricReading, Milestone, MilestoneSnapshot, MilestoneStatus, ModelPrice, Project, PromptVersion, Proposal, ProposalAction, PullRequest, Release, RiskTier, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
 import type { AgentsInput, BudgetsInput, CalendarEventInput, GovernanceInput, GovernanceItemInput, MilestoneInput, ProjectInput, ReleaseInput, RuleInput, TargetsInput, WorkspaceInput } from "@valueflow/shared";
+import { loadUsageRuns } from "./usage.ts";
 
 export class NotFound extends Error {
   override name = "NotFound";
@@ -48,6 +49,8 @@ interface MilestoneRow {
   base_time: number;
   stretch_fte: number;
   stretch_time: number;
+  retired_at: string | null;
+  created_at: string | null;
 }
 interface MetricRow {
   project_id: string;
@@ -56,6 +59,8 @@ interface MetricRow {
   label: string;
   base: number;
   stretch: number;
+  sort: number;
+  retired_at: string | null;
 }
 interface LatestRow {
   project_id: string;
@@ -135,6 +140,8 @@ interface ProposalRow {
   state: Proposal["state"];
   created_at: string;
   decided_at: string | null;
+  decided_by: string | null;
+  decision_mode: "human" | "automatic" | null;
 }
 interface RunRow {
   id: string;
@@ -245,6 +252,19 @@ interface ReadingRow {
   recorded_at: string;
   source: "eval" | "manual";
 }
+interface MilestoneSnapshotRow {
+  seq: number;
+  project_id: string;
+  milestone_id: string;
+  at: string;
+  status: MilestoneStatus;
+  month: string;
+  base_fte: number;
+  base_time: number;
+  stretch_fte: number;
+  stretch_time: number;
+  metrics: string;
+}
 
 const LATEST_SQL = `
   SELECT r.project_id, r.milestone_id, r.metric_id, r.value, r.recorded_at, r.source
@@ -280,18 +300,24 @@ const toCriterion = (c: CritRow): Criterion => {
   }
 };
 
-export const loadState = (db: Database, now: Date = new Date()): AppState => {
+export const loadState = (db: Database, now: Date = new Date(), prices: Record<string, ModelPrice> = {}): AppState => {
   const projects = db.query<ProjectRow, []>("SELECT * FROM projects ORDER BY sort").all();
   const repos = groupBy(db.query<RepoRow, []>("SELECT * FROM project_repos ORDER BY sort").all(), (r) => r.project_id);
   const members = groupBy(db.query<MemberRow, []>("SELECT * FROM team_members ORDER BY sort").all(), (r) => r.project_id);
-  const milestones = groupBy(db.query<MilestoneRow, []>("SELECT * FROM milestones ORDER BY sort").all(), (r) => r.project_id);
-  const metrics = groupBy(db.query<MetricRow, []>("SELECT * FROM metrics ORDER BY sort").all(), (r) => `${r.project_id} ${r.milestone_id}`);
+  const milestoneRows = db.query<MilestoneRow, []>("SELECT * FROM milestones ORDER BY sort").all();
+  const milestones = groupBy(milestoneRows.filter((r) => r.retired_at === null), (r) => r.project_id);
+  const historicalMilestones = groupBy(milestoneRows.filter((r) => r.retired_at !== null), (r) => r.project_id);
+  const metricRows = db.query<MetricRow, []>("SELECT * FROM metrics ORDER BY sort").all();
+  const metrics = groupBy(metricRows.filter((r) => r.retired_at === null), (r) => `${r.project_id} ${r.milestone_id}`);
+  const historicalMetrics = groupBy(metricRows, (r) => `${r.project_id} ${r.milestone_id}`);
+  const snapshots = groupBy(db.query<MilestoneSnapshotRow, []>("SELECT * FROM milestone_snapshots ORDER BY at, seq").all(), (r) => `${r.project_id} ${r.milestone_id}`);
   const latest = new Map(db.query<LatestRow, []>(LATEST_SQL).all().map((r) => [key3(r.project_id, r.milestone_id, r.metric_id), r]));
   const gov = groupBy(db.query<GovRow, []>("SELECT * FROM governance_items ORDER BY sort").all(), (r) => r.project_id);
   const releases = groupBy(db.query<ReleaseRow, []>("SELECT * FROM releases ORDER BY sort").all(), (r) => r.project_id);
   const relMs = groupBy(db.query<RelMsRow, []>("SELECT * FROM release_milestones ORDER BY sort").all(), (r) => `${r.project_id} ${r.release_id}`);
   const crits = groupBy(db.query<CritRow, []>("SELECT * FROM release_criteria ORDER BY sort").all(), (r) => `${r.project_id} ${r.release_id}`);
   const dev = loadDevFacts(db);
+  const usageRuns = loadUsageRuns(db, now, prices);
 
   const out: AppState = {
     asOf: now.toISOString(),
@@ -302,6 +328,7 @@ export const loadState = (db: Database, now: Date = new Date()): AppState => {
     dev: {},
     agents: loadAgents(db),
     runs: loadRuns(db, now),
+    usageRuns,
     llm: null,
     proposals: loadProposals(db, now),
     scores: loadScores(db, now),
@@ -314,19 +341,32 @@ export const loadState = (db: Database, now: Date = new Date()): AppState => {
     calendar: loadCalendar(db),
   };
   for (const p of projects) {
-    const ms: Milestone[] = (milestones.get(p.id) ?? []).map((m) => ({
+    const toMilestone = (m: MilestoneRow, includeRetiredMetrics: boolean): Milestone => ({
       id: m.id,
       name: m.name,
+      ...(m.created_at === null ? {} : { createdAt: m.created_at }),
       status: m.status,
       month: m.month,
       impact: { base: { fte: m.base_fte, time: m.base_time }, stretch: { fte: m.stretch_fte, time: m.stretch_time } },
-      metrics: (metrics.get(`${p.id} ${m.id}`) ?? []).map(
+      metrics: ((includeRetiredMetrics ? historicalMetrics.get(`${p.id} ${m.id}`) : metrics.get(`${p.id} ${m.id}`)) ?? []).map(
         (x): Metric => {
           const l = latest.get(key3(p.id, m.id, x.id));
           return { id: x.id, label: x.label, base: x.base, stretch: x.stretch, current: l?.value ?? 0, readAt: l?.recorded_at ?? null, readSource: l?.source ?? null };
         },
       ),
-    }));
+      snapshots: (snapshots.get(`${p.id} ${m.id}`) ?? []).map(
+        (s): MilestoneSnapshot => ({
+          seq: s.seq,
+          at: s.at,
+          status: s.status,
+          month: s.month,
+          impact: { base: { fte: s.base_fte, time: s.base_time }, stretch: { fte: s.stretch_fte, time: s.stretch_time } },
+          metrics: JSON.parse(s.metrics) as Metric[],
+        }),
+      ),
+    });
+    const ms: Milestone[] = (milestones.get(p.id) ?? []).map((m) => toMilestone(m, false));
+    const archived: Milestone[] = (historicalMilestones.get(p.id) ?? []).map((m) => toMilestone(m, true));
     const project: Project = {
       id: p.id,
       key: p.key,
@@ -339,6 +379,7 @@ export const loadState = (db: Database, now: Date = new Date()): AppState => {
       team: (members.get(p.id) ?? []).map((t) => ({ ini: t.ini, name: t.name, role: t.role })),
       targets: { fte: p.target_fte, time: p.target_time },
       milestones: ms,
+      ...(archived.length ? { historicalMilestones: archived } : {}),
       governance: (gov.get(p.id) ?? []).map(
         (g): GovernanceItem => ({
           cat: g.cat,
@@ -441,6 +482,12 @@ const toRun = (r: RunRow): AgentRun => ({
 
 const RUN_COLUMNS = "id, agent_id, project_id, tab, state, started_at, finished_at, instruction, summary, output, model, error, prompt_version, latency_ms, prompt_tokens, completion_tokens, benchmark, rating, rating_note";
 
+export const getRun = (db: Database, id: string): AgentRun => {
+  const row = db.query<RunRow, [string]>(`SELECT ${RUN_COLUMNS} FROM agent_runs WHERE id = ?`).get(id);
+  if (!row) throw new NotFound(`run ${id} not found`);
+  return toRun(row);
+};
+
 export const loadRuns = (db: Database, now: Date, windowDays = RUN_WINDOW_DAYS * 2): AgentRun[] => {
   const since = new Date(now.getTime() - windowDays * 86_400_000).toISOString();
   return db.query<RunRow, [string]>(`SELECT ${RUN_COLUMNS} FROM agent_runs WHERE started_at >= ? ORDER BY started_at DESC, id`).all(since).map(toRun);
@@ -509,7 +556,7 @@ export const upsertScore = (db: Database, s: RunScore): void => {
 export const loadProposals = (db: Database, now: Date, windowDays = RUN_WINDOW_DAYS): Proposal[] => {
   const since = new Date(now.getTime() - windowDays * 86_400_000).toISOString();
   return db
-    .query<ProposalRow, [string]>("SELECT * FROM proposals WHERE state = 'pending' OR created_at >= ? ORDER BY created_at DESC, id")
+    .query<ProposalRow, [string]>("SELECT p.*, g.decided_by, g.decision_mode FROM proposals p LEFT JOIN proposal_guards g ON g.proposal_id = p.id WHERE p.state = 'pending' OR p.created_at >= ? ORDER BY p.created_at DESC, p.id")
     .all(since)
     .map((r) => ({
       id: r.id,
@@ -522,6 +569,8 @@ export const loadProposals = (db: Database, now: Date, windowDays = RUN_WINDOW_D
       state: r.state,
       createdAt: r.created_at,
       decidedAt: r.decided_at,
+      ...(r.decided_by === null ? {} : { decidedBy: r.decided_by }),
+      ...(r.decision_mode === null ? {} : { decisionMode: r.decision_mode }),
     }));
 };
 
@@ -807,6 +856,8 @@ export const findMilestone = (state: AppState, pid: string, mid: string): Milest
 
 const metricExists = (db: Database, pid: string, mid: string, xid: string): boolean =>
   (db.query<{ n: number }, [string, string, string]>("SELECT COUNT(*) AS n FROM metrics WHERE project_id = ? AND milestone_id = ? AND id = ?").get(pid, mid, xid)?.n ?? 0) > 0;
+const activeMetricExists = (db: Database, pid: string, mid: string, xid: string): boolean =>
+  (db.query<{ n: number }, [string, string, string]>("SELECT COUNT(*) AS n FROM metrics WHERE project_id = ? AND milestone_id = ? AND id = ? AND retired_at IS NULL").get(pid, mid, xid)?.n ?? 0) > 0;
 
 export const listReadings = (db: Database, pid: string, mid: string, xid: string): MetricReading[] => {
   if (!metricExists(db, pid, mid, xid)) throw new NotFound(`metric ${pid}/${mid}/${xid} not found`);
@@ -818,7 +869,7 @@ export const listReadings = (db: Database, pid: string, mid: string, xid: string
     .map((r) => ({ projectId: r.project_id, milestoneId: r.milestone_id, metricId: r.metric_id, value: r.value, recordedAt: r.recorded_at, source: r.source }));
 };
 
-export const recordReading = (
+const recordReadingUnsafe = (
   db: Database,
   pid: string,
   mid: string,
@@ -826,8 +877,9 @@ export const recordReading = (
   value: number,
   source: "eval" | "manual",
   at = new Date(),
+  announce = true,
 ): MetricReading => {
-  if (!metricExists(db, pid, mid, xid)) throw new NotFound(`metric ${pid}/${mid}/${xid} not found`);
+  if (!activeMetricExists(db, pid, mid, xid)) throw new NotFound(`metric ${pid}/${mid}/${xid} not found`);
   const recordedAt = at.toISOString();
   db.query("INSERT INTO metric_readings (project_id, milestone_id, metric_id, value, recorded_at, source) VALUES (?,?,?,?,?,?)").run(
     pid,
@@ -837,44 +889,88 @@ export const recordReading = (
     recordedAt,
     source,
   );
-  if (source === "eval") {
-    // An eval run is news; a manual reading is the user simulating, not an event.
+  if (source === "eval" || announce) {
     const x = db
       .query<{ label: string; base: number; ms: string }, [string, string, string]>(
         "SELECT x.label, x.base, m.name AS ms FROM metrics x JOIN milestones m ON m.project_id = x.project_id AND m.id = x.milestone_id WHERE x.project_id = ? AND x.milestone_id = ? AND x.id = ?",
       )
       .get(pid, mid, xid);
     if (x) {
-      const gap = Math.round((x.base - value) * 10) / 10;
-      const verdict = gap > 0 ? `${gap}pt${gap === 1 ? "" : "s"} below base gate (${x.base}%)` : `clears base gate (${x.base}%)`;
-      recordEvent(db, { ref: `eval:${pid}/${mid}/${xid}:${recordedAt}`, at: recordedAt, type: "eval", proj: pid, tab: "value", text: `Eval: ${x.ms} · ${x.label} at ${value}% — ${verdict}` });
+      if (source === "eval") {
+        const gap = Math.round((x.base - value) * 10) / 10;
+        const verdict = gap > 0 ? `${gap}pt${gap === 1 ? "" : "s"} below base gate (${x.base}%)` : `clears base gate (${x.base}%)`;
+        recordEvent(db, { ref: `eval:${pid}/${mid}/${xid}:${recordedAt}`, at: recordedAt, type: "eval", proj: pid, tab: "value", text: `Eval: ${x.ms} · ${x.label} at ${value}% — ${verdict}` });
+      } else {
+        recordEvent(db, { ref: `manual:${pid}/${mid}/${xid}:${recordedAt}`, at: recordedAt, type: "eval", proj: pid, tab: "value", text: `Manual measurement: ${x.ms} · ${x.label} at ${value}%` });
+      }
     }
   }
+  // Readings are part of the historical milestone fact at this instant. The
+  // snapshot and the reading share the caller's transaction when one exists.
+  snapshotMilestone(db, pid, mid, recordedAt);
   return { projectId: pid, milestoneId: mid, metricId: xid, value, recordedAt, source };
 };
+
+/** Append a reading and its contemporaneous milestone snapshot atomically. */
+export const recordReading = (
+  db: Database,
+  pid: string,
+  mid: string,
+  xid: string,
+  value: number,
+  source: "eval" | "manual",
+  at = new Date(),
+  announce = true,
+): MetricReading => db.transaction(() => recordReadingUnsafe(db, pid, mid, xid, value, source, at, announce))();
 
 // ---- milestones ---------------------------------------------------------
 
 const milestoneExists = (db: Database, pid: string, mid: string): boolean =>
+  (db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM milestones WHERE project_id = ? AND id = ? AND retired_at IS NULL").get(pid, mid)?.n ?? 0) > 0;
+
+const milestoneRecordExists = (db: Database, pid: string, mid: string): boolean =>
   (db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM milestones WHERE project_id = ? AND id = ?").get(pid, mid)?.n ?? 0) > 0;
 
 const projectExists = (db: Database, pid: string): boolean =>
   (db.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM projects WHERE id = ?").get(pid)?.n ?? 0) > 0;
 
+/** Capture the complete milestone definition after a write. This row is
+ * append-only, so later threshold edits cannot rewrite historical facts. */
+const snapshotMilestone = (db: Database, pid: string, mid: string, at: string): void => {
+  const m = db.query<MilestoneRow, [string, string]>("SELECT * FROM milestones WHERE project_id = ? AND id = ?").get(pid, mid);
+  if (!m) return;
+  const metrics = db
+    .query<MetricRow, [string, string]>("SELECT * FROM metrics WHERE project_id = ? AND milestone_id = ? AND retired_at IS NULL ORDER BY sort").all(pid, mid)
+    .map((x) => {
+      const latest = db
+        .query<{ value: number; recorded_at: string; source: "eval" | "manual" }, [string, string, string, string]>(
+          "SELECT value, recorded_at, source FROM metric_readings WHERE project_id = ? AND milestone_id = ? AND metric_id = ? AND recorded_at <= ? ORDER BY recorded_at DESC, seq DESC LIMIT 1",
+        )
+        .get(pid, mid, x.id, at);
+      return { id: x.id, label: x.label, base: x.base, stretch: x.stretch, current: latest?.value ?? 0, readAt: latest?.recorded_at ?? null, readSource: latest?.source ?? null } satisfies Metric;
+    });
+  db.query(
+    "INSERT INTO milestone_snapshots (project_id, milestone_id, at, status, month, base_fte, base_time, stretch_fte, stretch_time, metrics) VALUES (?,?,?,?,?,?,?,?,?,?)",
+  ).run(pid, mid, at, m.status, m.month, m.base_fte, m.base_time, m.stretch_fte, m.stretch_time, JSON.stringify(metrics));
+};
+
 /**
  * Create or replace a milestone and its metric definitions. A metric's
- * `current` is a reading: when it differs from the latest recorded value (or
- * no reading exists yet and it is non-zero) a manual reading is appended, so
- * eval history is never rewritten.
+ * `current` is only accepted as an initial reading when a milestone or metric
+ * is created. Existing readings are changed exclusively through recordReading,
+ * so an editor holding stale metadata cannot overwrite a fresh eval.
  */
 export const upsertMilestone = (db: Database, pid: string, input: MilestoneInput, mode: "create" | "update", now = new Date()): void => {
   if (!projectExists(db, pid)) throw new NotFound(`project ${pid} not found`);
   const exists = milestoneExists(db, pid, input.id);
-  if (mode === "create" && exists) throw new Conflict(`milestone ${pid}/${input.id} already exists`);
+  if (mode === "create" && milestoneRecordExists(db, pid, input.id)) throw new Conflict(`milestone ${pid}/${input.id} already exists`);
   if (mode === "update" && !exists) throw new NotFound(`milestone ${pid}/${input.id} not found`);
 
   const before = exists ? db.query<{ status: MilestoneStatus }, [string, string]>("SELECT status FROM milestones WHERE project_id = ? AND id = ?").get(pid, input.id) : null;
   db.transaction(() => {
+    // Preserve the exact pre-edit definition as well as the post-edit one;
+    // this is especially important when an existing metric is retired.
+    if (exists) snapshotMilestone(db, pid, input.id, now.toISOString());
     if (exists) {
       db.query(
         "UPDATE milestones SET name = ?, status = ?, month = ?, base_fte = ?, base_time = ?, stretch_fte = ?, stretch_time = ? WHERE project_id = ? AND id = ?",
@@ -892,8 +988,8 @@ export const upsertMilestone = (db: Database, pid: string, input: MilestoneInput
     } else {
       const sort = db.query<{ s: number }, [string]>("SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM milestones WHERE project_id = ?").get(pid)?.s ?? 0;
       db.query(
-        "INSERT INTO milestones (project_id, id, name, status, month, base_fte, base_time, stretch_fte, stretch_time, sort) VALUES (?,?,?,?,?,?,?,?,?,?)",
-      ).run(pid, input.id, input.name, input.status, input.month, input.impact.base.fte, input.impact.base.time, input.impact.stretch.fte, input.impact.stretch.time, sort);
+        "INSERT INTO milestones (project_id, id, name, status, month, base_fte, base_time, stretch_fte, stretch_time, sort, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+      ).run(pid, input.id, input.name, input.status, input.month, input.impact.base.fte, input.impact.base.time, input.impact.stretch.fte, input.impact.stretch.time, sort, now.toISOString());
     }
     const keep = input.metrics.map((x) => x.id);
     const existing = db
@@ -901,11 +997,11 @@ export const upsertMilestone = (db: Database, pid: string, input: MilestoneInput
       .all(pid, input.id)
       .map((r) => r.id);
     for (const id of existing) {
-      if (!keep.includes(id)) db.query("DELETE FROM metrics WHERE project_id = ? AND milestone_id = ? AND id = ?").run(pid, input.id, id);
+      if (!keep.includes(id)) db.query("UPDATE metrics SET retired_at = COALESCE(retired_at, ?) WHERE project_id = ? AND milestone_id = ? AND id = ?").run(now.toISOString(), pid, input.id, id);
     }
     input.metrics.forEach((x, i) => {
       if (existing.includes(x.id)) {
-        db.query("UPDATE metrics SET label = ?, base = ?, stretch = ?, sort = ? WHERE project_id = ? AND milestone_id = ? AND id = ?").run(
+        db.query("UPDATE metrics SET label = ?, base = ?, stretch = ?, sort = ?, retired_at = NULL WHERE project_id = ? AND milestone_id = ? AND id = ?").run(
           x.label,
           x.base,
           x.stretch,
@@ -917,22 +1013,31 @@ export const upsertMilestone = (db: Database, pid: string, input: MilestoneInput
       } else {
         db.query("INSERT INTO metrics (project_id, milestone_id, id, label, base, stretch, sort) VALUES (?,?,?,?,?,?,?)").run(pid, input.id, x.id, x.label, x.base, x.stretch, i);
       }
-      const latest = db
-        .query<{ value: number }, [string, string, string]>(
-          "SELECT value FROM metric_readings WHERE project_id = ? AND milestone_id = ? AND metric_id = ? ORDER BY recorded_at DESC, seq DESC LIMIT 1",
-        )
-        .get(pid, input.id, x.id);
-      const currentStored = latest?.value ?? 0;
-      if (x.current !== currentStored) recordReading(db, pid, input.id, x.id, x.current, "manual", now);
+      if (mode === "create" || !existing.includes(x.id)) {
+        const latest = db
+          .query<{ value: number }, [string, string, string]>(
+            "SELECT value FROM metric_readings WHERE project_id = ? AND milestone_id = ? AND metric_id = ? ORDER BY recorded_at DESC, seq DESC LIMIT 1",
+          )
+          .get(pid, input.id, x.id);
+        if (!latest && x.current !== 0) recordReading(db, pid, input.id, x.id, x.current, "manual", now, false);
+      }
     });
+    snapshotMilestone(db, pid, input.id, now.toISOString());
   })();
 };
 
-export const deleteMilestone = (db: Database, pid: string, mid: string): void => {
+export const deleteMilestone = (db: Database, pid: string, mid: string, now = new Date()): void => {
   if (!milestoneExists(db, pid, mid)) throw new NotFound(`milestone ${pid}/${mid} not found`);
   // Release criteria that reference this milestone are intentionally left in
   // place: they resolve to "milestone not found" / not-met at read time.
-  db.query("DELETE FROM milestones WHERE project_id = ? AND id = ?").run(pid, mid);
+  // Retire the definition instead of deleting it: append-only readings and
+  // snapshots remain available for historical evidence and reconstruction.
+  const at = now.toISOString();
+  db.transaction(() => {
+    snapshotMilestone(db, pid, mid, at);
+    db.query("UPDATE milestones SET retired_at = ? WHERE project_id = ? AND id = ?").run(at, pid, mid);
+    db.query("UPDATE metrics SET retired_at = COALESCE(retired_at, ?) WHERE project_id = ? AND milestone_id = ?").run(at, pid, mid);
+  })();
 };
 
 // ---- projects ------------------------------------------------------------
@@ -1068,5 +1173,3 @@ export const setAgents = (db: Database, agents: AgentsInput): void => {
     agents.forEach((a, i) => q.run(a.id, i, a.name, a.grad, a.purpose, a.kind, a.model, a.owner, JSON.stringify(a.caps), a.schedule, a.prompt ?? null));
   })();
 };
-
-

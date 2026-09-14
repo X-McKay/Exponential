@@ -46,14 +46,16 @@ export function ProjectEditor({
 }: {
   project: Project | null;
   projects: Project[];
-  onSave: (input: ProjectInput, isNew: boolean) => void;
-  onDelete?: (pid: string) => void;
+  onSave: (input: ProjectInput, isNew: boolean) => Promise<unknown>;
+  onDelete?: (pid: string) => Promise<unknown>;
   onClose: () => void;
 }) {
   const isNew = project === null;
   const [d, setD] = useState<ProjectInput>(() => (project ? fromProject(project) : blank(projects)));
   const [committee, setCommittee] = useState({ date: project?.committee?.date ?? "", ref: project?.committee?.ref ?? "" });
   const [confirmDel, setConfirmDel] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const set = (patch: Partial<ProjectInput>) => setD((x) => ({ ...x, ...patch }));
   const setTeam = (i: number, patch: Partial<TeamMember>) => setD((x) => ({ ...x, team: x.team.map((t, ti) => (ti === i ? { ...t, ...patch } : t)) }));
   const setRepo = (i: number, patch: Partial<Repo>) => setD((x) => ({ ...x, repos: x.repos.map((r, ri) => (ri === i ? { ...r, ...patch } : r)) }));
@@ -68,9 +70,12 @@ export function ProjectEditor({
     d.team.every((t) => t.name.trim() !== "" && t.role.trim() !== "" && t.ini.trim() !== "") &&
     d.repos.every((r) => r.name.trim() !== "" && r.url.trim() !== "");
 
-  const submit = () => {
-    if (!valid) return;
-    onSave(
+  const submit = async () => {
+    if (!valid || saving) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onSave(
       {
         ...d,
         id,
@@ -81,31 +86,43 @@ export function ProjectEditor({
         team: d.team.map((t) => ({ ini: t.ini.trim().toUpperCase(), name: t.name.trim(), role: t.role.trim() })),
         repos: d.repos.map((r) => ({ name: r.name.trim(), url: r.url.trim() })),
       },
-      isNew,
-    );
+        isNew,
+      );
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  const remove = async () => {
+    if (!onDelete || saving) return;
+    setSaving(true);
+    setSaveError(null);
+    try { await onDelete(d.id); } catch (e) { setSaveError(e instanceof Error ? e.message : String(e)); setSaving(false); }
   };
 
   return (
     <Modal
       title={isNew ? "New project" : `Edit ${d.key}`}
       onClose={onClose}
-      onSubmit={submit}
+      onSubmit={() => void submit()}
       footer={
         <>
           {!isNew && onDelete && (
             <span style={{ marginRight: "auto" }}>
-              <Btn tone="danger" onClick={() => (confirmDel ? onDelete(d.id) : setConfirmDel(true))}>
+              <Btn tone="danger" disabled={saving} onClick={() => (confirmDel ? void remove() : setConfirmDel(true))}>
                 {confirmDel ? "Confirm delete project" : "Delete project"}
               </Btn>
             </span>
           )}
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn tone="primary" disabled={!valid} onClick={submit}>
-            {isNew ? "Create project" : "Save changes"}
+          <Btn tone="primary" disabled={!valid || saving} onClick={() => void submit()}>
+            {saving ? "Saving…" : isNew ? "Create project" : "Save changes"}
           </Btn>
         </>
       }
     >
+      {saveError && <div role="alert" style={{ color: C.redHi, fontSize: 12, margin: "8px 0" }}>Could not save: {saveError}</div>}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: 10 }}>
         <div>
           <Lbl>Name</Lbl>

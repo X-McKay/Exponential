@@ -2,6 +2,8 @@ import { join } from "node:path";
 import { createApp } from "./app.ts";
 import { webhookDelivery } from "./brief.ts";
 import { runDue } from "./runner.ts";
+import { runDueComms } from "./comms.ts";
+import { runDuePm } from "./pm.ts";
 import type { Skipped } from "./runner.ts";
 import { sourceFromEnv } from "./connectors/index.ts";
 import { llmFromEnv } from "./llm.ts";
@@ -10,6 +12,8 @@ import { ensureAgents, ensureSeeded } from "./seed.ts";
 import { syncAll, syncMissing } from "./sync.ts";
 import { loadDotEnv } from "./env.ts";
 import { staticHandler } from "./static.ts";
+import { accessFromEnv } from "./access.ts";
+import { recoverInterruptedRuns } from "./recovery.ts";
 import index from "../../web/src/index.html";
 
 loadDotEnv();
@@ -23,6 +27,8 @@ const db = openDb();
 if (ensureSeeded(db, now())) console.log(`seeded database with sample data as of ${now().toISOString().slice(0, 10)}`);
 const added = ensureAgents(db);
 if (added.length) console.log(`installed workspace agents: ${added.join(", ")}`);
+const interrupted = recoverInterruptedRuns(db, now());
+if (interrupted) console.log(`marked ${interrupted} interrupted run(s) failed`);
 
 /** `SYNC_SOURCE=sample|github|none`; `SYNC_INTERVAL_MIN=30` re-syncs every project on a timer. */
 const source = sourceFromEnv(process.env);
@@ -44,6 +50,7 @@ if (llm) {
     const tick = () => {
       const skipped: Skipped[] = [];
       return runDue(db, llm, now(), { deliverBrief }, skipped)
+        .then(async (runs) => { await runDuePm(db, llm, now()); await runDueComms(db, llm, now()); return runs; })
         .then((runs) => {
           if (runs.length) console.log(`scheduled agents: ${runs.length} run${runs.length === 1 ? "" : "s"}, ${runs.filter((r) => r.state === "failed").length} failed`);
           if (skipped.length) console.log(`scheduled agents: ${skipped.length} run${skipped.length === 1 ? "" : "s"} held back by budget (${skipped[0]?.reason})`);
@@ -71,17 +78,22 @@ if (source) {
 }
 const production = process.env.NODE_ENV === "production";
 const port = Number(process.env.PORT ?? 3000);
+const access = accessFromEnv(process.env, port);
 const serveStatic = staticHandler(join(import.meta.dir, "../../web/dist"));
 
 const server = Bun.serve({
   port,
+  hostname: access.hostname,
   development: !production,
   // Agent runs and the curator answer in one request and can take a minute; Bun closes idle connections after 10 s by default (255 is its maximum).
   idleTimeout: 255,
   // In development Bun bundles the React app on the fly with HMR; in
   // production the pre-built bundle in web/dist is served as static files.
-  routes: production ? undefined : { "/": index },
+  // Authenticated instances serve the built app through the access guard.
+  routes: production || process.env.VALUEFLOW_ACCESS_TOKEN ? undefined : { "/": index },
   async fetch(req) {
+    const denied = access.check(req);
+    if (denied) return denied;
     const api = await app.handleApi(req);
     if (api) return api;
     return serveStatic(req);

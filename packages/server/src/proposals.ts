@@ -1,3 +1,4 @@
+import { currentRuleStats, proposalIsCurrent, recordDecisionActor } from "./proposal-guard.ts";
 // ================= proposals =================
 //
 // An agent may propose a change to facts; nothing happens until a person
@@ -28,17 +29,33 @@ export class ProposalRejected extends Error {
 }
 
 /** Apply a pending proposal and mark it accepted. Throws ProposalRejected when the target no longer exists. */
-export const acceptProposal = (db: Database, proposal: Proposal, now: Date): Proposal => {
+export const acceptProposal = (db: Database, proposal: Proposal, now: Date, mode: "human" | "automatic" = "human"): Proposal => db.transaction(() => {
+  proposal = findProposal(db, proposal.id, now);
   if (proposal.state !== "pending") throw new ProposalRejected(`proposal ${proposal.id} is already ${proposal.state}`);
+  if (now.getTime() - new Date(proposal.createdAt).getTime() > 7 * 86_400_000) throw new ProposalRejected("proposal expired; request a fresh proposal");
   const state = loadState(db, now);
   const a = proposal.action;
+  // Check existence first so deletion is distinguishable from an intervening edit.
+  if (proposal.proj && !state.projects.some((p) => p.id === proposal.proj)) throw new ProposalRejected("project no longer exists");
+  if (a.type === "governance_status" && !state.projects.find((p) => p.id === proposal.proj)?.governance.some((g) => g.id === a.gid)) throw new ProposalRejected("governance item no longer exists");
+  if (a.type === "milestone_status" && !state.projects.find((p) => p.id === proposal.proj)?.milestones.some((m) => m.id === a.mid)) throw new ProposalRejected("milestone no longer exists");
+  if (!proposalIsCurrent(db, proposal, state)) throw new ProposalRejected("proposal is stale or predates evidence checks; dismiss it and request a fresh proposal");
+  if (mode === "automatic") {
+    const rule = state.rules.find((r) => r.id === proposal.ruleId);
+    if (!rule?.enabled || !rule.auto || (rule.proj !== null && rule.proj !== proposal.proj) || !currentRuleStats(db, rule, state.proposals).earnedAutonomy || a.type !== "calendar_event") {
+      throw new ProposalRejected("automatic actions require an eligible rule and are limited to calendar reminders; other changes require a person");
+    }
+  }
+  const actor = mode === "automatic" ? `agent:${proposal.agentId}` : state.workspace.user.ini;
+
   if (a.type === "agent_prompt" || a.type === "agent_model") {
     const agent = state.agents.find((x) => x.id === a.agentId);
     if (!agent) throw new ProposalRejected(`agent ${a.agentId} no longer exists`);
-    if (a.type === "agent_prompt") setAgentPrompt(db, agent.id, a.prompt, promptVersion(agent.kind, a.prompt), proposal.agentId === agent.id ? "person" : "tuner", now.toISOString());
+    if (a.type === "agent_prompt") setAgentPrompt(db, agent.id, a.prompt, promptVersion(agent.kind, a.prompt, agent.id), proposal.agentId === agent.id ? "person" : "tuner", now.toISOString());
     else setAgentModel(db, agent.id, a.model);
     const accepted: Proposal = { ...proposal, state: "accepted", decidedAt: now.toISOString() };
     updateProposal(db, accepted);
+    recordDecisionActor(db, accepted, actor, mode);
     return accepted;
   }
   if (!proposal.proj) throw new ProposalRejected(`proposal ${proposal.id} names no project`);
@@ -75,15 +92,18 @@ export const acceptProposal = (db: Database, proposal: Proposal, now: Date): Pro
   }
   const accepted: Proposal = { ...proposal, state: "accepted", decidedAt: now.toISOString() };
   updateProposal(db, accepted);
+  recordDecisionActor(db, accepted, actor, mode);
   return accepted;
-};
+})();
 
-export const dismissProposal = (db: Database, proposal: Proposal, now: Date): Proposal => {
+export const dismissProposal = (db: Database, proposal: Proposal, now: Date): Proposal => db.transaction(() => {
+  proposal = findProposal(db, proposal.id, now);
   if (proposal.state !== "pending") throw new ProposalRejected(`proposal ${proposal.id} is already ${proposal.state}`);
   const dismissed: Proposal = { ...proposal, state: "dismissed", decidedAt: now.toISOString() };
   updateProposal(db, dismissed);
+  recordDecisionActor(db, dismissed, loadState(db, now).workspace.user.ini, "human");
   return dismissed;
-};
+})();
 
 export const findProposal = (db: Database, id: string, now: Date): Proposal => {
   const p = loadState(db, now).proposals.find((x) => x.id === id);

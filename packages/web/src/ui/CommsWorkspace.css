@@ -1,0 +1,24 @@
+.vf-comms { display:grid; gap:14px; min-width:0; }
+.vf-comms-tabs { display:flex; gap:18px; border-bottom:1px solid var(--vf-line); }
+.vf-comms-tabs button { padding:8px 0 !important; font-size:13px !important; border-bottom:2px solid transparent !important; }
+.vf-comms-tabs button[aria-selected=true] { border-color:var(--vf-indigo-hi) !important; color:var(--vf-text) !important; }
+.vf-comms-grid { display:grid; grid-template-columns:minmax(220px, .75fr) minmax(0, 2fr); gap:14px; }
+.vf-comms-list { display:grid; gap:6px; align-content:start; }
+.vf-comms-assignment { text-align:left; border:1px solid var(--vf-line); background:var(--vf-inset); color:var(--vf-text2); border-radius:6px; padding:10px; cursor:pointer; }
+.vf-comms-assignment[aria-current=true] { border-color:var(--vf-accent-line); background:var(--vf-accent-soft); color:var(--vf-text); }
+.vf-comms-form { display:grid; gap:10px; margin-top:12px; }
+.vf-comms-form label { display:grid; gap:5px; font-size:12px; color:var(--vf-mut); }
+.vf-comms-message { padding:11px 0; border-top:1px solid var(--vf-line); }
+.vf-comms-message:first-child { border-top:0; }
+.vf-comms-message-body { margin-top:5px; white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; line-height:1.55; }
+.vf-comms-composer { display:grid; gap:8px; margin-top:14px; }
+.vf-comms-run, .vf-comms-artifact { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:11px 0; border-top:1px solid var(--vf-line); font-size:12px; }
+.vf-comms-run > div, .vf-comms-artifact > div { min-width:0; flex:1; overflow-wrap:anywhere; }
+.vf-comms-preview { margin-top:10px; padding:12px; max-height:420px; overflow:auto; background:var(--vf-inset); border:1px solid var(--vf-line); border-radius:6px; }
+.vf-comms-submit { all:unset; box-sizing:border-box; cursor:pointer; font-size:13px; font-weight:500; height:32px; padding:0 14px; border-radius:6px; background:var(--vf-indigo); color:#fff; border:1px solid var(--vf-indigo); }
+.vf-comms-submit:disabled { opacity:.45; cursor:default; }
+.vf-comms-secondary { background:var(--vf-field); color:var(--vf-text); border-color:var(--vf-line2); }
+@media (max-width:760px) { .vf-comms-grid { grid-template-columns:1fr; } }
+
+.vf-comms-conversation { margin-top:12px; max-height:52vh; overflow:auto; }
+.vf-comms-tabs button:focus-visible, .vf-comms-submit:focus-visible { outline:2px solid var(--vf-indigo-hi); outline-offset:3px; }

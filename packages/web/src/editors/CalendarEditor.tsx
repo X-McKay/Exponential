@@ -22,41 +22,52 @@ export function CalendarEditor({
   existing: CalendarEvent[];
   /** YYYY-MM-DD */
   today: string;
-  onSave: (ev: CalendarEvent, isNew: boolean) => void;
-  onDelete?: (id: string) => void;
+  onSave: (ev: CalendarEvent, isNew: boolean) => Promise<unknown>;
+  onDelete?: (id: string) => Promise<unknown>;
   onClose: () => void;
 }) {
   const isNew = event === null;
   const [d, setD] = useState<CalendarEvent>(() => event ?? { id: "", date: today, proj: projects[0]?.id ?? "", tab: "overview", text: "", sub: null });
   const [confirmDel, setConfirmDel] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const set = (patch: Partial<CalendarEvent>) => setD((x) => ({ ...x, ...patch }));
   const dateOk = /^\d{4}-\d{2}-\d{2}$/.test(d.date);
   const valid = dateOk && d.text.trim() !== "" && d.proj !== "";
-  const submit = () => {
-    if (!valid) return;
-    onSave({ ...d, id: isNew ? slugId(d.text, existing.map((e) => e.id), "event") : d.id, text: d.text.trim(), sub: d.sub?.trim() ? d.sub.trim() : null }, isNew);
+  const submit = async () => {
+    if (!valid || saving) return;
+    setSaving(true); setSaveError(null);
+    try { await onSave({ ...d, id: isNew ? slugId(d.text, existing.map((e) => e.id), "event") : d.id, text: d.text.trim(), sub: d.sub?.trim() ? d.sub.trim() : null }, isNew); }
+    catch (e) { setSaveError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
+  };
+  const remove = async () => {
+    if (!onDelete || saving) return;
+    setSaving(true); setSaveError(null);
+    try { await onDelete(d.id); } catch (e) { setSaveError(e instanceof Error ? e.message : String(e)); setSaving(false); }
   };
   return (
     <Modal
       title={isNew ? "New calendar event" : "Edit calendar event"}
       onClose={onClose}
-      onSubmit={submit}
+      onSubmit={() => void submit()}
       footer={
         <>
           {!isNew && onDelete && (
             <span style={{ marginRight: "auto" }}>
-              <Btn tone="danger" onClick={() => (confirmDel ? onDelete(d.id) : setConfirmDel(true))}>
+              <Btn tone="danger" disabled={saving} onClick={() => (confirmDel ? void remove() : setConfirmDel(true))}>
                 {confirmDel ? "Confirm delete" : "Delete"}
               </Btn>
             </span>
           )}
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn tone="primary" disabled={!valid} onClick={submit}>
-            {isNew ? "Add event" : "Save changes"}
+          <Btn tone="primary" disabled={!valid || saving} onClick={() => void submit()}>
+            {saving ? "Saving…" : isNew ? "Add event" : "Save changes"}
           </Btn>
         </>
       }
     >
+      {saveError && <div role="alert" style={{ color: C.redHi, fontSize: 12, margin: "8px 0" }}>Could not save: {saveError}</div>}
       <Lbl>What</Lbl>
       <input style={inpStyle} value={d.text} autoFocus={isNew} placeholder="e.g. Pen test window opens" onChange={(e) => set({ text: e.target.value })} />
       <div style={{ display: "grid", gridTemplateColumns: "130px 1fr 1fr", gap: 10 }}>

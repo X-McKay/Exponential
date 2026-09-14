@@ -11,6 +11,7 @@ import {
   nextRelease,
   readiness,
   realized,
+  eligible,
   releaseState,
   seedState,
   tierOf,
@@ -74,9 +75,17 @@ describe("tierOf", () => {
     expect(tierOf(ms({ status: "shipped", metrics: [] }))).toBe(0);
     expect(impactOf(ms({ status: "shipped", metrics: [] }), "fte")).toBe(0);
   });
+  test("a missing reading does not satisfy a zero-valued gate", () => {
+    const missing = ms({ status: "shipped", metrics: [{ id: "a", label: "A", base: 0, stretch: 0, current: 0, readAt: null }] });
+    expect(tierOf(missing)).toBe(0);
+    expect(tierOf({ ...missing, metrics: [{ ...missing.metrics[0]!, readAt: "2026-09-12T00:00:00.000Z" }] })).toBe(2);
+  });
 });
 
 describe("impactOf / realized", () => {
+  test("names gated delivery value as eligible until observed benefit exists", () => {
+    expect(eligible(project("onboarding"), "fte")).toBe(realized(project("onboarding"), "fte"));
+  });
   test("impact follows tier", () => {
     expect(impactOf(ms(), "fte")).toBe(10);
     expect(impactOf(ms(), "time")).toBe(12);
@@ -168,7 +177,7 @@ describe("evalCriterion", () => {
 
 describe("releaseState", () => {
   test("seed states match the mockup", () => {
-    expect(releaseState(release("onboarding", "R1"), project("onboarding"), cal)).toMatchObject({ met: 4, total: 4, label: "Shipped", tone: "good" });
+    expect(releaseState(release("onboarding", "R1"), project("onboarding"), cal)).toMatchObject({ met: 4, total: 4, label: "Ready", tone: "good" });
     expect(releaseState(release("onboarding", "R2"), project("onboarding"), cal)).toMatchObject({ met: 1, total: 4, label: "At risk", tone: "bad" });
     expect(releaseState(release("onboarding", "R3"), project("onboarding"), cal)).toMatchObject({ met: 0, total: 3, label: "At risk", tone: "bad" });
     expect(releaseState(release("ima", "R1"), project("ima"), cal)).toMatchObject({ met: 1, total: 4, label: "Blocked", tone: "bad" });
@@ -183,14 +192,14 @@ describe("releaseState", () => {
     const st = releaseState(release("ima", "R1"), p, cal);
     expect(st.label).toBe("Ready");
     expect(st.met).toBe(4);
-    expect(releaseState(release("ima", "R1"), p, { todayYm: "2026-10" }).label).toBe("Shipped");
+    expect(releaseState(release("ima", "R1"), p, { todayYm: "2026-10" }).label).toBe("Ready");
   });
   test("amber when at least half met but not all; a release with zero criteria has nothing outstanding", () => {
     const p = project("onboarding");
     const r = release("onboarding", "R2");
     p.milestones.find((m) => m.id === "MS-13")!.metrics[0]!.current = 90;
     expect(releaseState(r, p, cal)).toMatchObject({ met: 2, tone: "warn", label: "At risk" });
-    expect(releaseState({ ...r, criteria: [] }, p, cal)).toMatchObject({ met: 0, total: 0, tone: "good", label: "Ready" });
+    expect(releaseState({ ...r, criteria: [] }, p, cal)).toMatchObject({ met: 0, total: 0, tone: "warn", label: "Not configured" });
   });
   test("deleted milestone drops a release to not-met without crashing", () => {
     const p = project("onboarding");
@@ -209,17 +218,47 @@ describe("burnupSeries", () => {
     expect(cal.months.length).toBe(15);
     expect(cal.today).toBe(8);
     expect(s.real.length).toBe(cal.months.length);
-    expect(s.real[3]).toBe(0);
-    expect(s.real[4]).toBe(5);
-    expect(s.real[7]).toBe(15);
+    // Fixtures have no timestamped snapshots, so pre-upgrade history is
+    // explicitly unknown instead of being rewritten from today's state.
+    expect(s.real[3]).toBeNull();
+    expect(s.real[4]).toBeNull();
+    expect(s.real[7]).toBeNull();
     expect(s.real[cal.today]).toBe(15);
     expect(s.real[cal.months.length - 1]).toBe(15);
     expect(s.com[cal.today - 1]).toBeNull();
     expect(s.com[cal.today]).toBe(15);
     expect(s.com[9]).toBe(15 + 8);
     expect(s.com[13]).toBe(15 + 8 + 6 + 7);
-    for (let i = 1; i < s.ceil.length; i++) expect(s.ceil[i]!).toBeGreaterThanOrEqual(s.ceil[i - 1]!);
+    for (let i = 1; i < s.ceil.length; i++) {
+      if (s.ceil[i] !== null && s.ceil[i - 1] !== null) expect(s.ceil[i]!).toBeGreaterThanOrEqual(s.ceil[i - 1]!);
+    }
     expect(s.ceil[cal.months.length - 1]).toBe(15 + 5 + 11 + 9 + 10);
+  });
+
+  test("uses month-end snapshots and keeps months before the first snapshot unknown", () => {
+    const m = ms({
+      status: "shipped",
+      month: "2026-09",
+      snapshots: [
+        { seq: 1, at: "2026-09-30T23:59:59.000Z", status: "eval", month: "2026-09", impact: { base: { fte: 10, time: 10 }, stretch: { fte: 15, time: 15 } }, metrics: [{ id: "a", label: "A", base: 80, stretch: 95, current: 90 }] },
+        { seq: 2, at: "2026-10-01T00:00:00.000Z", status: "shipped", month: "2026-09", impact: { base: { fte: 10, time: 10 }, stretch: { fte: 15, time: 15 } }, metrics: [{ id: "a", label: "A", base: 80, stretch: 95, current: 90 }] },
+      ],
+    });
+    const c = calendarFor("2026-11-10T00:00:00.000Z", ["2026-08", "2026-11"]);
+    const s = burnupSeries([m], "fte", c);
+    expect(s.real[c.months.indexOf("2026-08")]).toBeNull();
+    expect(s.real[c.months.indexOf("2026-09")]).toBe(0);
+    expect(s.real[c.months.indexOf("2026-10")]).toBe(10);
+  });
+
+  test("a milestone created today contributes known zero before its creation", () => {
+    const old = ms({ id: "old", status: "shipped", month: "2026-08", createdAt: "2026-08-20T00:00:00.000Z" });
+    const fresh = ms({ id: "fresh", status: "backlog", month: "2026-10", createdAt: "2026-09-12T00:00:00.000Z" });
+    const snapshot = (m: Milestone, at: string): Milestone["snapshots"] => [{ at, status: m.status, month: m.month, impact: m.impact, metrics: m.metrics.map((x) => ({ ...x, readAt: at, readSource: "eval" as const })) }];
+    const withHistory = [{ ...old, snapshots: snapshot(old, "2026-08-20T00:00:00.000Z") }, { ...fresh, snapshots: snapshot(fresh, "2026-09-12T00:00:00.000Z") }];
+    const c = calendarFor("2026-09-12T00:00:00.000Z", ["2026-08", "2026-10"]);
+    const series = burnupSeries(withHistory, "fte", c);
+    expect(series.real[c.months.indexOf("2026-08")]).toBe(10);
   });
 });
 

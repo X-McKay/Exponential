@@ -59,9 +59,11 @@ export interface JobStatus {
   done: number;
   total: number;
   startedAt: string | null;
+  error?: string | null;
 }
 
 export const api = {
+  getRun: (id: string) => request<AgentRun>("GET", routes.run(id)),
   state: () => request<import("@valueflow/domain").AppState>("GET", routes.state()),
   setWorkspace: (body: WorkspaceInput) => request<Workspace>("PUT", routes.workspace(), body),
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { PROJECTS, realized, seedState, tierOf } from "@valueflow/domain";
+import { PROJECTS, burnupSeries, calendarOf, realized, seedState, tierOf } from "@valueflow/domain";
 import type { AppState, GovernanceItem, Metric, MetricReading, Milestone } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import { READINGS_PER_METRIC, trajectory } from "../src/seed.ts";
@@ -11,8 +11,16 @@ describe("seed", () => {
     const { status, body } = await app.get<AppState>(routes.state());
     expect(status).toBe(200);
     // The server knows when each reading was taken; the fixtures do not carry that.
-    const stripped: AppState = { ...body, projects: body.projects.map((p) => ({ ...p, milestones: p.milestones.map((m) => ({ ...m, metrics: m.metrics.map(({ readAt: _a, readSource: _s, ...x }) => x) })) })) };
+    const { usageRuns: _usageRuns, ...withoutUsageRuns } = body;
+    const stripped: AppState = {
+      ...withoutUsageRuns,
+      projects: body.projects.map((p) => ({
+        ...p,
+        milestones: p.milestones.map(({ snapshots: _snapshots, createdAt: _createdAt, ...m }) => ({ ...m, metrics: m.metrics.map(({ readAt: _a, readSource: _s, ...x }) => x) })),
+      })),
+    };
     expect(stripped).toEqual(seedState());
+    expect(body.usageRuns?.length).toBe(body.runs.length);
     expect(body.projects.find((p) => p.id === "ima")?.milestones.find((m) => m.id === "MS-21")?.metrics[0]).toMatchObject({ readAt: expect.stringMatching(/^2026-/), readSource: "eval" });
   });
 
@@ -74,7 +82,7 @@ describe("readings", () => {
 describe("milestones", () => {
   const base = PROJECTS[0]!.milestones.find((m) => m.id === "MS-13")!;
 
-  test("PUT updates definition; changing current appends a manual reading; unchanged current does not", async () => {
+  test("PUT updates definition without treating stale current as a new reading", async () => {
     const app = testApp();
     const input: Milestone = { ...base, name: "Document ingestion pipeline v2", metrics: base.metrics.map((x) => ({ ...x })) };
     const first = await app.send<Milestone>("PUT", routes.milestone("onboarding", "MS-13"), input);
@@ -84,10 +92,9 @@ describe("milestones", () => {
 
     input.metrics[0]!.current = 95;
     const second = await app.send<Milestone>("PUT", routes.milestone("onboarding", "MS-13"), input);
-    expect(second.body.metrics[0]!.current).toBe(95);
+    expect(second.body.metrics[0]!.current).toBe(base.metrics[0]!.current);
     const readings = (await app.get<MetricReading[]>(routes.readings("onboarding", "MS-13", "ext"))).body;
-    expect(readings.length).toBe(READINGS_PER_METRIC + 1);
-    expect(readings.at(-1)).toMatchObject({ value: 95, source: "manual" });
+    expect(readings.length).toBe(READINGS_PER_METRIC);
   });
 
   test("PUT removes dropped metrics and adds new ones", async () => {
@@ -95,7 +102,8 @@ describe("milestones", () => {
     const input: Milestone = { ...base, metrics: [{ id: "new", label: "New criterion", base: 50, stretch: 80, current: 0 }] };
     const { body } = await app.send<Milestone>("PUT", routes.milestone("onboarding", "MS-13"), input);
     expect(body.metrics.map((x) => x.id)).toEqual(["new"]);
-    expect((await app.get(routes.readings("onboarding", "MS-13", "ext"))).status).toBe(404);
+    expect((await app.get<MetricReading[]>(routes.readings("onboarding", "MS-13", "ext"))).status).toBe(200);
+    expect((await app.get<MetricReading[]>(routes.readings("onboarding", "MS-13", "ext"))).body.length).toBe(READINGS_PER_METRIC);
   });
 
   test("POST creates; duplicate id → 409; body/URL id mismatch → 400", async () => {
@@ -110,7 +118,8 @@ describe("milestones", () => {
     };
     const created = await app.send<Milestone>("POST", routes.milestones("onboarding"), fresh);
     expect(created.status).toBe(201);
-    expect(created.body).toEqual(fresh);
+    const { snapshots: _snapshots, createdAt: _createdAt, ...createdWithoutHistory } = created.body;
+    expect(createdWithoutHistory).toEqual(fresh);
     expect((await app.send("POST", routes.milestones("onboarding"), fresh)).status).toBe(409);
     expect((await app.send("PUT", routes.milestone("onboarding", "MS-99"), fresh)).status).toBe(400);
     expect((await app.send("PUT", routes.milestone("onboarding", "MS-99"), { ...fresh, id: "MS-99" })).status).toBe(404);
@@ -118,19 +127,28 @@ describe("milestones", () => {
     expect(state.projects[0]!.milestones.map((m) => m.id)).toEqual(["MS-12", "MS-15", "MS-13", "MS-14", "MS-16", "MS-17"]);
   });
 
-  test("DELETE removes the milestone and its readings; release criteria referencing it resolve to not-met", async () => {
+  test("DELETE retires the milestone and preserves its readings; release criteria resolve to not-met", async () => {
     const app = testApp();
+    const before = (await app.get<AppState>(routes.state())).body;
+    const beforeProject = before.projects.find((project) => project.id === "onboarding")!;
+    const beforeCalendar = calendarOf(before);
+    const beforeSeries = burnupSeries(beforeProject.milestones, "fte", beforeCalendar, beforeProject.historicalMilestones);
     expect((await app.send("DELETE", routes.milestone("onboarding", "MS-12"))).status).toBe(200);
     expect((await app.send("DELETE", routes.milestone("onboarding", "MS-12"))).status).toBe(404);
     const state = (await app.get<AppState>(routes.state())).body;
     const p = state.projects[0]!;
     expect(p.milestones.some((m) => m.id === "MS-12")).toBe(false);
+    expect(p.historicalMilestones?.map((m) => m.id)).toContain("MS-12");
+    const afterSeries = burnupSeries(p.milestones, "fte", calendarOf(state), p.historicalMilestones);
+    for (let i = 0; i < beforeCalendar.today; i++) expect(afterSeries.real[i]).toBe(beforeSeries.real[i]);
+    expect(afterSeries.real[beforeCalendar.today]).toBe(5);
     expect(realized(p, "fte")).toBe(5);
     expect(state.releases.onboarding![0]!.criteria[0]).toEqual({ type: "gate", ms: "MS-12", label: "Mapping base gate (accuracy ≥80, coverage ≥80)" });
     const glance = (await app.get<{ blocks: { kind: string; title: string }[] }>(routes.glance())).body;
     expect(glance.blocks.length).toBeGreaterThan(0);
     const rows = app.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM metric_readings WHERE milestone_id = 'MS-12'").get();
-    expect(rows?.n).toBe(0);
+    expect(rows?.n).toBeGreaterThan(0);
+    expect(app.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM milestones WHERE project_id = 'onboarding' AND id = 'MS-12' AND retired_at IS NOT NULL").get()?.n).toBe(1);
   });
 });
 

@@ -66,7 +66,7 @@ export function WidgetView({ w, cal, state, onOpen, onDecide }: { w: ResolvedWid
       return (
         <div>
           {caption(`${w.project.name} · ${w.realized}% of ${w.target}% ${w.dim === "fte" ? "FTE" : "time"} target realized`, w.project.id, "value")}
-          <Spark milestones={w.project.milestones} dim={w.dim} target={w.target} cal={cal} />
+          <Spark milestones={w.project.milestones} historicalMilestones={w.project.historicalMilestones} dim={w.dim} target={w.target} cal={cal} />
         </div>
       );
     case "proposals":

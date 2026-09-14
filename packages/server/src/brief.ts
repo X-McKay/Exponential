@@ -1,3 +1,5 @@
+import { callLlm } from "./usage.ts";
+import { nextStoredRunId } from "./ids.ts";
 // ================= weekly brief =================
 //
 // One person, one Monday note: what moved, what is blocked, decisions waiting
@@ -6,7 +8,7 @@
 // run. Delivery is optional: a webhook receives the same text.
 
 import type { Database } from "bun:sqlite";
-import { GSTATUS_LABEL, calendarOf, composeGlancePage, describeAction, deriveUpcoming, nextRunId, pendingProposals, recentEvents } from "@valueflow/domain";
+import { GSTATUS_LABEL, calendarOf, composeGlancePage, describeAction, deriveUpcoming, pendingProposals, recentEvents } from "@valueflow/domain";
 import type { Agent, AgentRun, AppState, Calendar } from "@valueflow/domain";
 import { clip } from "./agents.ts";
 import { workspaceBriefing } from "./chat.ts";
@@ -103,7 +105,7 @@ export const runBrief = async (db: Database, llm: Llm, agent: Agent, now: Date, 
   const briefing = messages[1]?.content ?? "";
   const started = Date.now();
   const run: AgentRun = {
-    id: nextRunId(state.runs),
+    id: nextStoredRunId(db),
     agentId: agent.id,
     proj: null,
     tab: "overview",
@@ -129,7 +131,7 @@ export const runBrief = async (db: Database, llm: Llm, agent: Agent, now: Date, 
   try {
     t.step("request", `${agent.model ?? llm.describe().model ?? "default model"}, JSON schema`);
     const asked = Date.now();
-    const res = await llm.chat(messages, { jsonSchema: BRIEF_SCHEMA, maxTokens: 2500, temperature: 0.2, model: agent.model, onToken: t.token });
+    const res = await callLlm(db, llm, { agentId: agent.id, proj: null, runId: run.id }, messages, { jsonSchema: BRIEF_SCHEMA, maxTokens: 2500, temperature: 0.2, model: agent.model, onToken: t.token }, now);
     t.step("reply", replyDetail(res.usage, Date.now() - asked, res.truncated));
     const raw = extractJson(res.content);
     const o = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};

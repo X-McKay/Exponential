@@ -144,6 +144,39 @@ describe("releases", () => {
   });
 });
 
+describe("evidence integrity", () => {
+  test("metadata saves cannot append a stale current reading", async () => {
+    const app = testApp();
+    const before = (await stateOf(app)).projects.find((p) => p.id === "ima")!.milestones.find((m) => m.id === "MS-21")!;
+    const readingsBefore = app.db.query<{ n: number }, [string, string, string]>("SELECT COUNT(*) AS n FROM metric_readings WHERE project_id = ? AND milestone_id = ? AND metric_id = ?").get("ima", "MS-21", "rec")!.n;
+    await app.send("PUT", routes.readings("ima", "MS-21", "rec"), { value: 93, source: "eval" });
+    const stale = { ...before, name: "Renamed metric milestone" };
+    const saved = await app.send<{ metrics: { id: string; current: number }[] }>("PUT", routes.milestone("ima", "MS-21"), stale);
+    expect(saved.status).toBe(200);
+    expect(saved.body.metrics.find((x) => x.id === "rec")?.current).toBe(93);
+    expect(app.db.query<{ n: number }, [string, string, string]>("SELECT COUNT(*) AS n FROM metric_readings WHERE project_id = ? AND milestone_id = ? AND metric_id = ?").get("ima", "MS-21", "rec")!.n).toBe(readingsBefore + 1);
+  });
+
+  test("retiring a metric hides it while preserving its readings and snapshot history", async () => {
+    const app = testApp();
+    const before = (await stateOf(app)).projects.find((p) => p.id === "ima")!.milestones.find((m) => m.id === "MS-21")!;
+    const oldId = before.metrics[0]!.id;
+    const oldReadings = app.db.query<{ n: number }, [string, string, string]>("SELECT COUNT(*) AS n FROM metric_readings WHERE project_id = ? AND milestone_id = ? AND metric_id = ?").get("ima", "MS-21", oldId)!.n;
+    await app.send("PUT", routes.milestone("ima", "MS-21"), { ...before, metrics: before.metrics.slice(1) });
+    expect((await stateOf(app)).projects.find((p) => p.id === "ima")!.milestones.find((m) => m.id === "MS-21")!.metrics.map((x) => x.id)).not.toContain(oldId);
+    expect(app.db.query<{ n: number }, [string, string, string]>("SELECT COUNT(*) AS n FROM metric_readings WHERE project_id = ? AND milestone_id = ? AND metric_id = ?").get("ima", "MS-21", oldId)!.n).toBe(oldReadings);
+    expect(app.db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM milestone_snapshots WHERE project_id = ? AND milestone_id = ?").get("ima", "MS-21")!.n).toBeGreaterThan(1);
+  });
+
+  test("rejects reversed gates, impossible dates, and unsafe URLs", async () => {
+    const app = testApp();
+    expect((await app.send("POST", routes.projects(), { ...fresh, id: "bad-gates", repos: [{ name: "repo", url: "javascript:alert(1)" }] })).status).toBe(400);
+    const m = { id: "MS-99", name: "Bad", status: "eval", month: "2026-09", impact: { base: { fte: 20, time: 2 }, stretch: { fte: 10, time: 3 } }, metrics: [] };
+    expect((await app.send("POST", routes.milestones("ima"), m)).status).toBe(400);
+    expect((await app.send("POST", routes.calendar(), { id: "bad-date", date: "2026-02-30", proj: "ima", tab: "value", text: "Bad", sub: null })).status).toBe(400);
+  });
+});
+
 describe("workspace", () => {
   test("PUT changes the signed-in user shown everywhere", async () => {
     const app = testApp();
@@ -217,7 +250,7 @@ describe("events", () => {
     expect((await stateOf(app)).events.length).toBe(before.length);
   });
 
-  test("governance moves, eval readings, and milestone status changes append events; manual readings do not", async () => {
+  test("governance moves, eval readings, status changes, and explicit manual readings append events", async () => {
     const app = testApp();
     const n = (await stateOf(app)).events.length;
     await app.send("PUT", routes.governance("ima", "sla"), { status: "draft", owner: "JL", date: null, detail: "" });
@@ -227,14 +260,15 @@ describe("events", () => {
     const ms = (await stateOf(app)).projects.find((p) => p.id === "ima")!.milestones.find((m) => m.id === "MS-22")!;
     await app.send("PUT", routes.milestone("ima", "MS-22"), { ...ms, status: "shipped" });
     const events = (await stateOf(app)).events;
-    expect(events.length).toBe(n + 3);
-    const texts = events.slice(0, 3).map((e) => `${e.type}: ${e.text}`);
+    expect(events.length).toBe(n + 4);
+    expect(events.some((event) => event.text.includes("Manual measurement:"))).toBe(true);
+    const texts = events.slice(0, 4).map((e) => `${e.type}: ${e.text}`);
     expect(texts).toContain("gov: Product SLA moved to Draft");
     expect(texts).toContain("eval: Eval: Restriction clause extraction · Rule recall at 84% — 4pts below base gate (88%)");
     expect(texts).toContain("ship: Universe definition parser shipped — gated impact now counts toward realized value");
     const glance = (await app.get<{ blocks: { kind: string; items?: { text: string }[] }[] }>(routes.glance())).body;
     const activity = glance.blocks.find((b) => b.kind === "activity");
-    expect(activity?.items?.[0]?.text).toContain("Product SLA moved to Draft");
+    expect(activity?.items?.some((item) => item.text.includes("Product SLA moved to Draft"))).toBe(true);
   });
 });
 

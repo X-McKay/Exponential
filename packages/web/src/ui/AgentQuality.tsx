@@ -12,23 +12,32 @@ const th: React.CSSProperties = { fontSize: 10.5, color: C.dim, letterSpacing: "
 const td: React.CSSProperties = { fontSize: 12.5, padding: "5px 12px 5px 0", color: C.text2, whiteSpace: "nowrap", verticalAlign: "top" };
 
 /** Edit the extra instructions layered on an agent's built-in role. Saving records a prompt version. */
-function InstructionsEditor({ agent, onSave, onClose }: { agent: Agent; onSave: (prompt: string | null) => void; onClose: () => void }) {
+function InstructionsEditor({ agent, onSave, onClose }: { agent: Agent; onSave: (prompt: string | null) => Promise<unknown>; onClose: () => void }) {
   const [text, setText] = useState(agent.prompt ?? "");
-  const submit = () => onSave(text.trim() ? text.trim() : null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const submit = async () => {
+    if (saving) return;
+    setSaving(true); setSaveError(null);
+    try { await onSave(text.trim() ? text.trim() : null); }
+    catch (e) { setSaveError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
+  };
   return (
     <Modal
       title={`${agent.name} · extra instructions`}
       onClose={onClose}
-      onSubmit={submit}
+      onSubmit={() => void submit()}
       footer={
         <>
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn tone="primary" onClick={submit}>
-            Save as new version
+          <Btn tone="primary" disabled={saving} onClick={() => void submit()}>
+            {saving ? "Saving…" : "Save as new version"}
           </Btn>
         </>
       }
     >
+      {saveError && <div role="alert" style={{ color: C.redHi, fontSize: 12, margin: "8px 0" }}>Could not save: {saveError}</div>}
       <div style={{ fontSize: 12, color: C.mut, lineHeight: 1.55, marginTop: 8 }}>
         These sit under the built-in role for this kind of agent. Every save is a new prompt version; runs record which version they used, so the table shows what each wording measured. Leave empty to return to the built-in prompt alone.
       </div>
@@ -67,7 +76,7 @@ export function AgentQuality({
   versions: PromptVersion[];
   llm: LlmInfo | null;
   busy: boolean;
-  onSetPrompt: (prompt: string | null) => void;
+  onSetPrompt: (prompt: string | null) => Promise<unknown>;
   onTune: () => void;
   onScout: () => void;
 }) {
@@ -200,8 +209,8 @@ export function AgentQuality({
       {editing && (
         <InstructionsEditor
           agent={agent}
-          onSave={(prompt) => {
-            onSetPrompt(prompt);
+          onSave={async (prompt) => {
+            await onSetPrompt(prompt);
             setEditing(false);
           }}
           onClose={() => setEditing(false)}

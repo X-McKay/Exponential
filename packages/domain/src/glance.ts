@@ -50,7 +50,7 @@ export type Block =
   | (BlockBase & { kind: "ci_failing"; pr: PullRequest; build: Build | null })
   | (BlockBase & { kind: "tier1_gaps"; counts: Record<GovStatus, number>; missing: string[] })
   | (BlockBase & { kind: "near_stretch"; milestone: Milestone; metrics: Metric[]; fteUpside: number })
-  | (BlockBase & { kind: "value_trajectory"; milestones: Milestone[]; dim: Dim; target: number; realized: number })
+  | (BlockBase & { kind: "value_trajectory"; milestones: Milestone[]; historicalMilestones?: Milestone[]; dim: Dim; target: number; realized: number })
   | (BlockBase & { kind: "ready_release"; release: Release })
   | (BlockBase & { kind: "agent_flag"; run: AgentRun; agentName: string })
   | (BlockBase & { kind: "brief"; run: AgentRun; agentName: string })
@@ -412,8 +412,9 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
       proj: p.id,
       tab: "value",
       projName: shortName(p),
-      title: `${realized(p, "fte")}% of ${p.targets.fte}% FTE target realized`,
+      title: `${realized(p, "fte")}% of ${p.targets.fte}% FTE target eligible`,
       milestones: p.milestones,
+      ...(p.historicalMilestones?.length ? { historicalMilestones: p.historicalMilestones } : {}),
       dim: "fte",
       target: p.targets.fte,
       realized: realized(p, "fte"),
@@ -750,7 +751,7 @@ export const describeBlock = (b: Block): string => {
     case "near_stretch":
       return `${head} — ${b.metrics.map((x) => `${x.label} ${x.current}% vs stretch ${x.stretch}%`).join(", ")}`;
     case "value_trajectory":
-      return `${head} — realized ${b.realized}% of ${b.target}%`;
+      return `${head} — eligible ${b.realized}% of ${b.target}%`;
     case "ready_release":
       return head;
     case "agent_flag":

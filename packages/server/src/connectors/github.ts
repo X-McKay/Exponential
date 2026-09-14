@@ -142,8 +142,8 @@ export const githubSource = (options: GitHubOptions = {}): RepoSource => {
       for (const p of pulls) {
         const [detail, checks, reviews] = await Promise.all([
           get<GhPull>(`${r}/pulls/${p.number}`),
-          get<GhCheckRuns>(`${r}/commits/${p.head.sha}/check-runs`).catch((): GhCheckRuns => ({ check_runs: [] })),
-          get<GhReview[]>(`${r}/pulls/${p.number}/reviews`).catch((): GhReview[] => []),
+          get<GhCheckRuns>(`${r}/commits/${p.head.sha}/check-runs`),
+          get<GhReview[]>(`${r}/pulls/${p.number}/reviews`),
         ]);
         const reviewers = new Set<string>();
         for (const rv of reviews) if (rv.user) reviewers.add(iniFor(ctx.team, rv.user.name, rv.user.login));
@@ -165,7 +165,7 @@ export const githubSource = (options: GitHubOptions = {}): RepoSource => {
         });
       }
 
-      const runs = await get<GhRuns>(`${r}/actions/runs?per_page=${maxRuns}`).catch((): GhRuns => ({ workflow_runs: [] }));
+      const runs = await get<GhRuns>(`${r}/actions/runs?per_page=${maxRuns}`);
       const builds: Build[] = runs.workflow_runs
         .filter((w) => w.created_at >= since)
         .map((w) => {

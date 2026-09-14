@@ -9,11 +9,46 @@ import { AGENT_KINDS, BUDGET_SCOPES, GOV_STATUSES, MILESTONE_STATUSES, PROJECT_T
 const pct = z.number().finite().min(0).max(100);
 const id = z.string().trim().min(1).max(64);
 const short = (max: number) => z.string().trim().min(1).max(max);
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD");
+const isoDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD")
+  .refine((value) => {
+    const [y, m, d] = value.split("-").map(Number);
+    const date = new Date(Date.UTC(y!, m! - 1, d!));
+    return date.getUTCFullYear() === y && date.getUTCMonth() === m! - 1 && date.getUTCDate() === d;
+  }, "expected a real calendar date");
 const month = z.string().regex(YEAR_MONTH, "expected YYYY-MM");
 const enumOf = <T extends string>(values: readonly T[]) => z.enum(values as unknown as [string, ...string[]]).pipe(z.custom<T>());
+const uniqueIds = <T extends { id: string }>(items: T[], ctx: z.RefinementCtx, label: string): void => {
+  const seen = new Set<string>();
+  items.forEach((item, i) => {
+    if (seen.has(item.id)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [i, "id"], message: `${label} ids must be unique` });
+    seen.add(item.id);
+  });
+};
+const safeUrl = (value: string): boolean => {
+  if (!value.trim()) return false;
+  // Bare hosts are accepted for existing repository fixtures, but an
+  // explicitly supplied scheme must be HTTP(S); this rejects javascript:,
+  // data:, file:, and other active URL schemes before URL normalization.
+  if (/^[a-z][a-z\d+.-]*:/i.test(value) && !/^https?:\/\//i.test(value)) return false;
+  try {
+    const parsed = new URL(value.includes("://") ? value : `https://${value}`);
+    return (parsed.protocol === "http:" || parsed.protocol === "https:") && Boolean(parsed.hostname);
+  } catch {
+    return false;
+  }
+};
+const url = (max: number) => z.string().trim().max(max).refine(safeUrl, "expected an http(s) URL");
 
 export const ImpactPairSchema = z.object({ fte: pct, time: pct });
+const ImpactSchema = z
+  .object({ base: ImpactPairSchema, stretch: ImpactPairSchema })
+  .superRefine((value, ctx) => {
+    for (const d of ["fte", "time"] as const) {
+      if (value.base[d] > value.stretch[d]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["stretch", d], message: "stretch must be greater than or equal to base" });
+    }
+  });
 
 // ---- milestones -----------------------------------------------------------
 
@@ -23,6 +58,8 @@ export const MetricInputSchema = z.object({
   base: pct,
   stretch: pct,
   current: pct,
+}).superRefine((value, ctx) => {
+  if (value.base > value.stretch) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["stretch"], message: "stretch must be greater than or equal to base" });
 });
 
 export const MilestoneInputSchema = z.object({
@@ -30,8 +67,12 @@ export const MilestoneInputSchema = z.object({
   name: short(160),
   status: enumOf(MILESTONE_STATUSES),
   month,
-  impact: z.object({ base: ImpactPairSchema, stretch: ImpactPairSchema }),
-  metrics: z.array(MetricInputSchema).max(12),
+  impact: ImpactSchema,
+  metrics: z.array(MetricInputSchema).max(12).superRefine((items, ctx) => uniqueIds(items, ctx, "metric")),
+}).superRefine((value, ctx) => {
+  if (value.impact.base.fte > value.impact.stretch.fte || value.impact.base.time > value.impact.stretch.time) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["impact", "stretch"], message: "stretch must be greater than or equal to base" });
+  }
 });
 export type MilestoneInput = z.infer<typeof MilestoneInputSchema>;
 
@@ -40,7 +81,7 @@ export type TargetsInput = z.infer<typeof TargetsInputSchema>;
 
 // ---- projects -------------------------------------------------------------
 
-export const RepoInputSchema = z.object({ name: short(120), url: short(300) });
+export const RepoInputSchema = z.object({ name: short(120), url: url(300) });
 export const TeamMemberInputSchema = z.object({ ini: short(3), name: short(80), role: short(80) });
 
 /** A project's editable facts. Milestones, governance items, and releases have their own endpoints. */
@@ -68,7 +109,7 @@ export const GovernanceInputSchema = z.object({
   owner: short(3),
   date: isoDate.nullable(),
   detail: z.string().max(2000),
-  link: z.string().trim().max(300).optional(),
+  link: z.string().trim().max(300).refine((s) => !s || safeUrl(s), "expected an http(s) URL").optional(),
 });
 export type GovernanceInput = z.infer<typeof GovernanceInputSchema>;
 
@@ -88,7 +129,13 @@ export const ReleaseInputSchema = z.object({
   id,
   name: short(120),
   month,
-  milestoneIds: z.array(id).max(20),
+  milestoneIds: z.array(id).max(20).superRefine((items, ctx) => {
+    const seen = new Set<string>();
+    items.forEach((item, i) => {
+      if (seen.has(item)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [i], message: "milestone ids must be unique" });
+      seen.add(item);
+    });
+  }),
   criteria: z.array(CriterionInputSchema).max(20),
 });
 export type ReleaseInput = z.infer<typeof ReleaseInputSchema>;
@@ -146,9 +193,9 @@ export type ProposalActionInput = z.infer<typeof ProposalActionSchema>;
 /** Everything the wizard composes from an accepted draft, created in one transaction. */
 export const SetupCreateInputSchema = z.object({
   project: ProjectInputSchema,
-  milestones: z.array(MilestoneInputSchema).max(20),
-  governance: z.array(GovernanceItemInputSchema).max(40),
-  releases: z.array(ReleaseInputSchema).max(10),
+  milestones: z.array(MilestoneInputSchema).max(20).superRefine((items, ctx) => uniqueIds(items, ctx, "milestone")),
+  governance: z.array(GovernanceItemInputSchema).max(40).superRefine((items, ctx) => uniqueIds(items, ctx, "governance")),
+  releases: z.array(ReleaseInputSchema).max(10).superRefine((items, ctx) => uniqueIds(items, ctx, "release")),
 });
 export type SetupCreateInput = z.infer<typeof SetupCreateInputSchema>;
 

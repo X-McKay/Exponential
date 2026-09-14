@@ -1,17 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
-import { budgetLine, defaultBrief, explainReadiness, explainRuns, explainShipped, fmtTokens, fmtUsd, projectView, reReviewCadence, relTime, resolveWidget, runsInScope, spendOf } from "@valueflow/domain";
-import type { AppState, Calendar, Project, ProjectTab } from "@valueflow/domain";
+import { budgetLine, defaultBrief, eligible, explainEligible, explainReadiness, explainRuns, explainShipped, fmtTokens, fmtUsd, monthLabel, projectView, reReviewCadence, relTime, releaseState, resolveWidget, runsInScope, spendOf } from "@valueflow/domain";
+import type { AgentRun, AppState, Calendar, Project, ProjectTab } from "@valueflow/domain";
+import { focusRelease, releaseBlockers } from "../releaseFocus.ts";
 import { BriefBody } from "../ui/Brief.tsx";
 import { Why } from "../ui/Explain.tsx";
 import { Avatar, Chip, SectionCard, TierBadge, Tip, ghostBtn } from "../ui/primitives.tsx";
 import { C } from "../theme.ts";
 
-/**
- * A project's front page: today's brief on this project (written by the
- * curator from this project's signals, or composed from facts until it is),
- * then what the project is, who is on it, and the key facts, each of which
- * can explain itself.
- */
+function CompactKpi({ label, value, sub, color = C.text }: { label: string; value: React.ReactNode; sub: React.ReactNode; color?: string }) {
+  return (
+    <div style={{ minWidth: 0, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "10px 12px" }}>
+      <div style={{ fontSize: 11, color: C.mut, marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 550, color, letterSpacing: "-0.02em", lineHeight: 1.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value}</div>
+      <div style={{ fontSize: 11, color: C.dim, marginTop: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub}</div>
+    </div>
+  );
+}
+
+/** A project's front page: status and the next action first, context second. */
 export function OverviewPage({
   p,
   state,
@@ -28,7 +34,7 @@ export function OverviewPage({
   state: AppState;
   cal: Calendar;
   onEdit: () => void;
-  onOpen: (id: string, tab: ProjectTab) => void;
+  onOpen: (id: string, tab: ProjectTab, focusId?: string) => void;
   onOpenInbox: () => void;
   onOpenAgents: () => void;
   onDecide: (id: string, d: "accept" | "dismiss") => void;
@@ -41,15 +47,30 @@ export function OverviewPage({
   const live = brief && brief.sections.some((s) => !s.widget || resolveWidget(s.widget, view, cal)) ? brief : null;
   const run = live ? state.runs.find((r) => r.id === live.runId) : undefined;
   const curator = state.agents.find((a) => a.kind === "curator");
+  const [briefOpen, setBriefOpen] = useState(false);
   const [writing, setWriting] = useState(false);
-  const prices = state.llm?.prices ?? {};
-  const spend = useMemo(() => budgetLine(state, prices, "project", p.id), [state, prices, p.id]);
-  const monthRuns = useMemo(() => runsInScope(state.runs, "project", p.id, state.asOf), [state.runs, p.id, state.asOf]);
-
-  // Opening the page asks the server for the brief; it writes one only when what is stored is missing or stale.
+  const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth < 640);
   useEffect(() => {
-    if (state.llm) void onCurate(p.id, false);
-  }, [state.llm, p.id, onCurate]);
+    const media = window.matchMedia("(max-width: 639px)");
+    const update = () => setNarrow(media.matches);
+    update();
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, []);
+  const prices = state.llm?.prices ?? {};
+  const releases = state.releases[p.id] ?? [];
+  const nextPlanned = useMemo(
+    () => releases.filter((r) => r.month >= cal.todayYm).sort((a, b) => a.month.localeCompare(b.month))[0],
+    [releases, cal.todayYm],
+  );
+  const release = useMemo(() => focusRelease(releases, p, cal), [releases, p, cal]);
+  const releaseStatus = release ? releaseState(release, p, cal) : undefined;
+  const openBlockers = useMemo(() => (release ? releaseBlockers(release, p, cal) : []), [release, p, cal]);
+
+  // budgetLine selects state.usageRuns when the usage ledger is available.
+  const spend = useMemo(() => budgetLine(state, prices, "project", p.id), [state, prices, p.id]);
+  const accountingRuns = (state as typeof state & { usageRuns?: AgentRun[] }).usageRuns ?? state.runs;
+  const monthRuns = useMemo(() => runsInScope(accountingRuns, "project", p.id, state.asOf), [accountingRuns, p.id, state.asOf]);
 
   const edit = (
     <button type="button" className="vf-ghost" onClick={onEdit} style={ghostBtn}>
@@ -73,62 +94,124 @@ export function OverviewPage({
     ],
   ];
 
+  const blockerTone = releaseStatus?.label === "Blocked" ? "bad" : releaseStatus?.label === "Ready" ? "good" : "warn";
+  const openBlocker = () => onOpen(p.id, "roadmap", release?.id);
+
   return (
     <div style={{ padding: "16px 20px 30px" }}>
-      <section style={{ marginBottom: 22 }}>
-        <div style={{ fontSize: 19, fontWeight: 550, letterSpacing: "-0.02em", lineHeight: 1.3, maxWidth: 760, marginBottom: 4 }}>Today on {p.name}</div>
-        <div style={{ fontSize: 14.5, color: C.text2, lineHeight: 1.55, maxWidth: 680 }}>{live?.headline ?? own.headline}</div>
-        <div style={{ fontSize: 11, color: C.dim, marginTop: 8, marginBottom: 6, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <span>{live ? `Written by ${curator?.name ?? "the curator"} ${relTime(live.at, cal.asOf)}${live.model ? ` · ${live.model}` : ""}` : "Composed from live facts"}</span>
-          {run && (
-            <span style={{ display: "inline-flex", gap: 2, alignItems: "center" }}>
-              <Tip label="Useful brief">
-                <button type="button" aria-pressed={run.rating === 1} onClick={() => onRate(run.id, run.rating === 1 ? null : 1)} className="vf-ghost" style={{ ...ghostBtn, height: 22, padding: "0 6px", color: run.rating === 1 ? C.green : C.dim, borderColor: run.rating === 1 ? C.green : C.line2 }}>
-                  👍
-                </button>
-              </Tip>
-              <Tip label="Missed what mattered">
-                <button type="button" aria-pressed={run.rating === -1} onClick={() => onRate(run.id, run.rating === -1 ? null : -1)} className="vf-ghost" style={{ ...ghostBtn, height: 22, padding: "0 6px", color: run.rating === -1 ? C.red : C.dim, borderColor: run.rating === -1 ? C.red : C.line2 }}>
-                  👎
-                </button>
-              </Tip>
-            </span>
-          )}
-          {state.llm && (
-            <button
-              type="button"
-              className="vf-ghost"
-              disabled={writing}
-              onClick={() => {
-                setWriting(true);
-                void onCurate(p.id, true).finally(() => setWriting(false));
-              }}
-              style={{ ...ghostBtn, height: 22, fontSize: 11, opacity: writing ? 0.6 : 1 }}
-            >
-              {writing ? "Writing…" : live ? "Rewrite" : "Write with the model"}
-            </button>
-          )}
-        </div>
-        <BriefBody sections={live?.sections ?? own.sections} cal={cal} state={view} onOpen={onOpen} onOpenInbox={onOpenInbox} onOpenAgents={onOpenAgents} onDecide={onDecide} empty="Nothing needs you on this project right now." />
+      <section aria-label="Project status" style={{ display: "grid", gridTemplateColumns: narrow ? "repeat(2, minmax(0, 1fr))" : "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 14 }}>
+        <CompactKpi label="Project status" value={p.stage} sub={p.tier ? `Tier ${p.tier}` : "Risk tier not set"} color={C.text} />
+        <CompactKpi label="Next planned release" value={nextPlanned?.id ?? "—"} sub={nextPlanned ? `${nextPlanned.name} · ${monthLabel(nextPlanned.month, cal.todayYm)}` : "No release scheduled"} color={C.indigoHi} />
+        <CompactKpi label="FTE reduction eligible" value={<Why e={() => explainEligible(p, "fte")}>{`${eligible(p, "fte")}%`}</Why>} sub={`of ${p.targets.fte}% target`} color={C.indigoHi} />
+        <CompactKpi label="Time reduction eligible" value={<Why e={() => explainEligible(p, "time")}>{`${eligible(p, "time")}%`}</Why>} sub={`of ${p.targets.time}% target`} color={C.indigoHi} />
       </section>
+
+      <SectionCard
+        title={release ? `${release.id} · ${release.name}` : "Release blockers"}
+        right={
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            {releaseStatus && <Chip tone={blockerTone}>{releaseStatus.label}</Chip>}
+            <button type="button" className="vf-ghost" onClick={openBlocker} style={{ ...ghostBtn, minHeight: 36, color: C.indigoHi }}>
+              {openBlockers.length ? "Review blockers" : "Open roadmap"}
+            </button>
+          </span>
+        }
+        pad="10px 14px"
+      >
+        {release ? (
+          <>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: openBlockers.length ? 8 : 0 }}>
+              <span style={{ fontSize: 12, color: C.dim }}>Target month</span>
+              <span style={{ fontSize: 13, color: C.text }}>{monthLabel(release.month, cal.todayYm)}</span>
+              <span style={{ fontSize: 12, color: C.dim }}>·</span>
+              <span style={{ fontSize: 12, color: C.mut }}>{releaseStatus?.met ?? 0}/{releaseStatus?.total ?? release.criteria.length} criteria met</span>
+            </div>
+            {openBlockers.length > 0 ? (
+              <div style={{ borderTop: `1px solid ${C.line}` }}>
+                {openBlockers.map((b) => (
+                  <div key={`${b.tab}:${b.focusId}:${b.index}`} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "9px 0", borderBottom: `1px solid ${C.line}` }}>
+                    <span style={{ color: b.evaluation.pending ? C.amber : C.red, fontSize: 13, width: 14, flexShrink: 0 }}>{b.evaluation.pending ? "◐" : "!"}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: "block", fontSize: 13, color: C.text }}>{b.criterion.label}</span>
+                      <span style={{ display: "block", fontSize: 11, color: C.dim, marginTop: 2 }}>{b.evaluation.sub}{b.owner ? ` · owner ${b.owner}` : ""}</span>
+                    </span>
+                    <button type="button" className="vf-ghost" onClick={() => onOpen(p.id, b.tab, b.focusId)} style={{ ...ghostBtn, minHeight: 36, flexShrink: 0 }}>
+                      {b.label}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ fontSize: 12, color: C.mut }}>No open criteria on this release. Check the roadmap for the complete delivery picture.</div>
+            )}
+          </>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 12, color: C.mut }}>
+            No release is planned yet. Add one to connect delivery criteria to the project status.
+          </div>
+        )}
+      </SectionCard>
+
+      <SectionCard
+        title="Project brief"
+        right={
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            {live && <span style={{ fontSize: 11, color: C.dim }}>Updated {relTime(live.at, cal.asOf)}</span>}
+            {state.llm && (
+              <button
+                type="button"
+                className="vf-ghost"
+                disabled={writing}
+                onClick={() => {
+                  setWriting(true);
+                  void onCurate(p.id, true).finally(() => setWriting(false));
+                }}
+                style={{ ...ghostBtn, height: 24, fontSize: 11, opacity: writing ? 0.6 : 1 }}
+              >
+                {writing ? "Writing…" : live ? "Refresh" : "Generate"}
+              </button>
+            )}
+          </span>
+        }
+        pad="10px 14px"
+      >
+        <details open={briefOpen} onToggle={(e) => setBriefOpen(e.currentTarget.open)}>
+          <summary style={{ cursor: "pointer", color: C.text, fontSize: 14, lineHeight: 1.5 }}>
+            Read project brief <span style={{ fontSize: 12, color: C.dim }}>{live ? "· curated update" : "· composed from live facts"}</span>
+          </summary>
+          {briefOpen && (
+            <div style={{ paddingTop: 10 }}>
+              <div style={{ fontSize: 14, color: C.text2, lineHeight: 1.5, marginBottom: 10 }}>{live?.headline ?? own.headline}</div>
+              <div style={{ fontSize: 11, color: C.dim, marginBottom: 8, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span>{live ? `Written by ${curator?.name ?? "the curator"} ${relTime(live.at, cal.asOf)}${live.model ? ` · ${live.model}` : ""}` : "Composed from live facts"}</span>
+                {run && (
+                  <span style={{ display: "inline-flex", gap: 2, alignItems: "center" }}>
+                    <Tip label="Useful brief">
+                      <button type="button" aria-pressed={run.rating === 1} onClick={() => onRate(run.id, run.rating === 1 ? null : 1)} className="vf-ghost" style={{ ...ghostBtn, height: 22, padding: "0 6px", color: run.rating === 1 ? C.green : C.dim, borderColor: run.rating === 1 ? C.green : C.line2 }}>👍</button>
+                    </Tip>
+                    <Tip label="Missed what mattered">
+                      <button type="button" aria-pressed={run.rating === -1} onClick={() => onRate(run.id, run.rating === -1 ? null : -1)} className="vf-ghost" style={{ ...ghostBtn, height: 22, padding: "0 6px", color: run.rating === -1 ? C.red : C.dim, borderColor: run.rating === -1 ? C.red : C.line2 }}>👎</button>
+                    </Tip>
+                  </span>
+                )}
+              </div>
+              <BriefBody sections={live?.sections ?? own.sections} cal={cal} state={view} onOpen={onOpen} onOpenInbox={onOpenInbox} onOpenAgents={onOpenAgents} onDecide={onDecide} empty="Nothing needs you on this project right now." />
+            </div>
+          )}
+        </details>
+      </SectionCard>
 
       <SectionCard title="About" right={edit}>
         <div style={{ fontSize: 14, lineHeight: 1.65, color: C.text2 }}>{p.description}</div>
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
           <Chip>{p.stage}</Chip>
           <TierBadge tier={p.tier} />
-          {p.committee ? (
-            <Chip tone="good">
-              AI committee approved {p.committee.date} · {p.committee.ref}
-            </Chip>
-          ) : (
-            <Chip tone="warn">AI committee review pending</Chip>
-          )}
+          {p.committee ? <Chip tone="good">AI committee approved {p.committee.date} · {p.committee.ref}</Chip> : <Chip tone="warn">AI committee review pending</Chip>}
         </div>
       </SectionCard>
 
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
-        <div style={{ flex: "1 1 320px", minWidth: 300 }}>
+      <div style={{ display: "grid", gridTemplateColumns: narrow ? "minmax(0, 1fr)" : "repeat(2, minmax(0, 1fr))", gap: 14 }}>
+        <div style={{ minWidth: 0 }}>
           <SectionCard title="Team" pad="8px 14px" right={edit}>
             {p.team.length === 0 && <div style={{ fontSize: 12, color: C.dim, padding: "8px 0" }}>No team members yet.</div>}
             {p.team.map((t) => (
@@ -140,16 +223,14 @@ export function OverviewPage({
             ))}
           </SectionCard>
         </div>
-        <div style={{ flex: "1 1 320px", minWidth: 300 }}>
+        <div style={{ minWidth: 0 }}>
           <SectionCard title="Repositories" pad="8px 14px" right={edit}>
             {p.repos.length === 0 && <div style={{ fontSize: 12, color: C.dim, padding: "8px 0" }}>No repositories linked.</div>}
             {p.repos.map((r) => (
-              <div key={r.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: `1px solid ${C.line}` }}>
+              <div key={r.name} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", minWidth: 0, padding: "8px 0", borderTop: `1px solid ${C.line}` }}>
                 <span style={{ fontSize: 12, color: C.dim }}>⌥</span>
-                <span style={{ fontSize: 13, color: C.text, flex: 1 }}>{r.name}</span>
-                <a href={r.url.startsWith("http") ? r.url : `https://${r.url}`} target="_blank" rel="noreferrer" className="vf-link" style={{ fontSize: 12, color: C.indigoHi, textDecoration: "none" }}>
-                  {r.url} ↗
-                </a>
+                <span style={{ fontSize: 13, color: C.text, flex: "1 1 140px", minWidth: 0, overflowWrap: "anywhere" }}>{r.name}</span>
+                <a href={r.url.startsWith("http") ? r.url : `https://${r.url}`} target="_blank" rel="noreferrer" className="vf-link" style={{ fontSize: 12, color: C.indigoHi, flex: "1 1 140px", minWidth: 0, overflowWrap: "anywhere", textAlign: "right", textDecoration: "none" }}>{r.url} ↗</a>
               </div>
             ))}
           </SectionCard>

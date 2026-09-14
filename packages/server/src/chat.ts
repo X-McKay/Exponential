@@ -1,3 +1,6 @@
+import { callLlm } from "./usage.ts";
+import { nextStoredRunId, nextStoredProposalId } from "./ids.ts";
+import { registerProposalGuard } from "./proposal-guard.ts";
 // ================= workspace conversation =================
 //
 // One question box over the whole workspace. The model is briefed with a
@@ -15,8 +18,6 @@ import {
   calendarOf,
   deriveUpcoming,
   monthLabel,
-  nextProposalId,
-  nextRunId,
   pendingProposals,
   readiness,
   realized,
@@ -139,7 +140,7 @@ export const askWorkspace = async (db: Database, llm: Llm, input: ChatInput, now
   const started = Date.now();
   const focusProj = input.proj && state.projects.some((p) => p.id === input.proj) ? input.proj : null;
   const run: AgentRun = {
-    id: nextRunId(state.runs),
+    id: nextStoredRunId(db),
     agentId: ask.id,
     proj: focusProj,
     tab: "overview",
@@ -165,7 +166,7 @@ export const askWorkspace = async (db: Database, llm: Llm, input: ChatInput, now
   try {
     t.step("request", `${ask.model ?? llm.describe().model ?? "default model"}, JSON schema`);
     const asked = Date.now();
-    const res = await llm.chat(messages, { jsonSchema: ANSWER_SCHEMA, maxTokens: 2000, temperature: 0.2, model: ask.model, onToken: t.token });
+    const res = await callLlm(db, llm, { agentId: ask.id, proj: focusProj, runId: run.id }, messages, { jsonSchema: ANSWER_SCHEMA, maxTokens: 2000, temperature: 0.2, model: ask.model, onToken: t.token }, now);
     t.step("reply", replyDetail(res.usage, Date.now() - asked, res.truncated));
     const raw = extractJson(res.content);
     const o = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
@@ -191,7 +192,6 @@ export const askWorkspace = async (db: Database, llm: Llm, input: ChatInput, now
     updateRun(db, finished);
     t.step("parsed", `${links.length} link${links.length === 1 ? "" : "s"}, ${rawProposals.length} proposal${rawProposals.length === 1 ? "" : "s"} returned`);
     const proposals: Proposal[] = [];
-    let existing = state.proposals;
     for (const item of rawProposals.slice(0, 4)) {
       if (typeof item !== "object" || item === null) continue;
       const { rationale, proj, ...rest } = item as Record<string, unknown>;
@@ -202,9 +202,11 @@ export const askWorkspace = async (db: Database, llm: Llm, input: ChatInput, now
       if (a.type === "agent_prompt" || a.type === "agent_model") continue;
       if (a.type === "governance_status" && !project.governance.some((g) => g.id === a.gid && g.status !== a.status)) continue;
       if (a.type === "milestone_status" && !project.milestones.some((m) => m.id === a.mid && m.status !== a.status)) continue;
-      const proposal: Proposal = { id: nextProposalId(existing), runId: run.id, agentId: ask.id, proj: project.id, ruleId: null, action: a, rationale: typeof rationale === "string" ? rationale.slice(0, 400) : "", state: "pending", createdAt: finished.finishedAt ?? now.toISOString(), decidedAt: null };
-      insertProposal(db, proposal);
-      existing = [...existing, proposal];
+      const proposal: Proposal = { id: nextStoredProposalId(db), runId: run.id, agentId: ask.id, proj: project.id, ruleId: null, action: a, rationale: typeof rationale === "string" ? rationale.slice(0, 400) : "", state: "pending", createdAt: now.toISOString(), decidedAt: null };
+      db.transaction(() => {
+        insertProposal(db, proposal);
+        registerProposalGuard(db, proposal, state);
+      })();
       proposals.push(proposal);
     }
     if (rawProposals.length) t.step("proposals", `kept ${proposals.length} of ${rawProposals.length}`);

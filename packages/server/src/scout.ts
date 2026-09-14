@@ -1,3 +1,5 @@
+import { nextStoredRunId, nextStoredProposalId } from "./ids.ts";
+import { registerProposalGuard } from "./proposal-guard.ts";
 // ================= model scout =================
 //
 // Same cases, same judge, different model. The scout runs each agent's
@@ -7,7 +9,7 @@
 // needs no model call: it is arithmetic over stored runs and scores.
 
 import type { Database } from "bun:sqlite";
-import { EVAL_CASES, PROJECT_KINDS, fmtUsd, modelComparison, nextProposalId, nextRunId } from "@valueflow/domain";
+import { EVAL_CASES, PROJECT_KINDS, fmtUsd, modelComparison } from "@valueflow/domain";
 import type { Agent, AgentRun, ModelRow, Proposal } from "@valueflow/domain";
 import { runBenchmark } from "./evals.ts";
 import type { Llm } from "./llm.ts";
@@ -68,7 +70,7 @@ const secs = (v: number | null) => (v === null ? "—" : `${(v / 1000).toFixed(0
 
 const table = (v: Verdict): string =>
   [
-    `## ${v.agent.name} (current: ${v.current}, prompt ${promptVersion(v.agent.kind, v.agent.prompt)})`,
+    `## ${v.agent.name} (current: ${v.current}, prompt ${promptVersion(v.agent.kind, v.agent.prompt, v.agent.id)})`,
     "| model | cases | judge | expectations | grounding | latency | tokens | cost/run | failed |",
     "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ...v.rows.map((r) => `| ${r.model}${r.model === v.current ? " (current)" : ""} | ${r.n} | ${pct(r.overall)} | ${pct(r.expectations)} | ${pct(r.grounding)} | ${secs(r.latencyMedianMs)} | ${r.tokensMean === null ? "—" : Math.round(r.tokensMean)} | ${r.costMean === null ? "—" : fmtUsd(r.costMean)} | ${r.failed} |`),
@@ -84,7 +86,7 @@ export const scoutModels = async (db: Database, llm: Llm, scout: Agent, now: Dat
   const targets = state0.agents.filter((a) => PROJECT_KINDS.includes(a.kind) && EVAL_CASES.some((c) => c.agentId === a.id) && (!options.agentId || a.id === options.agentId));
   const started = Date.now();
   const run: AgentRun = {
-    id: nextRunId(state0.runs),
+    id: nextStoredRunId(db),
     agentId: scout.id,
     proj: null,
     tab: "overview",
@@ -118,7 +120,7 @@ export const scoutModels = async (db: Database, llm: Llm, scout: Agent, now: Dat
     // Every (agent, model) pair that lacks a judged batch under the current prompt version gets one now.
     const jobs: { agent: Agent; model: string }[] = [];
     for (const a of targets) {
-      const version = promptVersion(a.kind, a.prompt);
+      const version = promptVersion(a.kind, a.prompt, a.id);
       const have = new Set(modelComparison(a, state0.runs, state0.scores, version, prices).filter((r) => r.overall !== null).map((r) => r.model));
       const current = a.model ?? defaultModel;
       for (const m of [current, ...candidates]) if (!have.has(m) && !jobs.some((j) => j.agent.id === a.id && j.model === m)) jobs.push({ agent: a, model: m });
@@ -135,7 +137,7 @@ export const scoutModels = async (db: Database, llm: Llm, scout: Agent, now: Dat
     const state = loadState(db, now);
     const verdicts: Verdict[] = targets.map((a) => {
       const fresh = state.agents.find((x) => x.id === a.id) ?? a;
-      return verdict(fresh, fresh.model ?? defaultModel, modelComparison(fresh, state.runs, state.scores, promptVersion(fresh.kind, fresh.prompt), prices));
+      return verdict(fresh, fresh.model ?? defaultModel, modelComparison(fresh, state.runs, state.scores, promptVersion(fresh.kind, fresh.prompt, fresh.id), prices));
     });
     const switches = verdicts.filter((v) => v.recommend);
     const finished: AgentRun = {
@@ -148,12 +150,13 @@ export const scoutModels = async (db: Database, llm: Llm, scout: Agent, now: Dat
     };
     updateRun(db, finished);
     t.step("parsed", finished.summary);
-    let existing = loadState(db, now).proposals;
     for (const v of switches) {
       const model = v.recommend?.model ?? "";
-      const proposal: Proposal = { id: nextProposalId(existing), runId: run.id, agentId: scout.id, proj: null, ruleId: null, action: { type: "agent_model", agentId: v.agent.id, model: model === defaultModel ? null : model }, rationale: `${v.reason}.`, state: "pending", createdAt: finished.finishedAt ?? now.toISOString(), decidedAt: null };
-      insertProposal(db, proposal);
-      existing = [...existing, proposal];
+      const proposal: Proposal = { id: nextStoredProposalId(db), runId: run.id, agentId: scout.id, proj: null, ruleId: null, action: { type: "agent_model", agentId: v.agent.id, model: model === defaultModel ? null : model }, rationale: `${v.reason}.`, state: "pending", createdAt: now.toISOString(), decidedAt: null };
+      db.transaction(() => {
+        insertProposal(db, proposal);
+        registerProposalGuard(db, proposal, state0);
+      })();
     }
     t.step("proposals", switches.length ? `${switches.length} model switch${switches.length === 1 ? "" : "es"} proposed` : "no switch justified");
     t.step("done", `compared in ${((finished.latencyMs ?? 0) / 1000).toFixed(0)}s`);

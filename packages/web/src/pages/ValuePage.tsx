@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { STATUS_LABEL, attainment, explainGatesCleared, explainRealized, explainTier, impactOf, isMeasurable, monthLabel, realized, tierOf } from "@valueflow/domain";
 import type { Calendar, Dim, ImpactPair, Milestone, Project } from "@valueflow/domain";
 import { Burnup } from "../charts/Burnup.tsx";
@@ -9,8 +9,10 @@ import { TargetsEditor } from "../editors/TargetsEditor.tsx";
 import { Why } from "../ui/Explain.tsx";
 import { Btn, Caret, Chip, Kpi, Ring, SectionCard, StatusIcon, Tip, ghostBtn, reset } from "../ui/primitives.tsx";
 import { C, STATUS_COLOR } from "../theme.ts";
+import { applyScenarioValues, hasScenarioValues, scenarioMetricKey } from "./valueScenario.ts";
 
 type MetricSetter = (mid: string, xid: string, v: number) => void;
+type RecordMeasurement = (mid: string, xid: string, v: number) => Promise<void>;
 
 function MilestoneRow({
   projectId,
@@ -19,6 +21,10 @@ function MilestoneRow({
   open,
   onToggle,
   onMetric,
+  onRecord,
+  scenario,
+  recording,
+  recorded,
   onEdit,
 }: {
   projectId: string;
@@ -27,6 +33,10 @@ function MilestoneRow({
   open: boolean;
   onToggle: () => void;
   onMetric: MetricSetter;
+  onRecord: RecordMeasurement;
+  scenario: boolean;
+  recording: string | null;
+  recorded: Set<string>;
   onEdit: () => void;
 }) {
   const t = tierOf(m);
@@ -35,12 +45,15 @@ function MilestoneRow({
   const [tab, setTab] = useState<"gates" | "evals">("gates");
   const ringColor = t === 2 ? C.green : t === 1 ? C.indigo : measurable ? C.amber : C.dim;
   return (
-    <div style={{ borderTop: `1px solid ${C.line}` }}>
+    <div id={`milestone-${m.id}`} tabIndex={-1} style={{ borderTop: `1px solid ${C.line}`, scrollMarginTop: 64 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, paddingRight: 12, flexWrap: "wrap" }}>
       <button
         type="button"
         onClick={onToggle}
+        aria-expanded={open}
+        aria-label={`${open ? "Collapse" : "Expand"} ${m.name}`}
         className="vf-row"
-        style={{ ...reset, width: "100%", display: "flex", alignItems: "center", gap: 11, padding: "11px 14px", background: open ? C.panel2 : "transparent", transition: "background .12s" }}
+        style={{ ...reset, flex: "1 1 200px", minWidth: 0, display: "flex", alignItems: "center", gap: 11, padding: "11px 14px", background: open ? C.panel2 : "transparent", transition: "background .12s" }}
       >
         <Ring pct={attain} color={ringColor} />
         <span style={{ flex: 1, minWidth: 0 }}>
@@ -49,6 +62,8 @@ function MilestoneRow({
             <StatusIcon status={m.status} /> {STATUS_LABEL[m.status]} · {monthLabel(m.month, cal.todayYm)}
           </span>
         </span>
+        <Caret open={open} />
+      </button>
         <Why e={() => explainTier({ id: projectId }, m)} style={{ display: "flex", gap: 5, borderBottom: "none" }}>
           {measurable && t > 0 ? (
             <>
@@ -64,31 +79,22 @@ function MilestoneRow({
           )}
         </Why>
         <Tip label="Edit milestone">
-          <span
-            role="button"
-            tabIndex={0}
-            aria-label="Edit milestone"
+          <button
+            type="button"
+            aria-label={`Edit ${m.name}`}
             className="vf-ghost"
             onClick={(e) => {
               e.stopPropagation();
               onEdit();
             }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                e.stopPropagation();
-                onEdit();
-              }
-            }}
-            style={{ ...ghostBtn, width: 26, padding: 0, justifyContent: "center", color: C.dim }}
+            style={{ ...ghostBtn, width: 40, height: 40, padding: 0, justifyContent: "center", color: C.dim }}
           >
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
               <path d="M8.5 1.5l2 2L4 10H2V8z" />
             </svg>
-          </span>
+          </button>
         </Tip>
-        <Caret open={open} />
-      </button>
+      </div>
       {open && (
         <div style={{ padding: "2px 14px 16px 47px" }}>
           <div style={{ display: "flex", gap: 2, margin: "8px 0 10px", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 6, padding: 2, width: "fit-content" }}>
@@ -112,10 +118,10 @@ function MilestoneRow({
                   <div key={x.id} style={{ padding: "10px 0", borderTop: `1px solid ${C.line}` }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
                       <span style={{ fontSize: 13, color: C.text2 }}>{x.label}</span>
-                      <span style={{ fontSize: 13, color: st, fontWeight: 500 }}>{x.current}%</span>
+                      <span style={{ fontSize: 13, color: st, fontWeight: 500 }}>{x.current === null ? "unmeasured" : `${x.current}%`}</span>
                     </div>
                     <div style={{ position: "relative", height: 6, borderRadius: 4, background: C.field }}>
-                      <div style={{ position: "absolute", inset: 0, width: `${x.current}%`, background: st, borderRadius: 4, transition: "width .2s, background .2s" }} />
+                      <div style={{ position: "absolute", inset: 0, width: `${x.current ?? 0}%`, background: st, borderRadius: 4, transition: "width .2s, background .2s" }} />
                       <div style={{ position: "absolute", top: -3, bottom: -3, left: `${x.base}%`, width: 1.5, background: C.indigo }} />
                       <div style={{ position: "absolute", top: -3, bottom: -3, left: `${x.stretch}%`, width: 1.5, background: C.green }} />
                     </div>
@@ -124,11 +130,27 @@ function MilestoneRow({
                         type="range"
                         min={0}
                         max={100}
-                        value={x.current}
+                        value={x.current ?? 0}
                         onChange={(e) => onMetric(m.id, x.id, Number(e.target.value))}
                         style={{ width: "100%", marginTop: 8, accentColor: C.indigo, height: 14 }}
-                        aria-label={`Simulate ${x.label}`}
+                        aria-label={`${scenario ? "Scenario" : "Local scenario"} value for ${x.label}`}
                       />
+                    )}
+                    {measurable && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+                        <button
+                          type="button"
+                          className="vf-ghost"
+                          disabled={recording === scenarioMetricKey(m.id, x.id)}
+                          onClick={() => void onRecord(m.id, x.id, x.current)}
+                          style={{ ...ghostBtn, height: 25, color: C.indigoHi, opacity: recording === scenarioMetricKey(m.id, x.id) ? 0.55 : 1 }}
+                        >
+                          {recording === scenarioMetricKey(m.id, x.id) ? "Recording…" : "Record measurement"}
+                        </button>
+                        <span style={{ fontSize: 11, color: recorded.has(scenarioMetricKey(m.id, x.id)) ? C.green : C.dim }}>
+                          {recorded.has(scenarioMetricKey(m.id, x.id)) ? "Source: manual · recorded" : "Source: manual when recorded"}
+                        </span>
+                      </div>
                     )}
                     <div style={{ display: "flex", gap: 14, marginTop: 4, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
                       <span style={{ color: C.indigo }}>base ≥ {x.base}%</span>
@@ -161,42 +183,77 @@ function MilestoneRow({
 export function ValuePage({
   p,
   cal,
-  onMetric,
   openMs,
+  focusId,
   setOpenMs,
   dim,
   setDim,
   onSaveMilestone,
   onDeleteMilestone,
   onSaveTargets,
+  onRecordMeasurement,
 }: {
   p: Project;
   cal: Calendar;
-  onMetric: (pid: string, mid: string, xid: string, v: number) => void;
   openMs: string | null;
+  focusId?: string | undefined;
   setOpenMs: (id: string | null) => void;
   dim: Dim;
   setDim: (d: Dim) => void;
-  onSaveMilestone: (pid: string, ms: Milestone, isNew: boolean) => void;
-  onDeleteMilestone: (pid: string, mid: string) => void;
-  onSaveTargets: (pid: string, t: ImpactPair) => void;
+  onSaveMilestone: (pid: string, ms: Milestone, isNew: boolean) => Promise<unknown>;
+  onDeleteMilestone: (pid: string, mid: string) => Promise<unknown>;
+  onSaveTargets: (pid: string, t: ImpactPair) => Promise<unknown>;
+  onRecordMeasurement: (pid: string, mid: string, xid: string, v: number) => Promise<void>;
 }) {
+  useEffect(() => {
+    if (!focusId) return;
+    setOpenMs(focusId);
+    const frame = requestAnimationFrame(() => {
+      const target = document.getElementById(`milestone-${focusId}`);
+      target?.scrollIntoView({ block: "start" });
+      target?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusId, p.id, setOpenMs]);
   const [editing, setEditing] = useState<"new" | string | null>(null);
   const [editTargets, setEditTargets] = useState(false);
-  const fte = realized(p, "fte");
-  const time = realized(p, "time");
-  const gates = p.milestones.filter((m) => tierOf(m) > 0).length;
-  const measurable = p.milestones.filter(isMeasurable).length;
+  const [scenarioValues, setScenarioValues] = useState<Record<string, number>>({});
+  const [recording, setRecording] = useState<string | null>(null);
+  const recordingRef = useRef<string | null>(null);
+  const [recorded, setRecorded] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    setScenarioValues({});
+    setRecorded(new Set());
+    recordingRef.current = null;
+    setRecording(null);
+  }, [p.id]);
+  const scenarioMilestones = useMemo(
+    () => applyScenarioValues(p.milestones, scenarioValues),
+    [p.milestones, scenarioValues],
+  );
+  const scenarioActive = hasScenarioValues(scenarioValues);
+  const displayProject = scenarioActive ? { ...p, milestones: scenarioMilestones } : p;
+  const fte = realized(displayProject, "fte");
+  const time = realized(displayProject, "time");
+  const gates = displayProject.milestones.filter((m) => tierOf(m) > 0).length;
+  const measurable = displayProject.milestones.filter(isMeasurable).length;
   const dims: [Dim, string][] = [
     ["fte", "FTE"],
     ["time", "Time"],
   ];
   return (
     <div style={{ paddingBottom: 30 }}>
+      {scenarioActive && (
+        <div role="status" style={{ margin: "14px 20px 0", padding: "10px 12px", border: `1px solid ${C.accentLine2}`, borderRadius: 8, background: C.accentSoft, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ color: C.indigoHi, fontWeight: 550 }}>Scenario mode</span>
+          <span style={{ color: C.mut, fontSize: 12, flex: 1 }}>Slider changes are local estimates. They do not change evidence, gates, releases, or the workspace.</span>
+          <button type="button" className="vf-ghost" onClick={() => { setScenarioValues({}); setRecorded(new Set()); recordingRef.current = null; setRecording(null); }} style={{ ...ghostBtn, height: 26 }}>Reset scenario</button>
+        </div>
+      )}
       <section style={{ display: "flex", gap: 12, padding: "16px 20px 4px", flexWrap: "wrap" }}>
-        <Kpi label="FTE reduction realized" value={<Why e={() => explainRealized(p, "fte")}>{`${fte}%`}</Why>} sub={`of ${p.targets.fte}% target`} color={C.indigoHi} ring={p.targets.fte ? fte / p.targets.fte : 0} />
-        <Kpi label="Time reduction realized" value={<Why e={() => explainRealized(p, "time")}>{`${time}%`}</Why>} sub={`of ${p.targets.time}% target`} color={C.indigoHi} ring={p.targets.time ? time / p.targets.time : 0} />
-        <Kpi label="Gates cleared" value={<Why e={() => explainGatesCleared(p)}>{`${gates}/${measurable}`}</Why>} sub="measurable milestones" color={C.green} />
+        <Kpi label={scenarioActive ? "FTE reduction scenario" : "FTE reduction eligible"} value={<Why e={() => explainRealized(displayProject, "fte")}>{`${fte}%`}</Why>} sub={`of ${p.targets.fte}% target`} color={C.indigoHi} ring={p.targets.fte ? fte / p.targets.fte : 0} />
+        <Kpi label={scenarioActive ? "Time reduction scenario" : "Time reduction eligible"} value={<Why e={() => explainRealized(displayProject, "time")}>{`${time}%`}</Why>} sub={`of ${p.targets.time}% target`} color={C.indigoHi} ring={p.targets.time ? time / p.targets.time : 0} />
+        <Kpi label={scenarioActive ? "Scenario gates cleared" : "Gates cleared"} value={<Why e={() => explainGatesCleared(displayProject)}>{`${gates}/${measurable}`}</Why>} sub="measurable milestones" color={C.green} />
       </section>
       <section style={{ padding: "14px 20px 6px" }}>
         <SectionCard
@@ -222,10 +279,10 @@ export function ValuePage({
             </div>
           }
         >
-          <Burnup milestones={p.milestones} dim={dim} target={p.targets[dim]} cal={cal} />
+          <Burnup milestones={displayProject.milestones} historicalMilestones={scenarioActive ? undefined : p.historicalMilestones} dim={dim} target={p.targets[dim]} cal={cal} />
           <div style={{ display: "flex", gap: 16, padding: "8px 4px 4px", fontSize: 11, color: C.dim, flexWrap: "wrap" }}>
             <span>
-              <span style={{ color: C.indigo }}>—</span> realized
+              <span style={{ color: C.indigo }}>—</span> eligible
             </span>
             <span>
               <span style={{ color: C.indigoHi }}>--</span> committed (base gates)
@@ -241,13 +298,13 @@ export function ValuePage({
       </section>
       <section>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 20px 8px" }}>
-          <span style={{ fontSize: 13, color: C.mut }}>Milestones — drag gate sliders to simulate eval results</span>
+          <span style={{ fontSize: 13, color: C.mut }}>{scenarioActive ? "Milestones — scenario values shown locally" : "Milestones — explore a local scenario with the sliders"}</span>
           <button type="button" onClick={() => setEditing("new")} style={{ ...reset, fontSize: 13, color: C.indigoHi }}>
             + New milestone
           </button>
         </div>
         <div style={{ margin: "0 20px", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, overflow: "hidden" }}>
-          {p.milestones.map((m) => (
+          {scenarioMilestones.map((m) => (
             <MilestoneRow
               key={m.id}
               projectId={p.id}
@@ -255,7 +312,23 @@ export function ValuePage({
               cal={cal}
               open={openMs === m.id}
               onToggle={() => setOpenMs(openMs === m.id ? null : m.id)}
-              onMetric={(mid, xid, v) => onMetric(p.id, mid, xid, v)}
+              onMetric={(mid, xid, v) => setScenarioValues((values) => ({ ...values, [scenarioMetricKey(mid, xid)]: v }))}
+              onRecord={async (mid, xid, v) => {
+                const key = scenarioMetricKey(mid, xid);
+                if (recordingRef.current) return;
+                recordingRef.current = key;
+                setRecording(key);
+                try {
+                  await onRecordMeasurement(p.id, mid, xid, v);
+                  setRecorded((values) => new Set(values).add(key));
+                } finally {
+                  recordingRef.current = null;
+                  setRecording((current) => (current === key ? null : current));
+                }
+              }}
+              scenario={scenarioActive}
+              recording={recording}
+              recorded={recorded}
               onEdit={() => setEditing(m.id)}
             />
           ))}
@@ -273,12 +346,12 @@ export function ValuePage({
           project={p}
           milestoneId={editing === "new" ? null : editing}
           cal={cal}
-          onSave={(ms, isNew) => {
-            onSaveMilestone(p.id, ms, isNew);
+          onSave={async (ms, isNew) => {
+            await onSaveMilestone(p.id, ms, isNew);
             setEditing(null);
           }}
-          onDelete={(mid) => {
-            onDeleteMilestone(p.id, mid);
+          onDelete={async (mid) => {
+            await onDeleteMilestone(p.id, mid);
             setEditing(null);
             if (openMs === mid) setOpenMs(null);
           }}
@@ -288,8 +361,8 @@ export function ValuePage({
       {editTargets && (
         <TargetsEditor
           targets={p.targets}
-          onSave={(t) => {
-            onSaveTargets(p.id, t);
+          onSave={async (t) => {
+            await onSaveTargets(p.id, t);
             setEditTargets(false);
           }}
           onClose={() => setEditTargets(false)}

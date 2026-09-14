@@ -1,4 +1,4 @@
-import { addMonths, isMeasurable, monthIndex, monthLabel, tierOf } from "@valueflow/domain";
+import { isMeasurable, monthIndex, monthLabel, tierOf } from "@valueflow/domain";
 import type { Calendar, Project, Release, ReleaseState } from "@valueflow/domain";
 import { C, STATUS_COLOR, releaseToneColor } from "../theme.ts";
 
@@ -76,7 +76,7 @@ export function RoadmapTimeline({
         const st = states[i];
         const color = st ? releaseToneColor(st.tone) : C.dim;
         return (
-          <g key={r.id} style={{ cursor: "pointer" }} onClick={() => onPick(r.id)}>
+          <g key={r.id} style={{ cursor: "pointer" }} role="button" tabIndex={0} aria-label={`Select release ${r.id}`} onClick={() => onPick(r.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(r.id); } }}>
             <Diamond x={XM(r.month)} y={PT + RH / 2 - 3} color={color} />
             <text x={XM(r.month)} y={PT + RH / 2 - 14} fontSize="9.5" fill={picked === r.id ? C.text : C.mut} textAnchor="middle" fontWeight={picked === r.id ? 600 : 400}>
               {r.id}
@@ -87,7 +87,6 @@ export function RoadmapTimeline({
 
       {rows.map((m, i) => {
         const y = PT + RH * (i + 1) + 6;
-        const start = addMonths(m.month, -3);
         const linked = releases.find((r) => r.milestoneIds.includes(m.id));
         return (
           <g key={m.id}>
@@ -95,17 +94,7 @@ export function RoadmapTimeline({
               <title>{m.name}</title>
               {trunc(m.name)}
             </text>
-            <rect
-              x={XM(start)}
-              y={y}
-              width={Math.max(8, XM(m.month) - XM(start))}
-              height={14}
-              rx="4"
-              fill={STATUS_COLOR[m.status]}
-              opacity={m.status === "shipped" ? 0.85 : 0.3}
-              stroke={STATUS_COLOR[m.status]}
-              strokeWidth="1"
-            />
+            <line x1={XM(m.month)} x2={XM(m.month)} y1={y - 1} y2={y + 17} stroke={STATUS_COLOR[m.status]} strokeWidth="1.4" opacity="0.8" />
             <circle cx={XM(m.month)} cy={y + 7} r="4.5" fill={gateDotColor(m)} stroke={C.bg} strokeWidth="1.5" />
             {linked && <line x1={XM(m.month)} x2={XM(linked.month)} y1={y + 7} y2={PT + RH / 2 + 4} stroke={C.line2} strokeWidth="1" strokeDasharray="2 3" />}
           </g>

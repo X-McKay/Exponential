@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AGENT_KIND_LABEL, AGENT_STATUS_LABEL, RUN_STATE_ICON, STEP_LABEL, agentStats, budgetLine, explainRuns, fmtTokens, fmtUsd, pendingProposals, relTime, runsInScope, runsOf, spendOf } from "@valueflow/domain";
 import type { Agent, AgentRun, Budget, LlmInfo, Project, ProjectTab, PromptVersion, Proposal, Rule, RunScore } from "@valueflow/domain";
 import type { RuleInput, RunAgentInput } from "@valueflow/shared";
+import { PMWorkspace } from "../ui/PMWorkspace.tsx";
 import { RunAgentEditor, RunViewer } from "../editors/RunAgent.tsx";
 import type { LiveRun } from "../state/live.ts";
 import { elapsed, useTicker } from "../ui/RunLive.tsx";
@@ -63,6 +64,7 @@ export function AgentsPage({
   onOpenInbox,
   onEdit,
   onRun,
+  onRefresh,
   onDecide,
   onRate,
   onJudge,
@@ -72,6 +74,7 @@ export function AgentsPage({
   onSaveRule,
   onDeleteRule,
   onSaveBudgets,
+  spendRuns,
 }: {
   agents: Agent[];
   runs: AgentRun[];
@@ -94,19 +97,23 @@ export function AgentsPage({
   onOpenInbox: () => void;
   onEdit: () => void;
   onRun: (input: RunAgentInput) => void;
+  onRefresh: () => Promise<void>;
   onDecide: (id: string, decision: "accept" | "dismiss") => void;
   onRate: (id: string, rating: 1 | -1 | null, note?: string) => void;
   onJudge: (id: string) => Promise<void>;
   onBenchmark: (agentId?: string) => Promise<void>;
   onScout: (agentId?: string) => Promise<void>;
-  onSetPrompt: (agentId: string, prompt: string | null) => void;
-  onSaveRule: (rule: Rule | null, input: RuleInput) => void;
-  onDeleteRule: (id: string) => void;
-  onSaveBudgets: (budgets: Budget[]) => void;
+  onSetPrompt: (agentId: string, prompt: string | null) => Promise<unknown>;
+  onSaveRule: (rule: Rule | null, input: RuleInput) => Promise<unknown>;
+  onDeleteRule: (id: string) => Promise<unknown>;
+  onSaveBudgets: (budgets: Budget[]) => Promise<unknown>;
+  /** Usage-ledger rows used only for spend totals; regular runs remain the activity view. */
+  spendRuns?: AgentRun[];
 }) {
   const prices = llm?.prices ?? {};
-  const workspaceSpend = budgetLine({ runs, budgets, asOf }, prices, "workspace", "");
-  const monthRuns = runsInScope(runs, "workspace", "", asOf);
+  const accountingRuns = spendRuns ?? runs;
+  const workspaceSpend = budgetLine({ runs: accountingRuns, budgets, asOf }, prices, "workspace", "");
+  const monthRuns = runsInScope(accountingRuns, "workspace", "", asOf);
   const [editingBudgets, setEditingBudgets] = useState(false);
   const spendValue = workspaceSpend.spend.tokens ? (workspaceSpend.spend.usd !== null ? fmtUsd(workspaceSpend.spend.usd) : fmtTokens(workspaceSpend.spend.tokens)) : "—";
   const inbox = pendingProposals({ proposals });
@@ -228,6 +235,11 @@ export function AgentsPage({
       )}
 
       {section === "agents" && (
+        <>
+        <PMWorkspace projects={projects} agents={agents} llm={llm} asOf={asOf} userIni={userIni}
+          onInspectRun={setViewing} onRefresh={onRefresh} />
+        <details>
+          <summary style={{ cursor: "pointer", padding: "12px 0", color: C.mut, fontSize: 13 }}>Agent operations &amp; history · prompts, models, budgets, and detailed runs</summary>
         <SectionCard
           title="Workspace agents"
           pad="0"
@@ -379,6 +391,8 @@ export function AgentsPage({
             );
           })}
         </SectionCard>
+        </details>
+        </>
       )}
 
       {section === "quality" && (
@@ -432,7 +446,7 @@ export function AgentsPage({
       )}
 
       <div style={{ fontSize: 12, color: C.dim, lineHeight: 1.6, maxWidth: 720 }}>
-        Every run briefs the agent with live state and stores the result; runs flagged for attention surface on Glance. Audie and Sentry run nightly. Monday writes the weekly brief, Coach proposes prompt changes from measured runs, and Scout compares candidate models, all weekly, all as proposals you decide on in the inbox.
+        Every run uses current project facts and keeps its steps, output, and errors for review. Proposed changes go to the Inbox for your decision. Background work follows assignment settings and requires the server scheduler to be enabled.
       </div>
 
       {editingBudgets && (
@@ -441,8 +455,8 @@ export function AgentsPage({
           agents={agents}
           projects={projects}
           prices={prices}
-          onSave={(b) => {
-            onSaveBudgets(b);
+          onSave={async (b) => {
+            await onSaveBudgets(b);
             setEditingBudgets(false);
           }}
           onClose={() => setEditingBudgets(false)}

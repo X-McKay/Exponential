@@ -9,10 +9,16 @@
 
 import type { AgentKind, ProjectTab } from "./types.ts";
 
+export const PM_ROLE = {
+  brief: "You are the project manager for this delivery project.",
+  task: "Produce a concise PM assessment with clear sections: current health and evidence, changes since the previous assessment, blockers and decisions needed, proposed next steps, follow-through on human-owned commitments, and a short stakeholder communications brief. Use project and milestone names. Distinguish observed facts from suggestions and missing evidence. Never close commitments yourself or invent owners or dates. When a due date is unknown, describe the next step in the assessment instead of proposing a dated calendar event. Do not allocate resources, predict completion dates, send reminders, or execute tests.",
+  tab: "overview" as const,
+};
+
 export const ROLE: Record<AgentKind, { brief: string; task: string; tab: ProjectTab }> = {
   deck: {
     brief: "You produce slide decks for executives and governance committees from project state.",
-    task: "Produce a slide-by-slide outline of 8–12 slides in markdown: each slide is a `##` heading followed by 3–5 tight bullets. Open with the value picture (targets vs realized), then gates, releases, governance, risks, and asks. Quote every number exactly as given.",
+    task: "Produce a slide-by-slide outline of 8–12 slides in markdown: each slide is a `##` heading followed by 3–5 tight bullets. Open with the value picture (targets vs eligible estimates), then gates, releases, governance, risks, and asks. Quote every number exactly as given.",
     tab: "value",
   },
   comms: {
@@ -22,7 +28,7 @@ export const ROLE: Record<AgentKind, { brief: string; task: string; tab: Project
   },
   ideation: {
     brief: "You are an ideation partner: divergent options, prior art, structured concept development.",
-    task: "Produce 8–12 concrete options as a markdown list. Each option: a bold title, a one-line rationale grounded in the context, effort (S/M/L), and which milestone or metric it moves. Rank by expected impact on realized value.",
+    task: "Produce 8–12 concrete options as a markdown list. Each option: a bold title, a one-line rationale grounded in the context, effort (S/M/L), and which milestone or metric it moves. Rank by expected impact on eligible value.",
     tab: "value",
   },
   audit: {
@@ -75,5 +81,8 @@ export const fnv = (s: string): string => {
 const COMMON_INSTRUCTIONS = "v4: facts-only, typed proposals, calendar events for pending work, rule ids on rule proposals";
 
 /** The version a run records: built-in role plus whatever extra instructions are in force. */
-export const promptVersion = (kind: AgentKind, prompt: string | null = null): string => fnv(`${COMMON_INSTRUCTIONS}|${ROLE[kind].brief}|${ROLE[kind].task}|${prompt ?? ""}`).slice(0, 8);
+export const promptVersion = (kind: AgentKind, prompt: string | null = null, agentId?: string): string => {
+  const role = agentId === "project-manager" ? PM_ROLE : ROLE[kind];
+  return fnv(`${COMMON_INSTRUCTIONS}|${role.brief}|${role.task}|${prompt ?? ""}`).slice(0, 8);
+};
 

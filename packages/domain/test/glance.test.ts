@@ -11,7 +11,7 @@ describe("detectSignals", () => {
     const s = detectSignals(seedState());
     expect(s.blocked.map((x) => `${x.p.id}/${x.r.id}`)).toEqual(["ima/R1"]);
     expect(s.atRisk.map((x) => `${x.p.id}/${x.r.id}`)).toEqual(["onboarding/R2", "sector/R1"]);
-    expect(s.readyRel).toEqual([]);
+    expect(s.readyRel.map((x) => `${x.p.id}/${x.r.id}`)).toEqual(["onboarding/R1"]);
     expect(s.shortfalls.map((x) => `${x.m.id}:${x.gap}`)).toEqual(["MS-31:6", "MS-13:4", "MS-21:2"]);
     expect(s.nearStretch).toEqual([]);
     expect(s.failPRs.map((x) => x.pr.number)).toEqual([409]);
@@ -46,6 +46,7 @@ describe("rankBlocks / composeGlance", () => {
       "tier1_gaps",
       "agent_flag",
       "value_trajectory",
+      "ready_release",
       "upcoming",
       "activity",
     ]);
@@ -90,7 +91,7 @@ describe("rankBlocks / composeGlance", () => {
     });
     blocks = composeGlance(st);
     expect(find(blocks, "blocked_release")).toBeUndefined();
-    expect(find(blocks, "ready_release")!.title).toBe("R1 Shadow mode — all go-live criteria met");
+    expect(detectSignals(st).readyRel.some(({ p, r }) => p.id === "ima" && r.id === "R1")).toBe(true);
   });
   test("empty state still composes without throwing", () => {
     const empty: AppState = { asOf: "2026-09-10T09:00:00.000Z", syncSource: null, workspace: { user: { name: "You", ini: "ME" }, lastGlanceAt: null }, projects: [], releases: {}, dev: {}, agents: [], runs: [], llm: null, proposals: [], scores: [], rules: [], promptVersions: [], brief: null, projectBriefs: {}, budgets: [], events: [], calendar: [] };

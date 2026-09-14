@@ -136,4 +136,38 @@ describe("llm client", () => {
     expect((body.response_format as { type: string }).type).toBe("json_schema");
     expect(llm.describe()).toEqual({ baseUrl: "http://llm.test/v1", model: "m1", models: ["m1"], judgeModel: null, prices: {} });
   });
+
+  test("only routes URL-bearing model specs that are configured, and binds keys to their endpoint", async () => {
+    const calls: { url: string; authorization?: string }[] = [];
+    const llm = createLlm({
+      baseUrl: "https://primary.test/v1",
+      apiKey: "primary-secret",
+      candidates: ["remote@https://remote.test/v1", "unkeyed@https://unkeyed.test/v1"],
+      providers: { remote: { baseUrl: "https://remote.test/v1", apiKey: "remote-secret" } },
+      model: "primary",
+      fetch: (url, init) => {
+        const headers = new Headers(init?.headers);
+        calls.push({ url, authorization: headers.get("authorization") ?? undefined });
+        return Promise.resolve(Response.json({ model: "remote", choices: [{ message: { content: "ok" } }] }));
+      },
+    });
+    await llm.chat([{ role: "user", content: "hi" }], { model: "remote@https://remote.test/v1" });
+    await llm.chat([{ role: "user", content: "hi" }], { model: "unkeyed@https://unkeyed.test/v1" });
+    expect(calls.map((c) => c.authorization)).toEqual(["Bearer remote-secret", undefined]);
+    expect(() => llm.validateModel?.("attacker@https://evil.test/v1")).toThrow("not configured");
+  });
+
+  test("sets redirect:error and fails closed on redirect responses", async () => {
+    let redirectMode: RequestRedirect | undefined;
+    const llm = createLlm({
+      baseUrl: "https://primary.test/v1",
+      model: "primary",
+      fetch: (_url, init) => {
+        redirectMode = init?.redirect;
+        return Promise.resolve(new Response("redirect", { status: 302 }));
+      },
+    });
+    await expect(llm.chat([{ role: "user", content: "hi" }])).rejects.toThrow("redirect refused");
+    expect(redirectMode).toBe("error");
+  });
 });

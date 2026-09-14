@@ -34,44 +34,53 @@ function RuleEditor({
   rule: Rule | null;
   projects: Project[];
   defaultOwner: string;
-  onSave: (input: RuleInput) => void;
-  onDelete: () => void;
+  onSave: (input: RuleInput) => Promise<unknown>;
+  onDelete: () => Promise<unknown>;
   onClose: () => void;
 }) {
   const [text, setText] = useState(rule?.text ?? "");
   const [proj, setProj] = useState<string>(rule?.proj ?? "");
   const [owner, setOwner] = useState(rule?.owner ?? defaultOwner);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const valid = text.trim().length >= 12 && owner.trim().length > 0;
-  const submit = () => {
-    if (!valid) return;
-    onSave({
+  const submit = async () => {
+    if (!valid || saving) return;
+    setSaving(true); setSaveError(null);
+    try { await onSave({
       text: text.trim(),
       proj: proj || null,
       enabled: rule?.enabled ?? true,
       auto: rule?.auto ?? false,
       owner: owner.trim().toUpperCase().slice(0, 3),
-    });
+    }); } catch (e) { setSaveError(e instanceof Error ? e.message : String(e)); } finally { setSaving(false); }
+  };
+  const remove = async () => {
+    if (saving) return;
+    setSaving(true); setSaveError(null);
+    try { await onDelete(); } catch (e) { setSaveError(e instanceof Error ? e.message : String(e)); setSaving(false); }
   };
   return (
     <Modal
       title={rule ? "Edit rule" : "New standing rule"}
       onClose={onClose}
-      onSubmit={submit}
+      onSubmit={() => void submit()}
       footer={
         <>
           {rule && (
-            <Btn tone="danger" onClick={onDelete}>
+            <Btn tone="danger" disabled={saving} onClick={() => void remove()}>
               Delete
             </Btn>
           )}
           <span style={{ flex: 1 }} />
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn tone="primary" disabled={!valid} onClick={submit}>
-            {rule ? "Save" : "Add rule"}
+          <Btn tone="primary" disabled={!valid || saving} onClick={() => void submit()}>
+            {saving ? "Saving…" : rule ? "Save" : "Add rule"}
           </Btn>
         </>
       }
     >
+      {saveError && <div role="alert" style={{ color: C.redHi, fontSize: 12, margin: "8px 0" }}>Could not save: {saveError}</div>}
       <div
         style={{ fontSize: 12, color: C.mut, lineHeight: 1.55, marginTop: 8 }}
       >
@@ -147,8 +156,8 @@ export function RulesPanel({
   projects: Project[];
   defaultOwner: string;
   canRun: boolean;
-  onSave: (rule: Rule | null, input: RuleInput) => void;
-  onDelete: (id: string) => void;
+  onSave: (rule: Rule | null, input: RuleInput) => Promise<unknown>;
+  onDelete: (id: string) => Promise<unknown>;
   onRunNow: () => void;
 }) {
   const [editing, setEditing] = useState<Rule | null | "new">(null);
@@ -269,12 +278,12 @@ export function RulesPanel({
           rule={editing === "new" ? null : editing}
           projects={projects}
           defaultOwner={defaultOwner}
-          onSave={(input) => {
-            onSave(editing === "new" ? null : editing, input);
+          onSave={async (input) => {
+            await onSave(editing === "new" ? null : editing, input);
             setEditing(null);
           }}
-          onDelete={() => {
-            if (editing !== "new") onDelete(editing.id);
+          onDelete={async () => {
+            if (editing !== "new") await onDelete(editing.id);
             setEditing(null);
           }}
           onClose={() => setEditing(null)}

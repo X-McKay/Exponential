@@ -1,8 +1,9 @@
 import type { Database } from "bun:sqlite";
+import { USAGE_LEDGER_SQL } from "./usage.ts";
 
 // Facts only. Nothing derived (realized value, tiers, readiness, release
 // state, Glance) is ever written here.
-const MIGRATIONS: readonly string[] = [
+export const MIGRATIONS: readonly string[] = [
   `
   CREATE TABLE projects (
     id TEXT PRIMARY KEY,
@@ -401,6 +402,92 @@ const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (scope, ref)
   );
   ALTER TABLE daily_briefs ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE CASCADE;
+  `,
+  // Evidence integrity: metric definitions are retired instead of deleted so
+  // their append-only readings remain queryable; milestone snapshots preserve
+  // the definitions and status used by historical derivations. Proposal
+  // guards are written by the proposal service and fail closed when absent.
+  `
+  ALTER TABLE milestones ADD COLUMN retired_at TEXT;
+  ALTER TABLE milestones ADD COLUMN created_at TEXT;
+  ALTER TABLE metrics ADD COLUMN retired_at TEXT;
+  CREATE TABLE milestone_snapshots (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    milestone_id TEXT NOT NULL,
+    at TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('backlog','progress','eval','shipped')),
+    month TEXT NOT NULL,
+    base_fte REAL NOT NULL,
+    base_time REAL NOT NULL,
+    stretch_fte REAL NOT NULL,
+    stretch_time REAL NOT NULL,
+    metrics TEXT NOT NULL
+  );
+  CREATE INDEX milestone_snapshots_lookup ON milestone_snapshots(project_id, milestone_id, at, seq);
+  CREATE TABLE proposal_guards (
+    proposal_id TEXT PRIMARY KEY REFERENCES proposals(id) ON DELETE CASCADE,
+    expected TEXT NOT NULL,
+    decided_by TEXT,
+    decision_mode TEXT
+  );
+  `,
+  // Provider attempts are reserved and reconciled in a durable usage ledger.
+  USAGE_LEDGER_SQL,
+  // Project manager assignments are durable user intent and their run audit log.
+  `
+  CREATE TABLE pm_assignments (
+    id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    objective TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, on_change INTEGER NOT NULL DEFAULT 1,
+    cadence TEXT NOT NULL CHECK (cadence IN ('weekly','manual')), owner TEXT NOT NULL,
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_input_fingerprint TEXT
+  );
+  CREATE INDEX pm_assignments_by_project ON pm_assignments(project_id);
+  CREATE TABLE pm_commitments (
+    id TEXT PRIMARY KEY, assignment_id TEXT NOT NULL REFERENCES pm_assignments(id) ON DELETE CASCADE,
+    title TEXT NOT NULL, owner TEXT NOT NULL, due TEXT, status TEXT NOT NULL CHECK (status IN ('open','in_progress','done','blocked')),
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  );
+  CREATE TABLE pm_runs (
+    id TEXT PRIMARY KEY, assignment_id TEXT NOT NULL REFERENCES pm_assignments(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, agent_run_id TEXT REFERENCES agent_runs(id) ON DELETE SET NULL,
+    trigger TEXT NOT NULL CHECK (trigger IN ('manual','scheduled')), input_fingerprint TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('queued','working','done','attention','failed')), summary TEXT NOT NULL, output TEXT NOT NULL, error TEXT,
+    started_at TEXT NOT NULL, finished_at TEXT
+  );
+  CREATE INDEX pm_runs_by_assignment ON pm_runs(assignment_id, started_at DESC);
+  CREATE UNIQUE INDEX pm_active_assignment ON pm_runs(assignment_id) WHERE state IN ('queued','working');
+  `,
+  `
+  CREATE TABLE comms_assignments (
+    id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    objective TEXT NOT NULL, audience TEXT NOT NULL, format TEXT NOT NULL CHECK (format IN ('executive_update','release_notes','decision_memo','project_brief')),
+    owner TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, on_change INTEGER NOT NULL DEFAULT 0,
+    cadence TEXT NOT NULL CHECK (cadence IN ('manual','weekly')), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_input_fingerprint TEXT
+  );
+  CREATE INDEX comms_assignments_by_project ON comms_assignments(project_id);
+  CREATE TABLE comms_runs (
+    id TEXT PRIMARY KEY, assignment_id TEXT NOT NULL REFERENCES comms_assignments(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, agent_run_id TEXT REFERENCES agent_runs(id) ON DELETE SET NULL,
+    trigger TEXT NOT NULL CHECK (trigger IN ('manual','scheduled')), mode TEXT NOT NULL DEFAULT 'draft' CHECK (mode IN ('draft','conversation')), input_fingerprint TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('queued','working','done','attention','failed')), summary TEXT NOT NULL, output TEXT NOT NULL, error TEXT,
+    started_at TEXT NOT NULL, finished_at TEXT
+  );
+  CREATE INDEX comms_runs_by_assignment ON comms_runs(assignment_id, started_at DESC);
+  CREATE UNIQUE INDEX comms_active_assignment ON comms_runs(assignment_id) WHERE state IN ('queued','working');
+  CREATE TABLE comms_messages (
+    id TEXT PRIMARY KEY, assignment_id TEXT NOT NULL REFERENCES comms_assignments(id) ON DELETE CASCADE,
+    run_id TEXT NOT NULL REFERENCES comms_runs(id) ON DELETE CASCADE, role TEXT NOT NULL CHECK (role IN ('user','assistant')), content TEXT NOT NULL, created_at TEXT NOT NULL
+  );
+  CREATE INDEX comms_messages_by_assignment ON comms_messages(assignment_id, created_at, id);
+  CREATE TABLE comms_artifacts (
+    id TEXT PRIMARY KEY, assignment_id TEXT NOT NULL REFERENCES comms_assignments(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, run_id TEXT NOT NULL REFERENCES comms_runs(id) ON DELETE CASCADE,
+    agent_run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE, title TEXT NOT NULL, format TEXT NOT NULL CHECK (format IN ('executive_update','release_notes','decision_memo','project_brief')),
+    version INTEGER NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('draft','approved')), approved_at TEXT, created_at TEXT NOT NULL,
+    UNIQUE (assignment_id, version)
+  );
+  CREATE INDEX comms_artifacts_by_project ON comms_artifacts(project_id, created_at DESC);
   `,
 ];
 

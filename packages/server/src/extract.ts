@@ -20,6 +20,10 @@ export interface ExtractedSource {
 
 /** Per-source cap so a 200-page deck cannot crowd out the brief. */
 export const MAX_SOURCE_CHARS = 40_000;
+/** Bounds for archive metadata and decompression before XML parsing begins. */
+export const MAX_ZIP_ENTRIES = 512;
+export const MAX_ZIP_ENTRY_BYTES = 8_000_000;
+export const MAX_ZIP_OUTPUT_BYTES = 16_000_000;
 
 // ---- zip -----------------------------------------------------------------
 
@@ -39,17 +43,26 @@ const LOCAL = 0x04034b50;
 export const zipEntries = (buf: Buffer): ZipEntry[] => {
   let eocd = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 66_000); i--) {
-    if (buf.readUInt32LE(i) === EOCD) {
+    if (i >= 0 && i + 22 <= buf.length && buf.readUInt32LE(i) === EOCD && i + 22 + buf.readUInt16LE(i + 20) === buf.length) {
       eocd = i;
       break;
     }
   }
   if (eocd < 0) throw new Error("not a zip archive");
+  const disk = buf.readUInt16LE(eocd + 4);
+  const centralDisk = buf.readUInt16LE(eocd + 6);
+  const diskCount = buf.readUInt16LE(eocd + 8);
   const count = buf.readUInt16LE(eocd + 10);
-  let p = buf.readUInt32LE(eocd + 16);
+  const centralSize = buf.readUInt32LE(eocd + 12);
+  const centralOffset = buf.readUInt32LE(eocd + 16);
+  if (disk !== 0 || centralDisk !== 0 || diskCount !== count || count === 0xffff) throw new Error("unsupported zip archive layout");
+  if (count > MAX_ZIP_ENTRIES) throw new Error(`zip contains too many entries (maximum ${MAX_ZIP_ENTRIES})`);
+  if (centralOffset > buf.length || centralSize > buf.length - centralOffset || centralOffset + centralSize > eocd) throw new Error("corrupt zip central directory");
+  let p = centralOffset;
   const out: ZipEntry[] = [];
+  let declaredOutput = 0;
   for (let i = 0; i < count; i++) {
-    if (buf.readUInt32LE(p) !== CENTRAL) throw new Error("corrupt zip central directory");
+    if (p < centralOffset || p + 46 > buf.length || buf.readUInt32LE(p) !== CENTRAL) throw new Error("corrupt zip central directory");
     const method = buf.readUInt16LE(p + 10);
     const compressedSize = buf.readUInt32LE(p + 20);
     const size = buf.readUInt32LE(p + 24);
@@ -57,25 +70,42 @@ export const zipEntries = (buf: Buffer): ZipEntry[] => {
     const extraLen = buf.readUInt16LE(p + 30);
     const commentLen = buf.readUInt16LE(p + 32);
     const offset = buf.readUInt32LE(p + 42);
+    const end = p + 46 + nameLen + extraLen + commentLen;
+    if (end > buf.length || end > centralOffset + centralSize) throw new Error("corrupt zip central directory");
     const name = buf.subarray(p + 46, p + 46 + nameLen).toString("utf8");
+    if (size > MAX_ZIP_ENTRY_BYTES) throw new Error(`zip entry ${name} exceeds ${MAX_ZIP_ENTRY_BYTES} bytes`);
+    declaredOutput += size;
+    if (declaredOutput > MAX_ZIP_OUTPUT_BYTES) throw new Error(`zip expands beyond ${MAX_ZIP_OUTPUT_BYTES} bytes`);
     out.push({ name, method, compressedSize, size, offset });
-    p += 46 + nameLen + extraLen + commentLen;
+    p = end;
   }
+  if (p !== centralOffset + centralSize) throw new Error("corrupt zip central directory");
   return out;
 };
 
-export const zipRead = (buf: Buffer, entry: ZipEntry): Buffer => {
+export const zipRead = (buf: Buffer, entry: ZipEntry, maxOutput = MAX_ZIP_ENTRY_BYTES): Buffer => {
+  if (maxOutput < 0 || maxOutput > MAX_ZIP_ENTRY_BYTES) throw new Error("invalid zip output limit");
+  if (entry.size > maxOutput || entry.size > MAX_ZIP_ENTRY_BYTES) throw new Error(`zip entry ${entry.name} exceeds decompression limit`);
   const p = entry.offset;
-  if (buf.readUInt32LE(p) !== LOCAL) throw new Error(`corrupt zip entry ${entry.name}`);
+  if (p < 0 || p + 30 > buf.length || buf.readUInt32LE(p) !== LOCAL) throw new Error(`corrupt zip entry ${entry.name}`);
   const nameLen = buf.readUInt16LE(p + 26);
   const extraLen = buf.readUInt16LE(p + 28);
   const start = p + 30 + nameLen + extraLen;
+  if (start > buf.length || entry.compressedSize > buf.length - start) throw new Error(`corrupt zip entry ${entry.name}`);
   const data = buf.subarray(start, start + entry.compressedSize);
   switch (entry.method) {
     case 0:
+      if (data.length > maxOutput || data.length !== entry.size) throw new Error(`zip entry ${entry.name} has an invalid size`);
       return Buffer.from(data);
     case 8:
-      return inflateRawSync(data);
+      try {
+        const inflated = inflateRawSync(data, { maxOutputLength: maxOutput });
+        if (inflated.length > maxOutput || inflated.length !== entry.size) throw new Error(`zip entry ${entry.name} has an invalid size`);
+        return inflated;
+      } catch (e) {
+        if (e instanceof Error && e.message.startsWith("zip entry")) throw e;
+        throw new Error(`zip entry ${entry.name} exceeds decompression limit or is corrupt`, { cause: e });
+      }
     default:
       throw new Error(`unsupported zip compression ${entry.method} in ${entry.name}`);
   }
@@ -111,7 +141,7 @@ export const docxText = (buf: Buffer): string => {
   const entries = zipEntries(buf);
   const doc = entries.find((e) => e.name === "word/document.xml");
   if (!doc) throw new Error("no word/document.xml: not a Word document");
-  return xmlText(zipRead(buf, doc).toString("utf8"), "w:p");
+  return xmlText(zipRead(buf, doc, MAX_ZIP_ENTRY_BYTES).toString("utf8"), "w:p");
 };
 
 export const pptxText = (buf: Buffer): string => {
@@ -121,7 +151,15 @@ export const pptxText = (buf: Buffer): string => {
     .filter((s) => Number.isFinite(s.n))
     .sort((a, b) => a.n - b.n);
   if (slides.length === 0) throw new Error("no slides: not a PowerPoint document");
-  return slides.map((s) => `## Slide ${s.n}\n${xmlText(zipRead(buf, s.e).toString("utf8"), "a:p")}`).join("\n\n");
+  let remaining = MAX_ZIP_OUTPUT_BYTES;
+  return slides
+    .map((s) => {
+      const bytes = zipRead(buf, s.e, Math.min(MAX_ZIP_ENTRY_BYTES, remaining));
+      remaining -= bytes.length;
+      const xml = bytes.toString("utf8");
+      return `## Slide ${s.n}\n${xmlText(xml, "a:p")}`;
+    })
+    .join("\n\n");
 };
 
 // ---- dispatch --------------------------------------------------------------

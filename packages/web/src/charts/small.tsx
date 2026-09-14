@@ -6,7 +6,7 @@ import type { Calendar, Contributor, DayCount, Dim, GovStatus, Metric, Milestone
 import { Avatar } from "../ui/primitives.tsx";
 import { C, GSTATUS_COLOR } from "../theme.ts";
 
-export function Spark({ milestones, dim, target, cal }: { milestones: Milestone[]; dim: Dim; target: number; cal: Calendar }) {
+export function Spark({ milestones, historicalMilestones, dim, target, cal }: { milestones: Milestone[]; historicalMilestones?: Milestone[]; dim: Dim; target: number; cal: Calendar }) {
   const MONTHS = cal.months;
   const TODAY = cal.today;
   const W = 220;
@@ -15,17 +15,20 @@ export function Spark({ milestones, dim, target, cal }: { milestones: Milestone[
   const iw = W - P * 2;
   const ih = H - P * 2 - 10;
   const X = (i: number) => P + (i / (MONTHS.length - 1)) * iw;
-  const real = burnupSeries(milestones, dim, cal).real;
-  const yMax = Math.max(target, ...real, 1);
+  const real = burnupSeries(milestones, dim, cal, historicalMilestones).real;
+  const known = real.filter((v): v is number => typeof v === "number");
+  const yMax = Math.max(target ?? 0, ...known, 1);
   const Y = (v: number) => P + ih - (v / yMax) * ih;
   const d = real
     .slice(0, TODAY + 1)
-    .map((v, i) => `${i === 0 ? "M" : "L"}${X(i)},${Y(v)}`)
+    .map((v, i) => (typeof v !== "number" ? null : `${i === 0 || typeof real[i - 1] !== "number" ? "M" : "L"}${X(i)},${Y(v)}`))
+    .filter((v): v is string => v !== null)
     .join(" ");
+  const firstKnown = real.findIndex((v, i) => i <= TODAY && typeof v === "number");
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 240, display: "block" }}>
       <line x1={P} x2={W - P} y1={Y(target)} y2={Y(target)} stroke={C.red} strokeWidth="1" strokeDasharray="4 3" opacity="0.7" />
-      <path d={`${d} L${X(TODAY)},${Y(0)} L${X(0)},${Y(0)} Z`} fill={C.indigo} opacity="0.15" />
+      {d && firstKnown >= 0 && <path d={`${d} L${X(TODAY)},${Y(0)} L${X(firstKnown)},${Y(0)} Z`} fill={C.indigo} opacity="0.15" />}
       <path d={d} fill="none" stroke={C.indigo} strokeWidth="1.8" />
       <circle cx={X(TODAY)} cy={Y(real[TODAY] ?? 0)} r="3" fill={C.indigoHi} />
       <text x={W - P} y={Y(target) - 3} fontSize="8.5" fill={C.red} textAnchor="end" opacity="0.85">
@@ -50,7 +53,7 @@ export const levelColor = (x: Metric, below: string = C.amber): string => {
 };
 
 export function Bullet({ metric }: { metric: Metric }) {
-  const cur = metric.current;
+  const cur = metric.current ?? 0;
   const col = levelColor(metric);
   return (
     <div style={{ margin: "7px 0" }}>

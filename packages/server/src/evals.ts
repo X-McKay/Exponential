@@ -1,3 +1,4 @@
+import { callLlm } from "./usage.ts";
 // ================= agent evals =================
 //
 // Every run is measured three ways, none of them stored as opinion:
@@ -155,7 +156,7 @@ export const judgeRun = async (db: Database, llm: Llm, runId: string, now: Date)
   const expectations = run.benchmark ? (EVAL_CASES.find((c) => c.id === run.benchmark)?.expectations ?? []) : [];
   const t = traceExisting(db, runId);
   t.step("judge", `${llm.describe().judgeModel ?? llm.describe().model ?? "default model"} grading against the ${agent?.kind ?? "chat"} rubric${expectations.length ? ` and ${expectations.length} expectation${expectations.length === 1 ? "" : "s"}` : ""}`);
-  const res = await llm.chat(judgeMessages(agent?.kind ?? "chat", run, briefing, expectations), { jsonSchema: JUDGE_SCHEMA, maxTokens: 1500, temperature: 0, model: llm.describe().judgeModel });
+  const res = await callLlm(db, llm, { agentId: run.agentId, proj: run.proj, runId: run.id }, judgeMessages(agent?.kind ?? "chat", run, briefing, expectations), { jsonSchema: JUDGE_SCHEMA, maxTokens: 1500, temperature: 0, model: llm.describe().judgeModel }, now);
   const j = parseJudgement(res.content);
   const at = new Date().toISOString();
   const scores: RunScore[] = JUDGE_DIMENSIONS.map((d) => ({ runId, scorer: "judge", dimension: d, score: j[d] / 10, note: d === "groundedness" && j.unsupported.length ? `unsupported: ${j.unsupported.join("; ")}` : "", at }));

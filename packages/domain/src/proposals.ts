@@ -44,7 +44,7 @@ export const AUTONOMY_MIN_RATE = 0.8;
 
 /** How a standing rule has been received; derived from the proposals it produced. */
 export const ruleStats = (rule: Pick<Rule, "id">, proposals: Proposal[]): RuleStats => {
-  const mine = proposals.filter((p) => p.ruleId === rule.id);
+  const mine = proposals.filter((p) => p.ruleId === rule.id && p.decisionMode !== "automatic");
   const accepted = mine.filter((p) => p.state === "accepted").length;
   const dismissed = mine.filter((p) => p.state === "dismissed").length;
   const decided = accepted + dismissed;

@@ -159,7 +159,7 @@ nix-hash:
     perl -0pi -e 's/outputHash = "sha256-[^"]*";/outputHash = lib.fakeHash;/' flake.nix
     hash=$(nix build .#nodeModules 2>&1 | sed -nE 's/^ *got: +(sha256-[A-Za-z0-9+\/=]+).*/\1/p')
     if [ -z "$hash" ]; then echo "could not obtain hash; flake.nix now has lib.fakeHash" >&2; exit 1; fi
-    perl -0pi -e "s/outputHash = lib.fakeHash;/outputHash = \"$hash\";/" flake.nix
+    perl -0pi -e "s|outputHash = lib.fakeHash;|outputHash = \"$hash\";|" flake.nix
     echo "flake.nix: outputHash = $hash"
     nix build .#nodeModules
 

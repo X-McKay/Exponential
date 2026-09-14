@@ -1,3 +1,6 @@
+import { callLlm } from "./usage.ts";
+import { nextStoredRunId, nextStoredProposalId } from "./ids.ts";
+import { registerProposalGuard } from "./proposal-guard.ts";
 // ================= agent runner =================
 //
 // A run gives an agent the live state of one project as context, asks the
@@ -7,6 +10,7 @@
 
 import type { Database } from "bun:sqlite";
 import {
+  PM_ROLE,
   GSTATUS_LABEL,
   STATUS_LABEL,
   calendarOf,
@@ -14,8 +18,6 @@ import {
   deriveUpcoming,
   metricLevel,
   monthLabel,
-  nextProposalId,
-  nextRunId,
   realized,
   recentEvents,
   releaseState,
@@ -41,7 +43,7 @@ export const projectContext = (state: AppState, p: Project, cal: Calendar): stri
   const lines: string[] = [];
   lines.push(`# ${p.name} (${p.key}) — stage ${p.stage}, AI risk tier ${p.tier ?? "untiered"}${p.committee ? `, committee approved ${p.committee.date} (${p.committee.ref})` : ", committee review pending"}`);
   lines.push(`As of ${cal.asOf.slice(0, 10)}. ${p.description}`);
-  lines.push(`Targets: FTE reduction ${pct(p.targets.fte)}, time reduction ${pct(p.targets.time)}. Realized so far: FTE ${pct(realized(p, "fte"))}, time ${pct(realized(p, "time"))}.`);
+  lines.push(`Targets: FTE reduction ${pct(p.targets.fte)}, time reduction ${pct(p.targets.time)}. Eligible estimate (not observed benefit): FTE ${pct(realized(p, "fte"))}, time ${pct(realized(p, "time"))}.`);
   lines.push(`Team: ${p.team.map((t) => `${t.name} (${t.ini}, ${t.role})`).join("; ") || "none"}. Repos: ${p.repos.map((r) => r.name).join(", ") || "none"}.`);
 
   lines.push("\n## Milestones (value counts only when shipped AND eval metrics clear a gate)");
@@ -146,7 +148,7 @@ const parseResult = (text: string, p: Project, rules: Rule[]): AgentResult => {
 export const rulesFor = (state: Pick<AppState, "rules">, p: Pick<Project, "id">): Rule[] => state.rules.filter((r) => r.enabled && (r.proj === null || r.proj === p.id));
 
 export const buildMessages = (agent: Agent, state: AppState, p: Project, cal: Calendar, instruction: string | null, rules: Rule[] = []): ChatMessage[] => {
-  const role = ROLE[agent.kind];
+  const role = agent.id === "project-manager" ? PM_ROLE : ROLE[agent.kind];
   const ruleBlock = rules.length ? `\n\nStanding rules to check (cite the id in every proposal's "rule" field):\n${rules.map((r) => `- ${r.id} (owner ${r.owner}): ${r.text}`).join("\n")}` : "";
   return [
     {
@@ -174,6 +176,7 @@ export interface RunOptions {
   benchmark?: string;
   /** Model to use for this run instead of the agent's (the scout compares candidates this way). */
   model?: string;
+  onCreated?: (run: AgentRun) => void;
 }
 
 /** Run a project-scoped agent (deck, comms, ideation, audit, chat, rules) against one project. */
@@ -191,7 +194,7 @@ export const runAgent = async (db: Database, llm: Llm, input: RunAgentInput, now
   const started = Date.now();
   const model = options.model ?? agent.model ?? null;
   const run: AgentRun = {
-    id: nextRunId(state.runs),
+    id: nextStoredRunId(db),
     agentId: agent.id,
     proj: project.id,
     tab: input.tab ?? ROLE[agent.kind].tab,
@@ -203,7 +206,7 @@ export const runAgent = async (db: Database, llm: Llm, input: RunAgentInput, now
     output: "",
     model: null,
     error: null,
-    promptVersion: promptVersion(agent.kind, agent.prompt),
+    promptVersion: promptVersion(agent.kind, agent.prompt, agent.id),
     latencyMs: null,
     promptTokens: null,
     completionTokens: null,
@@ -212,20 +215,21 @@ export const runAgent = async (db: Database, llm: Llm, input: RunAgentInput, now
     ratingNote: null,
   };
   insertRun(db, run, briefing);
+  options.onCreated?.(run);
   const t = trace(db, run);
   t.step("briefing", `${project.name}: ${briefing.length.toLocaleString()} characters${rules.length ? `, ${rules.length} standing rule${rules.length === 1 ? "" : "s"}` : ""}${input.instruction ? ", with an instruction" : ""}`);
   const schema = resultSchema(rules.length > 0);
   try {
     t.step("request", `${model ?? llm.describe().model ?? "default model"}, JSON schema, up to 4000 tokens`);
     let asked = Date.now();
-    let res = await llm.chat(messages, { jsonSchema: schema, maxTokens: 4000, model, onToken: t.token });
+    let res = await callLlm(db, llm, { agentId: agent.id, proj: project.id, runId: run.id }, messages, { jsonSchema: schema, maxTokens: 4000, model, onToken: t.token }, now);
     t.step("reply", replyDetail(res.usage, Date.now() - asked, res.truncated));
     if (res.truncated) {
       // The reply hit the budget mid-JSON. Ask once more, tersely, with more room.
       t.step("retry", "asking for a complete, shorter reply with a 6000-token budget");
       const terse: ChatMessage[] = [...messages, { role: "assistant", content: res.content.slice(0, 400) }, { role: "user", content: "That reply was cut off before the JSON closed. Reply again, complete and valid, keeping the body under 500 words and at most 4 proposals." }];
       asked = Date.now();
-      res = await llm.chat(terse, { jsonSchema: schema, maxTokens: 6000, model, onToken: t.token });
+      res = await callLlm(db, llm, { agentId: agent.id, proj: project.id, runId: run.id }, terse, { jsonSchema: schema, maxTokens: 6000, model, onToken: t.token }, now);
       t.step("reply", replyDetail(res.usage, Date.now() - asked, res.truncated));
     }
     let result: AgentResult;
@@ -248,17 +252,18 @@ export const runAgent = async (db: Database, llm: Llm, input: RunAgentInput, now
       completionTokens: res.usage?.completion ?? null,
     };
     updateRun(db, finished);
-    let existing = loadState(db, now).proposals;
     // A benchmark run measures what the agent would propose; it does not fill the inbox with it.
     for (const pr of options.benchmark ? [] : result.proposals) {
-      const proposal: Proposal = { id: nextProposalId(existing), runId: run.id, agentId: agent.id, proj: project.id, ruleId: pr.ruleId, action: pr.action, rationale: pr.rationale, state: "pending", createdAt: finished.finishedAt ?? now.toISOString(), decidedAt: null };
-      insertProposal(db, proposal);
-      existing = [...existing, proposal];
+      const proposal: Proposal = { id: nextStoredProposalId(db), runId: run.id, agentId: agent.id, proj: project.id, ruleId: pr.ruleId, action: pr.action, rationale: pr.rationale, state: "pending", createdAt: now.toISOString(), decidedAt: null };
+      db.transaction(() => {
+        insertProposal(db, proposal);
+        registerProposalGuard(db, proposal, state);
+      })();
       // A rule that earned autonomy applies its proposals at once; the proposal stays as the record of what happened.
       const rule = rules.find((r) => r.id === pr.ruleId);
       if (rule?.auto) {
         try {
-          acceptProposal(db, proposal, new Date());
+          acceptProposal(db, proposal, now, "automatic");
           t.step("applied", `${rule.id} has earned autonomy: ${proposal.id} applied at once`);
         } catch (e) {
           console.error(`rule ${rule.id}: could not apply ${proposal.id}`, e instanceof Error ? e.message : e);

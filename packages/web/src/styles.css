@@ -553,6 +553,7 @@ kbd.vf-kbd {
 }
 .vf-topnav {
   display: flex;
+  overflow-x: auto;
   align-items: center;
   gap: 2px;
   padding: 6px 8px;
@@ -561,6 +562,9 @@ kbd.vf-kbd {
   position: sticky;
   top: 0;
   z-index: 41;
+}
+.vf-topnav > button {
+  flex-shrink: 0;
 }
 @media (max-width: 640px) {
   .vf-kpis {
@@ -588,4 +592,10 @@ kbd.vf-kbd {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+@media (max-width: 700px) {
+  .vf-proposal > div { flex-direction: column; }
+  .vf-proposal > div > span { width: 100%; }
+  .vf-proposal > div > span:last-child { justify-content: flex-start !important; }
 }

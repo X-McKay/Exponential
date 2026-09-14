@@ -9,6 +9,8 @@
 import type { AgentRun, AppState, Budget, BudgetScope, ModelPrice } from "./types.ts";
 
 export type PriceList = Record<string, ModelPrice>;
+export type SpendRun = Pick<AgentRun, "id" | "agentId" | "proj" | "startedAt" | "model" | "promptTokens" | "completionTokens"> & { costUsd?: number | null };
+type SpendState = Pick<AppState, "budgets" | "asOf"> & { runs: SpendRun[]; usageRuns?: SpendRun[] };
 
 /** "model=0.20/0.60,other@https://host/v1=1/4": USD per million tokens in and out. Bad entries are skipped. */
 export const parsePrices = (spec: string | undefined): PriceList => {
@@ -36,7 +38,9 @@ export const priceFor = (model: string | null, prices: PriceList): ModelPrice | 
 export const runTokens = (r: Pick<AgentRun, "promptTokens" | "completionTokens">): number => (r.promptTokens ?? 0) + (r.completionTokens ?? 0);
 
 /** USD a run cost, or null when its model has no price (or it recorded no tokens). */
-export const runCost = (r: Pick<AgentRun, "model" | "promptTokens" | "completionTokens">, prices: PriceList): number | null => {
+export const runCost = (r: Pick<AgentRun, "model" | "promptTokens" | "completionTokens"> & { costUsd?: number | null }, prices: PriceList): number | null => {
+  if (r.costUsd !== undefined) return r.costUsd;
+  if (r.promptTokens === null || r.completionTokens === null || !Number.isSafeInteger(r.promptTokens) || !Number.isSafeInteger(r.completionTokens) || r.promptTokens < 0 || r.completionTokens < 0) return null;
   const p = priceFor(r.model, prices);
   if (!p || runTokens(r) === 0) return null;
   return ((r.promptTokens ?? 0) * p.input + (r.completionTokens ?? 0) * p.output) / 1_000_000;
@@ -49,27 +53,34 @@ export interface Spend {
   usd: number | null;
   /** Runs that used tokens but whose model has no price. */
   unpriced: number;
+  /** Runs whose provider usage did not include both token counts. */
+  unknown: number;
 }
 
-export const spendOf = (runs: Pick<AgentRun, "model" | "promptTokens" | "completionTokens">[], prices: PriceList): Spend => {
+export const spendOf = (runs: SpendRun[], prices: PriceList): Spend => {
   let tokens = 0;
   let usd: number | null = null;
   let unpriced = 0;
+  let unknown = 0;
   for (const r of runs) {
-    const t = runTokens(r);
+    const rowUnknown = r.promptTokens === null || r.completionTokens === null || !Number.isSafeInteger(r.promptTokens) || !Number.isSafeInteger(r.completionTokens) || r.promptTokens < 0 || r.completionTokens < 0;
+    const prompt = typeof r.promptTokens === "number" && Number.isSafeInteger(r.promptTokens) && r.promptTokens > 0 ? r.promptTokens : 0;
+    const completion = typeof r.completionTokens === "number" && Number.isSafeInteger(r.completionTokens) && r.completionTokens > 0 ? r.completionTokens : 0;
+    const t = prompt + completion;
+    if (rowUnknown) unknown += 1;
     tokens += t;
     const c = runCost(r, prices);
     if (c !== null) usd = (usd ?? 0) + c;
-    else if (t > 0) unpriced += 1;
+    else if (t > 0 && !rowUnknown) unpriced += 1;
   }
-  return { runs: runs.length, tokens, usd, unpriced };
+  return { runs: runs.length, tokens, usd, unpriced, unknown };
 };
 
 /** First instant of the month `asOf` falls in (UTC). */
 export const monthStart = (asOf: string): string => `${asOf.slice(0, 7)}-01T00:00:00.000Z`;
 
 /** Runs that count toward this month's spend for a scope: the workspace, one agent, or one project (a project's runs include workspace-wide ones only for the workspace scope). */
-export const runsInScope = (runs: AgentRun[], scope: BudgetScope, ref: string, asOf: string): AgentRun[] => {
+export const runsInScope = <T extends SpendRun>(runs: T[], scope: BudgetScope, ref: string, asOf: string): T[] => {
   const since = monthStart(asOf);
   return runs.filter((r) => r.startedAt >= since && (scope === "workspace" || (scope === "agent" ? r.agentId === ref : r.proj === ref)));
 };
@@ -90,14 +101,16 @@ export interface BudgetLine {
 }
 
 /** How a scope stands against its budget this month. */
-export const budgetLine = (state: Pick<AppState, "runs" | "budgets" | "asOf">, prices: PriceList, scope: BudgetScope, ref: string): BudgetLine => {
+export const budgetLine = (state: SpendState, prices: PriceList, scope: BudgetScope, ref: string): BudgetLine => {
   const budget = state.budgets.find((b) => b.scope === scope && b.ref === ref) ?? null;
-  const spend = spendOf(runsInScope(state.runs, scope, ref, state.asOf), prices);
+  const spend = spendOf(runsInScope(state.usageRuns ?? state.runs, scope, ref, state.asOf), prices);
   let used: number | null = null;
   let against: BudgetLine["against"] = null;
   if (budget) {
-    const byUsd = budget.monthlyUsd !== null && budget.monthlyUsd > 0 ? (spend.usd ?? 0) / budget.monthlyUsd : null;
-    const byTokens = budget.monthlyTokens !== null && budget.monthlyTokens > 0 ? spend.tokens / budget.monthlyTokens : null;
+    // Zero is an explicit zero ceiling. Represent it as already exhausted so
+    // callers cannot silently treat it as an unlimited budget.
+    const byUsd = budget.monthlyUsd !== null ? (budget.monthlyUsd === 0 ? 1 : spend.unknown > 0 || spend.unpriced > 0 ? Math.max(1, (spend.usd ?? 0) / budget.monthlyUsd) : (spend.usd ?? 0) / budget.monthlyUsd) : null;
+    const byTokens = budget.monthlyTokens !== null ? (budget.monthlyTokens === 0 ? 1 : spend.unknown > 0 ? Math.max(1, spend.tokens / budget.monthlyTokens) : spend.tokens / budget.monthlyTokens) : null;
     if (byUsd !== null && (byTokens === null || byUsd >= byTokens)) {
       used = byUsd;
       against = "usd";
@@ -111,7 +124,7 @@ export const budgetLine = (state: Pick<AppState, "runs" | "budgets" | "asOf">, p
 };
 
 /** Every budget line that applies to a run: the workspace, the agent, and the project when there is one. */
-export const budgetLinesFor = (state: Pick<AppState, "runs" | "budgets" | "asOf">, prices: PriceList, agentId: string, proj: string | null): BudgetLine[] => [
+export const budgetLinesFor = (state: SpendState, prices: PriceList, agentId: string, proj: string | null): BudgetLine[] => [
   budgetLine(state, prices, "workspace", ""),
   budgetLine(state, prices, "agent", agentId),
   ...(proj ? [budgetLine(state, prices, "project", proj)] : []),
@@ -124,7 +137,7 @@ export const fmtTokens = (n: number): string => (n >= 1_000_000 ? `${(n / 1_000_
 export const budgetLabel = (b: Pick<Budget, "monthlyUsd" | "monthlyTokens">): string => [b.monthlyUsd !== null ? fmtUsd(b.monthlyUsd) : null, b.monthlyTokens !== null ? `${fmtTokens(b.monthlyTokens)} tokens` : null].filter(Boolean).join(" or ") || "no ceiling";
 
 /** Why a run may not start now, or null when every applicable budget has room. */
-export const overBudget = (state: Pick<AppState, "runs" | "budgets" | "asOf" | "agents" | "projects">, prices: PriceList, agentId: string, proj: string | null): string | null => {
+export const overBudget = (state: SpendState & Pick<AppState, "agents" | "projects">, prices: PriceList, agentId: string, proj: string | null): string | null => {
   for (const line of budgetLinesFor(state, prices, agentId, proj)) {
     if (line.state !== "over" || !line.budget) continue;
     const name = line.scope === "workspace" ? "the workspace" : line.scope === "agent" ? (state.agents.find((a) => a.id === line.ref)?.name ?? line.ref) : (state.projects.find((p) => p.id === line.ref)?.name ?? line.ref);

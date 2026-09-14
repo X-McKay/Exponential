@@ -71,4 +71,11 @@ describe("explanations trace the derivation", () => {
     expect(e.inputs.length).toBeGreaterThan(0);
     expect(e.inputs.every((a) => a.inputs.every((r) => r.fact?.kind === "run"))).toBe(true);
   });
+
+  test("ledger usage rows do not link to a nonexistent agent run", () => {
+    const source = state.runs[0]!;
+    const usage = { ...source, id: "usage-42", summary: "LLM succeeded attempt" };
+    const e = explainRuns("Spend", "$1", "ledger usage", [usage], state, (r) => r.id);
+    expect(e.inputs[0]?.inputs[0]?.fact).toBeNull();
+  });
 });

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { PROJECT_TABS, blockers, calendarOf, dayLabel, pendingProposals } from "@valueflow/domain";
-import type { Dim, ProjectTab } from "@valueflow/domain";
+import type { AgentRun, Dim, ProjectTab } from "@valueflow/domain";
 import { AgentsInputSchema } from "@valueflow/shared";
 import { JsonDocEditor } from "./editors/JsonDocEditor.tsx";
 import { ProjectEditor } from "./editors/ProjectEditor.tsx";
@@ -179,12 +179,13 @@ export function App() {
 
   const state = store.state;
   const projects = state?.projects ?? [];
+  const spendRuns = state ? (state as typeof state & { usageRuns?: AgentRun[] }).usageRuns : undefined;
   const proj = projects.find((p) => p.id === view.projectId);
 
   const nav = useCallback(
     (v: View) => {
       setView(v);
-      setOpenMs(null);
+      setOpenMs(v.page === "project" && v.tab === "value" ? v.focusId ?? null : null);
       setPalette(false);
       if (v.projectId) setLastProject(v.projectId);
     },
@@ -194,7 +195,7 @@ export function App() {
     (page: Page, projectId: string | null, tab: ProjectTab = "overview", section: AgentsSection = "agents") => nav({ page, projectId, tab, section }),
     [nav],
   );
-  const openProject = useCallback((id: string, tab: ProjectTab = "overview") => nav({ page: "project", projectId: id, tab, section: "agents" }), [nav]);
+  const openProject = useCallback((id: string, tab: ProjectTab = "overview", focusId?: string) => nav({ page: "project", projectId: id, tab, section: "agents", ...(focusId ? { focusId } : {}) }), [nav]);
 
   const keyboard = useMemo(
     () => ({
@@ -282,13 +283,13 @@ export function App() {
         <ProjectEditor
           project={editor.pid ? (projects.find((p) => p.id === editor.pid) ?? null) : null}
           projects={projects}
-          onSave={(input, isNew) => {
-            void store.saveProject(input, isNew);
+          onSave={async (input, isNew) => {
+            await store.saveProject(input, isNew);
             closeEditor();
             if (isNew) openProject(input.id);
           }}
-          onDelete={(pid) => {
-            void store.deleteProject(pid);
+          onDelete={async (pid) => {
+            await store.deleteProject(pid);
             closeEditor();
             go("portfolio", null);
           }}
@@ -313,8 +314,8 @@ export function App() {
           help="One entry per workspace agent: id, name, grad (CSS gradient), purpose, kind (deck | comms | ideation | audit | chat | rules | brief | tuner | scout), model (null = workspace default), owner initials, caps, schedule (null | nightly | weekly), prompt (extra instructions or null; a change is recorded as a prompt version). Runs are kept when an agent is edited and removed when it is deleted."
           value={state.agents}
           schema={AgentsInputSchema}
-          onSave={(agents) => {
-            void store.saveAgents(agents);
+          onSave={async (agents) => {
+            await store.saveAgents(agents);
             closeEditor();
           }}
           onClose={closeEditor}
@@ -323,8 +324,8 @@ export function App() {
       {editor?.kind === "workspace" && (
         <WorkspaceEditor
           workspace={state.workspace}
-          onSave={(w) => {
-            void store.saveWorkspace(w);
+          onSave={async (w) => {
+            await store.saveWorkspace(w);
             closeEditor();
           }}
           onClose={closeEditor}
@@ -461,14 +462,14 @@ export function App() {
               <h1 style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em", margin: 0 }}>Inbox</h1>
               <span style={{ fontSize: 12, color: C.dim }}>{waiting ? `${waiting} waiting on you` : "nothing waiting"}</span>
             </Header>
-            <InboxPage state={state} onDecide={(id, d) => void store.decideProposal(id, d)} />
+            <InboxPage state={state} onDecide={store.decideProposal} />
           </>
         ) : view.page === "agents" ? (
           <>
             <Header>
               <h1 style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em", margin: 0 }}>Agents</h1>
               <span style={{ fontSize: 12, color: C.dim }}>
-                {state.agents.length} workspace agents{state.llm ? ` · ${state.llm.model ?? "model resolving"}` : " · no model configured"}
+                Project Manager · Communications Director{state.llm ? ` · ${state.llm.model ?? "model resolving"}` : " · no model configured"}
               </span>
             </Header>
             <AgentsPage
@@ -491,16 +492,18 @@ export function App() {
               onOpen={openProject}
               onOpenInbox={() => go("inbox", null)}
               onEdit={() => setEditor({ kind: "agents" })}
+              onRefresh={store.reload}
               onRun={(input) => void store.runAgent(input)}
               onDecide={(id, d) => void store.decideProposal(id, d)}
               onRate={(id, r, n) => void store.rateRun(id, r, n)}
               onJudge={store.judgeRun}
               onBenchmark={store.runBenchmark}
               onScout={store.runScout}
-              onSetPrompt={(id, prompt) => void store.setAgentPrompt(id, prompt)}
-              onSaveRule={(rule, input) => void store.saveRule(rule, input)}
-              onDeleteRule={(id) => void store.deleteRule(id)}
-              onSaveBudgets={(b) => void store.saveBudgets(b)}
+              onSetPrompt={(id, prompt) => store.setAgentPrompt(id, prompt)}
+              onSaveRule={(rule, input) => store.saveRule(rule, input)}
+              onDeleteRule={(id) => store.deleteRule(id)}
+              onSaveBudgets={(b) => store.saveBudgets(b)}
+              spendRuns={spendRuns}
             />
           </>
         ) : view.page === "portfolio" ? (
@@ -524,10 +527,10 @@ export function App() {
             </Header>
             <DataPage
               state={state}
-              onWorkspace={(w) => void store.saveWorkspace(w)}
-              onAgents={(a) => void store.saveAgents(a)}
-              onCalendar={(ev, isNew) => void store.saveCalendar(ev, isNew)}
-              onDeleteCalendar={(id) => void store.deleteCalendar(id)}
+              onWorkspace={(w) => store.saveWorkspace(w)}
+              onAgents={(a) => store.saveAgents(a)}
+              onCalendar={(ev, isNew) => store.saveCalendar(ev, isNew)}
+              onDeleteCalendar={(id) => store.deleteCalendar(id)}
               onSync={store.syncProject}
             />
           </>
@@ -542,12 +545,19 @@ export function App() {
                 <h1 style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em", margin: 0, flex: 1, minWidth: 160 }}>{proj.name}</h1>
                 <TierBadge tier={proj.tier} />
               </div>
-              <div style={{ display: "flex", gap: 4, marginTop: 10 }}>
+              {narrow ? (
+                <label style={{ display: "flex", alignItems: "center", gap: 12, margin: "12px 0", color: C.mut, fontSize: 13 }}>
+                  Project view
+                  <select aria-label="Project view" value={view.tab} onChange={(e) => openProject(proj.id, e.target.value as ProjectTab)} style={{ flex: 1, minWidth: 0, minHeight: 40, color: C.text, background: C.panel, border: `1px solid ${C.line2}`, borderRadius: 6, padding: "8px 10px", font: "inherit" }}>
+                    {PROJECT_TABS.map((k) => <option key={k} value={k}>{TAB_LABEL[k]}</option>)}
+                  </select>
+                </label>
+              ) : <div style={{ display: "flex", gap: 4, marginTop: 10 }}>
                 {PROJECT_TABS.map((k) => (
                   <button
                     key={k}
                     type="button"
-                    onClick={() => setView({ ...view, tab: k })}
+                    onClick={() => openProject(proj.id, k)}
                     className="vf-tab"
                     aria-current={view.tab === k ? "page" : undefined}
                     style={{ ...reset, fontSize: 13, padding: "7px 12px", color: view.tab === k ? C.text : C.mut, borderBottom: `2px solid ${view.tab === k ? C.indigo : "transparent"}`, transition: "color .12s, border-color .12s" }}
@@ -556,7 +566,7 @@ export function App() {
                     {k === "governance" && blockers(proj) > 0 && <span style={{ color: C.red }}> ·</span>}
                   </button>
                 ))}
-              </div>
+              </div>}
             </header>
             {view.tab === "overview" && (
               <OverviewPage
@@ -574,34 +584,44 @@ export function App() {
             )}
             {view.tab === "value" && (
               <ValuePage
+                key={proj.id}
                 p={proj}
                 cal={cal}
-                onMetric={store.setMetric}
+                focusId={view.focusId}
                 openMs={openMs}
                 setOpenMs={setOpenMs}
                 dim={dim}
                 setDim={setDim}
-                onSaveMilestone={(pid, ms, isNew) => void store.saveMilestone(pid, ms, isNew)}
-                onDeleteMilestone={(pid, mid) => void store.deleteMilestone(pid, mid)}
-                onSaveTargets={(pid, t) => void store.saveTargets(pid, t)}
+                onSaveMilestone={(pid, ms, isNew) => store.saveMilestone(pid, ms, isNew)}
+                onDeleteMilestone={(pid, mid) => store.deleteMilestone(pid, mid)}
+                onSaveTargets={(pid, t) => store.saveTargets(pid, t)}
+                onRecordMeasurement={async (pid, mid, xid, value) => { await store.recordReading(pid, mid, xid, value); }}
               />
             )}
             {view.tab === "roadmap" && (
               <RoadmapPage
+                key={proj.id}
+                focusId={view.focusId}
+                onOpen={openProject}
                 p={proj}
                 releases={state.releases[proj.id] ?? []}
                 cal={cal}
-                onSaveRelease={(pid, rel, isNew) => void store.saveRelease(pid, rel, isNew)}
-                onDeleteRelease={(pid, rid) => void store.deleteRelease(pid, rid)}
+                onSaveRelease={(pid, rel, isNew) => store.saveRelease(pid, rel, isNew)}
+                onDeleteRelease={(pid, rid) => store.deleteRelease(pid, rid)}
               />
             )}
             {view.tab === "development" && <DevPage facts={state.dev[proj.id]} project={proj} asOf={state.asOf} source={state.syncSource} onSync={() => store.syncProject(proj.id)} />}
             {view.tab === "governance" && (
               <GovernancePage
+                key={proj.id}
+                focusId={view.focusId}
+                onOpen={openProject}
+                releases={state.releases[proj.id] ?? []}
+                cal={cal}
                 p={proj}
                 defaultOwner={user.ini}
-                onSaveGov={(pid, item, isNew) => void store.saveGovernance(pid, item, isNew)}
-                onDeleteGov={(pid, gid) => void store.deleteGovernance(pid, gid)}
+                onSaveGov={(pid, item, isNew) => store.saveGovernance(pid, item, isNew)}
+                onDeleteGov={(pid, gid) => store.deleteGovernance(pid, gid)}
               />
             )}
           </>

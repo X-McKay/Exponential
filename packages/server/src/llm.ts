@@ -8,7 +8,11 @@
 //   LLM_THINKING   "on" to let reasoning models think (slower); default off
 //   LLM_MODELS     optional comma list of candidate models the scout may try;
 //                  an entry may be "name@https://other-host/v1" to reach a
-//                  second endpoint (same API key)
+//                  second, explicitly configured endpoint. Credentials are
+//                  never copied to that endpoint unless it has its own config.
+//   LLM_PROVIDER_<ID>_BASE_URL / LLM_PROVIDER_<ID>_API_KEY optionally configure
+//                  credentials for a named provider endpoint. A URL still
+//                  needs to appear in LLM_MODELS before model@URL can use it.
 //   EVAL_JUDGE_MODEL  optional model for the judge (defaults to LLM_MODEL)
 //   LLM_PRICES     optional "model=in/out,…" USD per million tokens, so spend
 //                  can be shown in money and budgets set in dollars
@@ -45,6 +49,8 @@ export interface Llm {
   /** Model name in use (resolved lazily when LLM_MODEL is unset). */
   model: () => Promise<string>;
   chat: (messages: ChatMessage[], options?: ChatOptions) => Promise<ChatResult>;
+  /** Validate a persisted or requested model before a caller records it. */
+  validateModel?: (spec: string | null | undefined) => void;
   describe: () => { baseUrl: string; model: string | null; models: string[]; judgeModel: string | null; prices: PriceList };
 }
 
@@ -67,8 +73,27 @@ export interface LlmOptions {
   judgeModel?: string | undefined;
   /** USD per million tokens by model. */
   prices?: PriceList;
+  /** Explicitly configured additional endpoints and their credentials. */
+  providers?: Record<string, { baseUrl: string; apiKey?: string | undefined }>;
   fetch?: (input: string, init?: RequestInit) => Promise<Response>;
 }
+
+const endpointKey = (model: string, base: string): string => `${model}\0${base}`;
+
+/** Canonicalize an HTTP(S) API base and reject URL tricks such as credentials or query strings. */
+const canonicalBase = (raw: string): string => {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new LlmError(500, `invalid LLM base URL: ${raw}`);
+  }
+  if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.search || url.hash) {
+    throw new LlmError(500, `invalid LLM base URL: ${raw}`);
+  }
+  const path = url.pathname.replace(/\/+$/, "");
+  return `${url.origin}${path}`;
+};
 
 /** "name@https://host/v1" → the model name and the endpoint it lives on. */
 export const splitModel = (spec: string, defaultBase: string): { model: string; base: string } => {
@@ -137,19 +162,57 @@ export const readStream = async (res: Response, onToken: (text: string) => void)
 };
 
 export const createLlm = (options: LlmOptions): Llm => {
-  const base = options.baseUrl.replace(/\/$/, "");
+  const base = canonicalBase(options.baseUrl);
   const doFetch = options.fetch ?? fetch;
   let resolved: string | null = options.model ?? null;
 
-  const headers = (): Record<string, string> => {
+  // Credentials are indexed by the exact configured API base. This prevents
+  // a model spec from using the default provider's key at another origin.
+  const providerKeys = new Map<string, string>();
+  if (options.apiKey) providerKeys.set(base, options.apiKey);
+  for (const provider of Object.values(options.providers ?? {})) {
+    const providerBase = canonicalBase(provider.baseUrl);
+    if (provider.apiKey) providerKeys.set(providerBase, provider.apiKey);
+  }
+
+  const candidates = (options.candidates ?? []).map((c) => c.trim()).filter(Boolean);
+  const configuredRoutes = new Set<string>();
+  for (const candidate of candidates) {
+    const split = splitModel(candidate, base);
+    if (!split.model) continue;
+    configuredRoutes.add(endpointKey(split.model, canonicalBase(split.base)));
+  }
+
+  const selection = (spec: string): { model: string; base: string } => {
+    const split = splitModel(spec, base);
+    if (!split.model) throw new LlmError(400, "LLM model name is empty");
+    const target = canonicalBase(split.base);
+    // A URL-bearing model is a routing instruction. Only a candidate supplied
+    // by server configuration may authorize that instruction.
+    if (spec.includes("@") && !configuredRoutes.has(endpointKey(split.model, target))) {
+      throw new LlmError(403, `LLM model endpoint is not configured: ${spec}`);
+    }
+    return { model: split.model, base: target };
+  };
+
+  const headers = (target: string): Record<string, string> => {
     const h: Record<string, string> = { "content-type": "application/json" };
-    if (options.apiKey) h.authorization = `Bearer ${options.apiKey}`;
+    const key = providerKeys.get(target);
+    if (key) h.authorization = `Bearer ${key}`;
     return h;
   };
 
+  const rejectRedirect = (res: Response): void => {
+    if (res.redirected || (res.status >= 300 && res.status < 400)) throw new LlmError(502, "LLM redirect refused");
+  };
+
   const model = async (): Promise<string> => {
-    if (resolved) return resolved;
-    const res = await doFetch(`${base}/models`, { headers: headers() });
+    if (resolved) {
+      selection(resolved);
+      return resolved;
+    }
+    const res = await doFetch(`${base}/models`, { headers: headers(base), redirect: "error" });
+    rejectRedirect(res);
     if (!res.ok) throw new LlmError(res.status, `LLM ${res.status} listing models`);
     const body = (await res.json()) as ModelsResponse;
     const first = body.data[0]?.id;
@@ -159,7 +222,7 @@ export const createLlm = (options: LlmOptions): Llm => {
   };
 
   const chat = async (messages: ChatMessage[], o: ChatOptions = {}): Promise<ChatResult> => {
-    const spec = o.model ? splitModel(o.model, base) : { model: await model(), base };
+    const spec = o.model ? selection(o.model) : selection(await model());
     const m = spec.model;
     const payload: Record<string, unknown> = {
       model: m,
@@ -175,10 +238,12 @@ export const createLlm = (options: LlmOptions): Llm => {
     }
     const res = await doFetch(`${spec.base}/chat/completions`, {
       method: "POST",
-      headers: headers(),
+      headers: headers(spec.base),
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(o.timeoutMs ?? 120_000),
+      redirect: "error",
     });
+    rejectRedirect(res);
     if (!res.ok) throw new LlmError(res.status, `LLM ${res.status}: ${(await res.text()).slice(0, 300)}`);
     const body = o.onToken ? await readStream(res, o.onToken) : ((await res.json()) as ChatResponse);
     const content = body.choices[0]?.message.content ?? "";
@@ -190,13 +255,24 @@ export const createLlm = (options: LlmOptions): Llm => {
     };
   };
 
-  const candidates = (options.candidates ?? []).map((c) => c.trim()).filter(Boolean);
+  const validateModel = (spec: string | null | undefined): void => {
+    if (spec) selection(spec);
+  };
   const describe = () => ({ baseUrl: base, model: resolved, models: [...new Set([...(resolved ? [resolved] : []), ...candidates])], judgeModel: options.judgeModel ?? null, prices: options.prices ?? {} });
-  return { model, chat, describe };
+  return { model, chat, validateModel, describe };
 };
 
 export const llmFromEnv = (env: Record<string, string | undefined>): Llm | null => {
   if (!env.LLM_BASE_URL) return null;
+  const providers: Record<string, { baseUrl: string; apiKey?: string }> = {};
+  for (const [key, value] of Object.entries(env)) {
+    const match = key.match(/^LLM_PROVIDER_([A-Z0-9_]+)_BASE_URL$/);
+    if (match && value) {
+      const id = match[1];
+      if (!id) continue;
+      providers[id] = { baseUrl: value, apiKey: env[`LLM_PROVIDER_${id}_API_KEY`] };
+    }
+  }
   return createLlm({
     baseUrl: env.LLM_BASE_URL,
     apiKey: env.LLM_API_KEY,
@@ -205,6 +281,7 @@ export const llmFromEnv = (env: Record<string, string | undefined>): Llm | null 
     candidates: (env.LLM_MODELS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
     judgeModel: env.EVAL_JUDGE_MODEL,
     prices: parsePrices(env.LLM_PRICES),
+    providers,
   });
 };
 

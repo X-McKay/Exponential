@@ -9,7 +9,7 @@
 
 import type { Calendar } from "./calendar.ts";
 import { monthLabel } from "./calendar.ts";
-import { blockers, evalCriterion, impactOf, isMeasurable, metricLevel, readiness, realized, releaseState, shippedCount, tierOf } from "./derive.ts";
+import { blockers, eligible, evalCriterion, impactOf, isMeasurable, metricLevel, readiness, releaseState, shippedCount, tierOf } from "./derive.ts";
 import { GSTATUS_LABEL, STATUS_LABEL } from "./labels.ts";
 import type { AgentRun, AppState, Dim, GovernanceItem, Metric, Milestone, Project, ProjectTab, Proposal, Release } from "./types.ts";
 
@@ -136,19 +136,19 @@ export const explainImpact = (p: Pick<Project, "id">, m: Milestone, d: Dim): Exp
   return {
     label: `${m.id} ${m.name}`,
     value: `${v}%`,
-    rule: !shipped ? `not shipped, so it counts 0% (would add ${m.impact.base[d]}% at base, ${m.impact.stretch[d]}% at stretch)` : t === 2 ? `shipped and clearing the stretch gate: the stretch ${label} figure` : t === 1 ? `shipped and clearing the base gate: the base ${label} figure` : `shipped but below its base gate, so it counts 0% (base would add ${m.impact.base[d]}%)`,
+    rule: !shipped ? `not shipped, so eligible value is 0% (would add ${m.impact.base[d]}% at base, ${m.impact.stretch[d]}% at stretch)` : t === 2 ? `shipped and clearing the stretch gate: the stretch ${label} figure is eligible` : t === 1 ? `shipped and clearing the base gate: the base ${label} figure is eligible` : `shipped but below its base gate, so eligible value is 0% (base would add ${m.impact.base[d]}%)`,
     fact: null,
     inputs: [statusFact(p, m), explainTier(p, m)],
   };
 };
 
-/** Realized value: the sum of shipped milestones' gated impact. */
-export const explainRealized = (p: Pick<Project, "id" | "milestones" | "targets">, d: Dim): Explanation => {
-  const label = d === "fte" ? "FTE reduction realized" : "Time reduction realized";
+/** Value eligible after delivery: gated impact, pending observed-benefit data. */
+export const explainEligible = (p: Pick<Project, "id" | "milestones" | "targets">, d: Dim): Explanation => {
+  const label = d === "fte" ? "FTE reduction eligible" : "Time reduction eligible";
   const contributing = p.milestones.filter((m) => m.status === "shipped" && impactOf(m, d) > 0);
   return {
     label,
-    value: `${realized(p, d)}%`,
+    value: `${eligible(p, d)}%`,
     rule: `${contributing.length} shipped milestone${plural(contributing.length, "", "s")} clearing a gate, impact summed; target ${p.targets[d]}%`,
     fact: null,
     inputs: [
@@ -157,6 +157,9 @@ export const explainRealized = (p: Pick<Project, "id" | "milestones" | "targets"
     ],
   };
 };
+
+/** @deprecated Use explainEligible; the current fact is eligibility, not an observed outcome. */
+export const explainRealized = explainEligible;
 
 export const explainShipped = (p: Pick<Project, "id" | "milestones">, cal?: Pick<Calendar, "todayYm">): Explanation => ({
   label: "Milestones shipped",
@@ -204,7 +207,7 @@ export const explainRelease = (p: Pick<Project, "id" | "milestones" | "governanc
   return {
     label: `${rel.id} ${rel.name}`,
     value: `${st.label} · ${st.met} of ${st.total} criteria met`,
-    rule: `Ready when every criterion is met (Shipped once its month, ${monthLabel(rel.month, cal.todayYm)}, has passed); otherwise Blocked when the target is within a month and At risk when further out`,
+    rule: `Ready when every configured criterion is met; shipment requires explicit deployment evidence. Empty criteria are Not configured. Otherwise Blocked when the target is within a month and At risk when further out`,
     fact: { kind: "release", proj: p.id, rid: rel.id },
     inputs: rel.criteria.map((_, i) => explainCriterion(p, rel, i)),
   };
@@ -269,7 +272,7 @@ export const explainRuns = (label: string, value: string, rule: string, runs: Ag
       value: `${rs.length} run${plural(rs.length, "", "s")}`,
       rule: null,
       fact: null,
-      inputs: rs.slice(0, 12).map((r) => ({ label: `${r.id} · ${r.summary.slice(0, 60)}`, value: describe(r), rule: null, fact: { kind: "run", runId: r.id, proj: r.proj }, inputs: [] })),
+        inputs: rs.slice(0, 12).map((r) => ({ label: `${r.id} · ${r.summary.slice(0, 60)}`, value: describe(r), rule: null, fact: r.id.startsWith("usage-") ? null : { kind: "run", runId: r.id, proj: r.proj }, inputs: [] })),
     })),
   };
 };

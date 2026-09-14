@@ -98,4 +98,11 @@ describe("GitHub source", () => {
     const source = githubSource({ fetch: () => Promise.resolve(new Response("rate limited", { status: 403 })) });
     await expect(source.fetchRepo({ name: "x", url: "github.com/org/x" }, { projectId: "p", now: NOW, sinceDays: 7, team: [] })).rejects.toThrow("GitHub 403");
   });
+
+  test("does not turn failed checks, reviews, or workflows into empty snapshots", async () => {
+    for (const resource of ["/check-runs", "/reviews", "/actions/runs"]) {
+      const source = githubSource({ fetch: (url) => String(url).includes(resource) ? Promise.resolve(new Response("permission denied", { status: 403 })) : fakeFetch(url) });
+      await expect(source.fetchRepo({ name: "widget", url: "github.com/org/widget" }, { projectId: "p", now: NOW, sinceDays: 56, team: TEAM })).rejects.toThrow("GitHub 403");
+    }
+  });
 });

@@ -28,8 +28,8 @@ export function MilestoneEditor({
   project: Project;
   milestoneId: string | null;
   cal: Calendar;
-  onSave: (ms: Milestone, isNew: boolean) => void;
-  onDelete: (mid: string) => void;
+  onSave: (ms: Milestone, isNew: boolean) => Promise<unknown>;
+  onDelete: (mid: string) => Promise<unknown>;
   onClose: () => void;
 }) {
   const existing = project.milestones.find((m) => m.id === milestoneId);
@@ -37,37 +37,60 @@ export function MilestoneEditor({
   const [d, setD] = useState<Milestone>(() => (existing ? structuredClone(existing) : blank(project, cal)));
   const months = planningMonths(cal);
   const [confirmDel, setConfirmDel] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const set = (patch: Partial<Milestone>) => setD((x) => ({ ...x, ...patch }));
   const setImpact = (tier: "base" | "stretch", dim: Dim, v: number) => setD((x) => ({ ...x, impact: { ...x.impact, [tier]: { ...x.impact[tier], [dim]: v } } }));
   const setMetric = (i: number, patch: Partial<Metric>) => setD((x) => ({ ...x, metrics: x.metrics.map((m, mi) => (mi === i ? { ...m, ...patch } : m)) }));
   const addMetric = () => setD((x) => ({ ...x, metrics: [...x.metrics, { id: `m${Date.now() % 100000}`, label: "", base: 80, stretch: 95, current: 0 }] }));
   const rmMetric = (i: number) => setD((x) => ({ ...x, metrics: x.metrics.filter((_, mi) => mi !== i) }));
   const valid = d.name.trim().length > 0 && d.metrics.every((m) => m.label.trim().length > 0);
-  const submit = () => {
-    if (valid) onSave({ ...d, name: d.name.trim(), metrics: d.metrics.map((m) => ({ ...m, label: m.label.trim() })) }, isNew);
+  const submit = async () => {
+    if (!valid || saving) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onSave({ ...d, name: d.name.trim(), metrics: d.metrics.map((m) => ({ ...m, label: m.label.trim() })) }, isNew);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  const remove = async () => {
+    if (saving) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onDelete(d.id);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : String(e));
+      setSaving(false);
+    }
   };
 
   return (
     <Modal
       title={isNew ? "New milestone" : `Edit ${d.id}`}
       onClose={onClose}
-      onSubmit={submit}
+      onSubmit={() => void submit()}
       footer={
         <>
           {!isNew && (
             <span style={{ marginRight: "auto" }}>
-              <Btn tone="danger" onClick={() => (confirmDel ? onDelete(d.id) : setConfirmDel(true))}>
+              <Btn tone="danger" disabled={saving} onClick={() => (confirmDel ? void remove() : setConfirmDel(true))}>
                 {confirmDel ? "Confirm delete" : "Delete"}
               </Btn>
             </span>
           )}
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn tone="primary" disabled={!valid} onClick={submit}>
-            {isNew ? "Create milestone" : "Save changes"}
+          <Btn tone="primary" disabled={!valid || saving} onClick={() => void submit()}>
+            {saving ? "Saving…" : isNew ? "Create milestone" : "Save changes"}
           </Btn>
         </>
       }
     >
+      {saveError && <div role="alert" style={{ color: C.redHi, fontSize: 12, margin: "8px 0" }}>Could not save: {saveError}</div>}
       <Lbl>Name</Lbl>
       <input style={inpStyle} value={d.name} placeholder="e.g. Entity resolution service" onChange={(e) => set({ name: e.target.value })} />
 
@@ -123,7 +146,7 @@ export function MilestoneEditor({
         </div>
       )}
       {d.metrics.map((mx, i) => (
-        <div key={mx.id} style={{ display: "grid", gridTemplateColumns: "1fr 62px 62px 62px 26px", gap: 6, alignItems: "end", marginBottom: 6 }}>
+        <div key={mx.id} style={{ display: "grid", gridTemplateColumns: "1fr 62px 62px 26px", gap: 6, alignItems: "end", marginBottom: 6 }}>
           <div>
             {i === 0 && <div style={{ fontSize: 11, color: C.dim, marginBottom: 3 }}>Metric</div>}
             <input style={inpStyle} value={mx.label} placeholder="e.g. Mapping accuracy" onChange={(e) => setMetric(i, { label: e.target.value })} />
@@ -135,10 +158,6 @@ export function MilestoneEditor({
           <div>
             {i === 0 && <div style={{ fontSize: 11, color: C.greenHi, marginBottom: 3 }}>Stretch ≥</div>}
             <input type="number" style={inpStyle} value={mx.stretch} onChange={(e) => setMetric(i, { stretch: num(e.target.value) })} />
-          </div>
-          <div>
-            {i === 0 && <div style={{ fontSize: 11, color: C.dim, marginBottom: 3 }}>Current</div>}
-            <input type="number" style={inpStyle} value={mx.current} onChange={(e) => setMetric(i, { current: num(e.target.value) })} />
           </div>
           <Tip label="Remove criterion">
             <button type="button" onClick={() => rmMetric(i)} aria-label="Remove criterion" className="vf-ghost" style={{ ...ghostBtn, width: 26, height: 32, padding: 0, justifyContent: "center", border: "1px solid transparent" }}>

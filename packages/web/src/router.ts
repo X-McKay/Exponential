@@ -15,6 +15,8 @@ export interface View {
   projectId: string | null;
   tab: ProjectTab;
   section: AgentsSection;
+  /** Referenced release, governance item or milestone within the tab. */
+  focusId?: string;
 }
 
 export const HOME: View = { page: "glance", projectId: null, tab: "overview", section: "agents" };
@@ -24,7 +26,8 @@ const isSection = (s: string): s is AgentsSection => (AGENTS_SECTIONS as readonl
 
 export const parseHash = (hash: string): View => {
   const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean);
-  const [head, a, b] = parts;
+  const [head, a, b, focus] = parts;
+  const decode = (value: string): string => { try { return decodeURIComponent(value); } catch { return value; } };
   switch (head) {
     case "inbox":
       return { ...HOME, page: "inbox" };
@@ -35,7 +38,7 @@ export const parseHash = (hash: string): View => {
     case "data":
       return { ...HOME, page: "data" };
     case "project":
-      if (a) return { ...HOME, page: "project", projectId: decodeURIComponent(a), tab: b && isTab(b) ? b : "overview" };
+      if (a) return { ...HOME, page: "project", projectId: decode(a), tab: b && isTab(b) ? b : "overview", ...(focus ? { focusId: decode(focus) } : {}) };
       return HOME;
     default:
       return HOME;
@@ -55,7 +58,7 @@ export const toHash = (v: View): string => {
     case "data":
       return "#/data";
     case "project":
-      return `#/project/${encodeURIComponent(v.projectId ?? "")}/${v.tab}`;
+      return `#/project/${encodeURIComponent(v.projectId ?? "")}/${v.tab}${v.focusId ? `/${encodeURIComponent(v.focusId)}` : ""}`;
   }
 };
 

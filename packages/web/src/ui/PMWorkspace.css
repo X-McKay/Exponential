@@ -1,0 +1,19 @@
+.vf-pm-workspace { display: grid; gap: 14px; min-width: 0; }
+.vf-pm-roles { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; border-bottom: 1px solid var(--vf-line); padding-bottom: 12px; }
+.vf-pm-roles button { padding: 8px 0 !important; font-size: 13px !important; border-bottom: 2px solid transparent !important; }
+.vf-pm-roles button[aria-pressed=true] { border-color: var(--vf-indigo-hi) !important; }
+.vf-pm-description { color: var(--vf-mut); font-size: 13px; line-height: 1.6; }
+.vf-pm-field { display: grid; gap: 6px; font-size: 12px; color: var(--vf-mut); min-width: 0; }
+.vf-pm-field textarea { min-height: 64px; resize: vertical; }
+.vf-pm-new { margin-top: 16px; border-top: 1px solid var(--vf-line); padding-top: 12px; font-size: 13px; }
+.vf-pm-new summary { cursor: pointer; color: var(--vf-mut); }
+.vf-pm-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap: 12px; align-items: end; margin-top: 12px; }
+.vf-pm-wide { grid-column: 1 / -1; }
+.vf-pm-heading { display: flex; justify-content: space-between; gap: 16px; margin: 20px 0 14px; font-size: 14px; line-height: 1.5; }
+.vf-pm-meta { color: var(--vf-dim); font-size: 11px; line-height: 1.6; margin-top: 4px; }
+.vf-pm-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
+.vf-pm-settings { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 14px; color: var(--vf-mut); font-size: 12px; }
+.vf-pm-commitment, .vf-pm-run { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--vf-line); font-size: 12px; }
+.vf-pm-run > div, .vf-pm-commitment > div { flex: 1; min-width: min(220px, 100%); overflow-wrap: anywhere; }
+.vf-pm-assessment { padding-bottom: 18px; max-height: 440px; overflow: auto; }
+.vf-pm-error { padding: 12px; border: 1px solid var(--vf-line); border-radius: 8px; color: var(--vf-red-hi); font-size: 12px; }

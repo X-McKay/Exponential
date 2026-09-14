@@ -127,6 +127,18 @@ export const AGENTS: Agent[] = [
     schedule: "nightly",
     prompt: null,
   },
+  {
+    id: "project-manager",
+    name: "Project Manager",
+    grad: "linear-gradient(135deg,#8B5CF0,#6254CE)",
+    purpose: "Reviews project health, proposes evidence-backed plans, and follows approved commitments",
+    kind: "audit",
+    model: null,
+    owner: "AM",
+    caps: ["Project assessment", "Blocker analysis", "Action planning", "Commitment follow-through", "Communications briefs"],
+    schedule: null,
+    prompt: null,
+  },
 ];
 
 /** The built-in conversational agent; installed on boot if missing. */

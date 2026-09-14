@@ -62,21 +62,32 @@ export function ReleaseEditor({
   releases: Release[];
   release: Release | null;
   cal: Calendar;
-  onSave: (rel: Release, isNew: boolean) => void;
-  onDelete?: (rid: string) => void;
+  onSave: (rel: Release, isNew: boolean) => Promise<unknown>;
+  onDelete?: (rid: string) => Promise<unknown>;
   onClose: () => void;
 }) {
   const isNew = release === null;
   const [d, setD] = useState<Release>(() => (release ? structuredClone(release) : blank(releases, cal)));
   const months = planningMonths(cal);
   const [confirmDel, setConfirmDel] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const set = (patch: Partial<Release>) => setD((x) => ({ ...x, ...patch }));
   const setCrit = (i: number, c: Criterion) => setD((x) => ({ ...x, criteria: x.criteria.map((y, yi) => (yi === i ? c : y)) }));
   const toggleMs = (mid: string) => setD((x) => ({ ...x, milestoneIds: x.milestoneIds.includes(mid) ? x.milestoneIds.filter((m) => m !== mid) : [...x.milestoneIds, mid] }));
 
   const valid = d.name.trim() !== "" && d.criteria.every((c) => c.label.trim() !== "" && (c.type === "gate" ? c.ms !== "" : c.type === "gov" ? c.gid !== "" : true));
-  const submit = () => {
-    if (valid) onSave({ ...d, name: d.name.trim(), criteria: d.criteria.map((c) => ({ ...c, label: c.label.trim() })) }, isNew);
+  const submit = async () => {
+    if (!valid || saving) return;
+    setSaving(true); setSaveError(null);
+    try { await onSave({ ...d, name: d.name.trim(), criteria: d.criteria.map((c) => ({ ...c, label: c.label.trim() })) }, isNew); }
+    catch (e) { setSaveError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
+  };
+  const remove = async () => {
+    if (!onDelete || saving) return;
+    setSaving(true); setSaveError(null);
+    try { await onDelete(d.id); } catch (e) { setSaveError(e instanceof Error ? e.message : String(e)); setSaving(false); }
   };
 
   const addCriterion = () => {
@@ -88,23 +99,24 @@ export function ReleaseEditor({
     <Modal
       title={isNew ? "New release" : `Edit ${d.id}`}
       onClose={onClose}
-      onSubmit={submit}
+      onSubmit={() => void submit()}
       footer={
         <>
           {!isNew && onDelete && (
             <span style={{ marginRight: "auto" }}>
-              <Btn tone="danger" onClick={() => (confirmDel ? onDelete(d.id) : setConfirmDel(true))}>
+              <Btn tone="danger" disabled={saving} onClick={() => (confirmDel ? void remove() : setConfirmDel(true))}>
                 {confirmDel ? "Confirm delete" : "Delete"}
               </Btn>
             </span>
           )}
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn tone="primary" disabled={!valid} onClick={submit}>
-            {isNew ? "Create release" : "Save changes"}
+          <Btn tone="primary" disabled={!valid || saving} onClick={() => void submit()}>
+            {saving ? "Saving…" : isNew ? "Create release" : "Save changes"}
           </Btn>
         </>
       }
     >
+      {saveError && <div role="alert" style={{ color: C.redHi, fontSize: 12, margin: "8px 0" }}>Could not save: {saveError}</div>}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 140px", gap: 10 }}>
         <div>
           <Lbl>Name</Lbl>

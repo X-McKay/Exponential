@@ -52,14 +52,29 @@ export interface MetricReading {
   source: "eval" | "manual";
 }
 
+/** Immutable definition/status fact captured whenever a milestone changes. */
+export interface MilestoneSnapshot {
+  /** Database sequence for deterministic ordering when timestamps tie. */
+  seq?: number;
+  at: string;
+  status: MilestoneStatus;
+  month: string;
+  impact: Impact;
+  metrics: Metric[];
+}
+
 export interface Milestone {
   id: string;
   name: string;
+  /** Creation instant when known; legacy rows may omit it. */
+  createdAt?: string | null;
   status: MilestoneStatus;
   /** Target (or shipped) month as `YYYY-MM`; see calendar.ts. */
   month: string;
   impact: Impact;
   metrics: Metric[];
+  /** Historical definitions captured by the server; absent for in-memory fixtures. */
+  snapshots?: MilestoneSnapshot[];
 }
 
 export interface GovernanceItem {
@@ -101,6 +116,8 @@ export interface Project {
   team: TeamMember[];
   targets: ImpactPair;
   milestones: Milestone[];
+  /** Retired milestone facts kept for historical derivations only. */
+  historicalMilestones?: Milestone[];
   governance: GovernanceItem[];
 }
 
@@ -438,6 +455,9 @@ export interface Proposal {
   state: ProposalState;
   createdAt: string;
   decidedAt: string | null;
+  /** Actor and mode for an accepted/dismissed decision, when recorded. */
+  decidedBy?: string | null;
+  decisionMode?: "human" | "automatic" | null;
 }
 
 // ---- feed & calendar ----------------------------------------------------
@@ -555,6 +575,8 @@ export interface AppState {
   agents: Agent[];
   /** Newest first, trailing RUN_WINDOW_DAYS. */
   runs: AgentRun[];
+  /** Usage-ledger view of this month's attempts, when a ledger has records. */
+  usageRuns?: AgentRun[];
   /** The configured model, or null when agents cannot run. */
   llm: LlmInfo | null;
   /** Pending proposals plus recently decided ones, newest first. */

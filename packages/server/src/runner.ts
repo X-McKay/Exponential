@@ -59,13 +59,13 @@ export interface Skipped {
 /**
  * Run every scheduled agent that is due. Project kinds run once per project;
  * the rest once. A run whose workspace, agent, or project budget is used up
- * is skipped (reported in `skipped`), so a schedule can never overspend.
+ * is skipped (reported in `skipped`), before work starts. Provider calls also reserve estimated capacity.
  */
 export const runDue = async (db: Database, llm: Llm, now: Date, options: RunnerOptions = {}, skipped: Skipped[] = []): Promise<AgentRun[]> => {
   const state = loadState(db, now);
   const out: AgentRun[] = [];
   const prices = llm.describe().prices;
-  /** Budgets are checked against the runs so far, including this tick's, so one tick cannot blow through a ceiling. */
+  /** Budgets are checked against the runs so far, including this tick's, with provider-call checks handling nested calls and reservations. */
   const allowed = (agentId: string, proj: string | null): boolean => {
     const reason = overBudget(loadState(db, now), prices, agentId, proj);
     if (reason) skipped.push({ agentId, proj, reason });

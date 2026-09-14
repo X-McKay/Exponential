@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { TIER_LABEL } from "@valueflow/domain";
 import type { MilestoneStatus, RiskTier } from "@valueflow/domain";
@@ -213,8 +213,8 @@ export const inpStyle: CSSProperties = {
   transition: "border-color .12s",
 };
 
-export function Lbl({ children }: { children: ReactNode }) {
-  return <div style={{ fontSize: 12, color: C.mut, margin: "12px 0 5px" }}>{children}</div>;
+export function Lbl({ children, htmlFor }: { children: ReactNode; htmlFor?: string }) {
+  return <label htmlFor={htmlFor} style={{ display: "block", fontSize: 12, color: C.mut, margin: "12px 0 5px" }}>{children}</label>;
 }
 
 const BTN = {
@@ -288,11 +288,29 @@ export function Modal({
   footer?: ReactNode;
   width?: number;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const restoreRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
   useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  useEffect(() => {
+    restoreRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    const first = dialogRef.current?.querySelector<HTMLElement>("input, select, textarea, button, [tabindex]:not([tabindex='-1'])");
+    first?.focus();
+    const onWindowKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCloseRef.current();
+      }
+    };
+    window.addEventListener("keydown", onWindowKeyDown);
     return () => {
+      window.removeEventListener("keydown", onWindowKeyDown);
       document.body.style.overflow = prev;
+      restoreRef.current?.focus();
     };
   }, []);
   const onKeyDown = (e: ReactKeyboardEvent) => {
@@ -309,11 +327,23 @@ export function Modal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        onKeyDown={onKeyDown}
+        onKeyDown={(e) => {
+          onKeyDown(e);
+          if (e.key === "Tab") {
+            const nodes = [...e.currentTarget.querySelectorAll<HTMLElement>("input, select, textarea, button, [tabindex]:not([tabindex='-1'])")].filter((x) => !x.hasAttribute("disabled"));
+            if (nodes.length) {
+              const first = nodes[0];
+              const last = nodes[nodes.length - 1];
+              if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+              else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+            }
+          }
+        }}
+        ref={dialogRef}
         className="vf-modal"
         role="dialog"
         aria-modal
-        aria-label={title}
+          aria-labelledby="vf-dialog-title"
         style={{
           width: "100%",
           maxWidth: width,
@@ -326,7 +356,7 @@ export function Modal({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 20px 0", position: "sticky", top: 0, background: C.raised, zIndex: 2 }}>
-          <span style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em" }}>{title}</span>
+          <span id="vf-dialog-title" style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em" }}>{title}</span>
           <Tip label="Close" keys={["esc"]}>
             <button type="button" onClick={onClose} aria-label="Close" className="vf-ghost" style={{ ...ghostBtn, width: 26, padding: 0, justifyContent: "center", border: "1px solid transparent" }}>
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">

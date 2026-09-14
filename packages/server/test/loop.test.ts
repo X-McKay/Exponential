@@ -81,19 +81,18 @@ describe("standing rules", () => {
     expect(ruleStats({ id: "rule-2" }, props)).toMatchObject({ fired: 1, pending: 1, acceptanceRate: null, earnedAutonomy: false });
   });
 
-  test("a rule that earned autonomy applies its proposal at once; a project with no applicable rules is refused", async () => {
+  test("an unearned rule cannot enable autonomy; a project with no applicable rules is refused", async () => {
     const llm = fakeLlm(RULES_REPLY);
     const { db, call } = appWith(llm);
     const put = await call<Rule>("PUT", routes.rule("rule-2"), { text: "If a runbook is complete, approve the SLA.", proj: "ima", enabled: true, auto: true, owner: "RS" });
-    expect(put.status).toBe(200);
-    expect(put.body.auto).toBe(true);
+    expect(put.status).toBe(409);
     const run = await runAgent(db, llm, { agentId: "sentry", proj: "ima" }, NOW);
     const state = loadState(db, NOW);
     const p = state.proposals.find((x) => x.runId === run.id);
-    expect(p?.state).toBe("accepted");
-    expect(state.projects.find((x) => x.id === "ima")?.governance.find((g) => g.id === "sla")?.status).toBe("approved");
+    expect(p?.state).toBe("pending");
+    expect(state.projects.find((x) => x.id === "ima")?.governance.find((g) => g.id === "sla")?.status).not.toBe("approved");
     // Disable every rule for sector and the agent has nothing to check there.
-    for (const r of state.rules) if (r.id !== "rule-2") await call("PUT", routes.rule(r.id), { text: r.text, proj: r.proj, enabled: false, auto: false, owner: r.owner });
+    for (const r of state.rules) await call("PUT", routes.rule(r.id), { text: r.text, proj: r.proj, enabled: false, auto: false, owner: r.owner });
     const refused = await call<{ error: string }>("POST", routes.agentRuns("sentry"), { proj: "sector" });
     expect(refused.status).toBe(409);
     expect(refused.body.error).toContain("no enabled standing rules");
@@ -337,6 +336,6 @@ describe("weekly brief", () => {
     const state = loadState(db, NOW);
     const coach = state.agents.find((a) => a.kind === "tuner")!;
     const runs = await runAny(db, fakeLlm(() => JSON.stringify({ analysis: "fine", prompt: "", change: "" })), { agentId: coach.id }, NOW);
-    expect(runs.map((r) => r.instruction)).toEqual(["Tune Slider", "Tune Comma", "Tune Nova", "Tune Audie", "Tune Ask", "Tune Sentry", "Tune Monday"]);
+    expect(runs.map((r) => r.instruction)).toEqual(["Tune Slider", "Tune Comma", "Tune Nova", "Tune Audie", "Tune Ask", "Tune Sentry", "Tune Monday", "Tune Project Manager"]);
   });
 });

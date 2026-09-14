@@ -43,8 +43,12 @@ export const metricLevel = (x: Pick<Metric, "current" | "base" | "stretch">): Me
 export const tierOf = (m: Milestone): GateTier => {
   if (!isMeasurable(m)) return 0;
   if (m.metrics.length === 0) return 0;
-  if (m.metrics.every((x) => x.current >= x.stretch)) return 2;
-  if (m.metrics.every((x) => x.current >= x.base)) return 1;
+  // A zero value with no recorded reading is unknown, even when a gate is
+  // configured at zero. Legacy in-memory fixtures omit readAt and remain
+  // supported; server state uses null to mean no evidence exists.
+  const measured = (x: Metric): boolean => x.readAt !== null;
+  if (m.metrics.every((x) => measured(x) && x.current >= x.stretch)) return 2;
+  if (m.metrics.every((x) => measured(x) && x.current >= x.base)) return 1;
   return 0;
 };
 
@@ -62,8 +66,13 @@ export const impactOf = (m: Milestone, d: Dim): number => {
 };
 
 /** Value realized = shipped milestones' gated impact, summed. */
-export const realized = (p: Pick<Project, "milestones">, d: Dim): number =>
+/** Value eligible after a shipped milestone clears its configured gate.
+ * This is delivery eligibility, not an observed business outcome. */
+export const eligible = (p: Pick<Project, "milestones">, d: Dim): number =>
   p.milestones.reduce((a, m) => a + (m.status === "shipped" ? impactOf(m, d) : 0), 0);
+
+/** @deprecated Use eligible; no observed-benefit fact is stored yet. */
+export const realized = eligible;
 
 /** Fraction of a milestone's stretch gates attained, averaged (0 when it has no metrics). */
 export const attainment = (m: Pick<Milestone, "metrics">): number =>
@@ -127,7 +136,7 @@ export const evalCriterion = (c: Criterion, p: Pick<Project, "milestones" | "gov
   }
 };
 
-export type ReleaseLabel = "Shipped" | "Ready" | "Blocked" | "At risk";
+export type ReleaseLabel = "Shipped" | "Ready" | "Blocked" | "At risk" | "Not configured";
 export type ReleaseTone = "good" | "warn" | "bad";
 
 export interface ReleaseState {
@@ -143,38 +152,77 @@ export const releaseState = (rel: Release, p: Pick<Project, "milestones" | "gove
   const evals = rel.criteria.map((c) => evalCriterion(c, p));
   const met = evals.filter((e) => e.ok).length;
   const total = rel.criteria.length;
-  const allMet = met === total;
-  const tone: ReleaseTone = allMet ? "good" : met >= total / 2 ? "warn" : "bad";
-  const label: ReleaseLabel = allMet ? (rel.month <= cal.todayYm ? "Shipped" : "Ready") : rel.month <= addMonths(cal.todayYm, 1) ? "Blocked" : "At risk";
+  const allMet = total > 0 && met === total;
+  const tone: ReleaseTone = total === 0 ? "warn" : allMet ? "good" : met >= total / 2 ? "warn" : "bad";
+  // A planned month and passing gates establish readiness only. Shipment is a
+  // separate deployment fact and is therefore never inferred here.
+  const label: ReleaseLabel = total === 0 ? "Not configured" : allMet ? "Ready" : rel.month <= addMonths(cal.todayYm, 1) ? "Blocked" : "At risk";
   return { evals, met, total, tone, label };
 };
 
 export const nextRelease = (releases: Release[], cal: Pick<Calendar, "todayYm">): Release | undefined =>
-  releases.find((r) => r.month > cal.todayYm);
+  releases.filter((r) => r.month > cal.todayYm).sort((a, b) => a.month.localeCompare(b.month))[0];
 
 // ---- time series --------------------------------------------------------
 
 export interface BurnupSeries {
-  /** Realized value per month; flat after today. */
-  real: number[];
+  /** Eligible value per month; flat after today. Null means historical evidence is unknown. */
+  real: (number | null)[];
   /** Committed (base gates) per month from today onward; null before today. */
   com: (number | null)[];
-  /** Stretch ceiling per month. */
-  ceil: number[];
+  /** Stretch ceiling per month; historical values are null without snapshots. */
+  ceil: (number | null)[];
 }
 
 /** One value per month on the calendar axis. */
-export const burnupSeries = (milestones: Milestone[], dim: Dim, cal: Calendar): BurnupSeries => {
+export const burnupSeries = (milestones: Milestone[], dim: Dim, cal: Calendar, historicalMilestones: Milestone[] = []): BurnupSeries => {
   const { months, today, todayYm } = cal;
-  const real = months.map((ym) =>
-    milestones.reduce((a, m) => a + (m.status === "shipped" && m.month <= (ym < todayYm ? ym : todayYm) ? impactOf(m, dim) : 0), 0),
-  );
+  // Retired milestones contribute only to historical points. Keeping them in
+  // a separate argument preserves current eligibility and committed totals.
+  const historicalPool = [...milestones, ...historicalMilestones];
+  const archivedIds = new Set(historicalMilestones.map((m) => m.id));
+  // undefined means historical evidence is unknown; null means the milestone
+  // did not exist yet and therefore contributes a known zero.
+  const snapshotAt = (m: Milestone, ym: string): Milestone | null | undefined => {
+    // A month's historical value includes evidence recorded on any day in
+    // that month, so the cutoff is the final instant before the next month.
+    const at = new Date(`${addMonths(ym, 1)}-01T00:00:00.000Z`).getTime() - 1;
+    const snapshots = m.snapshots
+      ?.filter((s) => new Date(s.at).getTime() <= at)
+      .sort((a, b) => a.at.localeCompare(b.at) || (a.seq ?? 0) - (b.seq ?? 0));
+    const s = snapshots?.at(-1);
+    if (s) return { ...m, status: s.status, month: s.month, impact: s.impact, metrics: s.metrics };
+    return m.createdAt && new Date(m.createdAt).getTime() > at ? null : undefined;
+  };
+  const real: (number | null)[] = months.map((ym) => {
+    let value = 0;
+    for (const m of historicalPool) {
+      if (ym >= todayYm && archivedIds.has(m.id)) continue;
+      // There is no honest zero for a pre-upgrade milestone without a
+      // timestamped snapshot: its historical contribution is unknown.
+      const historical = ym < todayYm ? snapshotAt(m, ym) : m;
+      if (historical === undefined) return null;
+      if (historical === null) continue;
+      if (historical.status === "shipped" && historical.month <= (ym < todayYm ? ym : todayYm)) value += impactOf(historical, dim);
+    }
+    return value;
+  });
   const realToday = real[today] ?? 0;
   const com = months.map((ym, t) => {
     if (t < today) return null;
     return realToday + milestones.reduce((a, m) => a + (m.status !== "shipped" && m.month <= ym ? m.impact.base[dim] : 0), 0);
   });
-  const ceil = months.map((ym) => milestones.reduce((a, m) => a + (m.month <= ym ? m.impact.stretch[dim] : 0), 0));
+  const ceil: (number | null)[] = months.map((ym) => {
+    let value = 0;
+    for (const m of historicalPool) {
+      if (ym >= todayYm && archivedIds.has(m.id)) continue;
+      const historical = ym < todayYm ? snapshotAt(m, ym) : m;
+      if (historical === undefined) return null;
+      if (historical === null) continue;
+      if (historical.month <= ym) value += historical.impact.stretch[dim];
+    }
+    return value;
+  });
   return { real, com, ceil };
 };
 

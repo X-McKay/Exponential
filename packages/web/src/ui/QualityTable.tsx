@@ -75,7 +75,7 @@ export function QualityTable({
   onToggle: (id: string | null) => void;
   onBenchmark: (agentId: string) => void;
   onScout: (agentId: string) => void;
-  onSetPrompt: (agentId: string, prompt: string | null) => void;
+  onSetPrompt: (agentId: string, prompt: string | null) => Promise<unknown>;
   onTune: (agentId: string) => void;
 }) {
   const cards = new Map<string, AgentScorecard>(agents.map((a) => [a.id, agentScorecard(a, runs, scores, proposals, asOf)]));
@@ -169,7 +169,7 @@ export function QualityTable({
                     <td colSpan={11} style={{ padding: "0 14px 6px 36px", background: C.panel2, borderTop: `1px solid ${C.line}` }}>
                       <AgentQuality
                         agent={a}
-                        currentVersion={a.kind === "scout" ? null : promptVersion(a.kind, a.prompt)}
+                        currentVersion={a.kind === "scout" ? null : promptVersion(a.kind, a.prompt, a.id)}
                         runs={runs}
                         scores={scores}
                         versions={versions}

@@ -37,29 +37,36 @@ export function JsonDocEditor<T>({
   help?: string;
   value: unknown;
   schema: DocSchema<T>;
-  onSave: (doc: T) => void;
+  onSave: (doc: T) => Promise<unknown>;
   onClose: () => void;
 }) {
   const [text, setText] = useState(() => JSON.stringify(value, null, 2));
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const result = useMemo(() => check(text, schema), [text, schema]);
-  const submit = () => {
-    if (result.ok) onSave(result.data);
+  const submit = async () => {
+    if (!result.ok || saving) return;
+    setSaving(true); setSaveError(null);
+    try { await onSave(result.data); }
+    catch (e) { setSaveError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
   };
   return (
     <Modal
       title={title}
       onClose={onClose}
-      onSubmit={submit}
+      onSubmit={() => void submit()}
       footer={
         <>
           <span style={{ marginRight: "auto", fontSize: 12, color: result.ok ? C.green : C.dim }}>{result.ok ? "Valid" : `${result.errors.length} problem${result.errors.length === 1 ? "" : "s"}`}</span>
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn tone="primary" disabled={!result.ok} onClick={submit}>
-            Save
+          <Btn tone="primary" disabled={!result.ok || saving} onClick={() => void submit()}>
+            {saving ? "Saving…" : "Save"}
           </Btn>
         </>
       }
     >
+      {saveError && <div role="alert" style={{ color: C.redHi, fontSize: 12, margin: "8px 0" }}>Could not save: {saveError}</div>}
       {help && <div style={{ fontSize: 12, color: C.mut, lineHeight: 1.55, margin: "8px 0 10px" }}>{help}</div>}
       <textarea
         value={text}
