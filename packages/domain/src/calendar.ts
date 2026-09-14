@@ -83,6 +83,19 @@ export const calendarFor = (asOf: Date | string, anchors: readonly YearMonth[] =
   return { months, today: monthsBetween(first, todayYm), todayYm, asOf: iso };
 };
 
+/**
+ * Axis covering exactly `first`..`last`, with no padding around today. Today
+ * may fall outside it: `today` is then negative or `months.length` or more.
+ */
+export const calendarBetween = (first: YearMonth, last: YearMonth, asOf: Date | string): Calendar => {
+  const iso = typeof asOf === "string" ? asOf : asOf.toISOString();
+  const todayYm = ymOf(iso);
+  const [lo, hi] = first <= last ? [first, last] : [last, first];
+  const months: YearMonth[] = [];
+  for (let ym = lo; ym <= hi; ym = addMonths(ym, 1)) months.push(ym);
+  return { months, today: monthsBetween(lo, todayYm), todayYm, asOf: iso };
+};
+
 /** Every planned month in the state, for widening the axis. */
 export const plannedMonths = (state: Pick<AppState, "projects" | "releases">): YearMonth[] => [
   ...state.projects.flatMap((p) => p.milestones.map((m) => m.month)),

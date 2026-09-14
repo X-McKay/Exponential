@@ -4,8 +4,8 @@
 // status + metric readings against gates; release readiness is always derived
 // from live criteria references. Nothing in this module has side effects.
 
-import { addMonths } from "./calendar.ts";
-import type { Calendar } from "./calendar.ts";
+import { addMonths, calendarBetween, ymOf } from "./calendar.ts";
+import type { Calendar, YearMonth } from "./calendar.ts";
 import { GSTATUS_LABEL } from "./labels.ts";
 import type {
   Criterion,
@@ -63,6 +63,50 @@ export const impactOf = (m: Milestone, d: Dim): number => {
     case 0:
       return 0;
   }
+};
+
+/** Lead time assumed for a milestone with no recorded creation instant or history. */
+export const DEFAULT_LEAD_MONTHS = 3;
+
+/**
+ * Month a milestone's work is taken to have started, so the roadmap can draw
+ * it as a span rather than a point. The earliest evidence wins: the oldest
+ * snapshot, else the creation instant, else a fixed lead before the target.
+ * Always before the target month, so every span is at least one month.
+ */
+export const milestoneStart = (m: Pick<Milestone, "month" | "createdAt" | "snapshots">): YearMonth => {
+  const seen: YearMonth[] = (m.snapshots ?? []).map((s) => ymOf(s.at));
+  if (m.createdAt) seen.push(ymOf(m.createdAt));
+  // Evidence from the target month onwards (a backfilled record, a late
+  // snapshot) says nothing about when the work began.
+  const before = seen.filter((ym) => ym < m.month);
+  return before.length ? before.reduce((a, b) => (b < a ? b : a)) : addMonths(m.month, -DEFAULT_LEAD_MONTHS);
+};
+
+/** Earliest start among `milestones`, or `fallback` when it is earlier or there are none. */
+export const earliestStart = (milestones: readonly Pick<Milestone, "month" | "createdAt" | "snapshots">[], fallback: YearMonth): YearMonth =>
+  milestones.reduce((a, m) => {
+    const s = milestoneStart(m);
+    return s < a ? s : a;
+  }, fallback);
+
+/** Months a release spans on the roadmap: from its earliest milestone's start to the month it ships. */
+export const releaseSpan = (rel: Pick<Release, "month" | "milestoneIds">, p: Pick<Project, "milestones">): { start: YearMonth; end: YearMonth } => ({
+  start: earliestStart(p.milestones.filter((m) => rel.milestoneIds.includes(m.id)), rel.month),
+  end: rel.month,
+});
+
+/**
+ * Axis for the roadmap: only the months where work is planned, from the
+ * earliest bar start to the latest target or ship month, so the chart has no
+ * empty space before or after. Falls back to `cal` when nothing is planned.
+ */
+export const roadmapCalendar = (p: Pick<Project, "milestones">, releases: readonly Pick<Release, "month" | "milestoneIds">[], cal: Calendar): Calendar => {
+  const ends = [...p.milestones.map((m) => m.month), ...releases.map((r) => r.month)];
+  if (ends.length === 0) return cal;
+  const last = ends.reduce((a, b) => (b > a ? b : a));
+  const first = earliestStart(p.milestones, releases.reduce((a, r) => (r.month < a ? r.month : a), last));
+  return calendarBetween(first, last, cal.asOf);
 };
 
 /** Value eligible after a shipped milestone clears its configured gate.
