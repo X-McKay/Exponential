@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { earliestStart, isMeasurable, milestoneStart, monthIndex, monthLabel, releaseSpan, roadmapCalendar, STATUS_LABEL, tierOf } from "@valueflow/domain";
 import type { Calendar, Milestone, Project, Release, ReleaseState, YearMonth } from "@valueflow/domain";
 import { C, STATUS_COLOR, releaseToneColor } from "../theme.ts";
@@ -9,8 +9,9 @@ import { C, STATUS_COLOR, releaseToneColor } from "../theme.ts";
 // ending in a diamond coloured by the gate tier it has cleared. Names sit
 // directly above their own bar so the timeline gets the full width. The axis
 // covers only the months where work is planned. Clicking a release selects
-// it; double-clicking (or Space) folds its milestones into the release bar as
-// diamonds.
+// it; double-clicking it, clicking its caret, or pressing Space folds its
+// milestones into the release bar as diamonds. Selection must not scroll the
+// chart, or the second click of a double-click lands somewhere else.
 
 const W = 1080;
 const X0 = 16;
@@ -62,6 +63,24 @@ const gateDotColor = (m: Milestone): string => {
   }
 };
 
+/** Fold toggle drawn beside a group's name; a single click folds without selecting. */
+function Caret({ d, x, y, open, onToggle }: { d: string; x: number; y: number; open: boolean; onToggle: () => void }) {
+  return (
+    <g
+      style={{ cursor: "pointer" }}
+      aria-label={open ? "Fold milestones" : "Expand milestones"}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      <rect x={x - 6} y={y - 22} width={20} height={20} fill="transparent" />
+      <path d={d} fill="none" stroke={C.dim} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </g>
+  );
+}
+
 /** Target marker: filled once the milestone is being measured, hollow before. */
 function Target({ x, y, m, size }: { x: number; y: number; m: Milestone; size: number }) {
   return <Diamond x={x} y={y} size={size} color={gateDotColor(m)} hollow={!isMeasurable(m)} />;
@@ -101,22 +120,6 @@ export function RoadmapTimeline({
       else next.add(key);
       return next;
     });
-  // A double-click is preceded by two clicks. Selecting a release scrolls the
-  // page to its card, so a click only selects once it is clear no second click
-  // is coming; a double-click cancels it and folds instead.
-  const pendingPick = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cancelPick = () => {
-    if (pendingPick.current) clearTimeout(pendingPick.current);
-    pendingPick.current = null;
-  };
-  useEffect(() => cancelPick, []);
-  const pickSoon = (id: string) => {
-    cancelPick();
-    pendingPick.current = setTimeout(() => {
-      pendingPick.current = null;
-      onPick(id);
-    }, 220);
-  };
 
   const byMonth = (a: Milestone, b: Milestone) => (a.month < b.month ? -1 : a.month > b.month ? 1 : 0);
   const loose = p.milestones.filter((m) => !releases.some((r) => r.milestoneIds.includes(m.id))).sort(byMonth);
@@ -221,7 +224,7 @@ export function RoadmapTimeline({
             }}
           >
             <rect x={X0} y={top} width={W - X0 - XR} height={gh} rx="6" fill={C.panel2} opacity="0.35" />
-            <path d={caret} fill="none" stroke={C.dim} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            <Caret d={caret} x={lx} y={barY} open={open} onToggle={() => toggle(g.key)} />
             <text x={lx + 16} y={barY - 7} fontSize="12" fontWeight="600" fill={C.mut}>
               Not in a release
               <tspan dx="8" fontSize="10.5" fontWeight="400" fill={C.dim}>
@@ -249,14 +252,13 @@ export function RoadmapTimeline({
           tabIndex={0}
           aria-pressed={selected}
           aria-expanded={open}
-          aria-label={`Release ${r.id} ${r.name}, ${st?.label ?? ""}, ${count}. Enter selects; double-click or Space ${open ? "folds" : "expands"} its milestones.`}
+          aria-label={`Release ${r.id} ${r.name}, ${st?.label ?? ""}, ${count}. Enter selects; Space ${open ? "folds" : "expands"} its milestones.`}
           style={{ cursor: "pointer" }}
           onClick={(e) => {
-            if (e.detail <= 1) pickSoon(r.id);
+            if (e.detail <= 1) onPick(r.id);
           }}
           onDoubleClick={(e) => {
             e.preventDefault();
-            cancelPick();
             toggle(g.key);
           }}
           onKeyDown={(e) => {
@@ -277,7 +279,7 @@ export function RoadmapTimeline({
             </linearGradient>
           </defs>
           <rect x={X0} y={top} width={W - X0 - XR} height={gh} rx="6" fill={C.panel2} opacity={selected ? 0.9 : open ? 0.45 : 0.3} stroke={selected ? C.line2 : "none"} />
-          <path d={caret} fill="none" stroke={C.dim} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          <Caret d={caret} x={lx} y={barY} open={open} onToggle={() => toggle(g.key)} />
           <Diamond x={lx + 18} y={barY - 11} size={4.5} color={tone} />
           <text x={lx + 28} y={barY - 7} fontSize="12" fontWeight="600" fill={C.text}>
             {r.id}
