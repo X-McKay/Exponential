@@ -71,6 +71,7 @@
           export HOME=$TMPDIR
           tar -C ${nodeModules} -cf - . | tar -xf -
           chmod -R u+w node_modules packages
+          patchShebangs node_modules
         '';
 
         # Production bundle + server, runnable as `exponential`.
