@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { earliestStart, isMeasurable, milestoneStart, monthIndex, monthLabel, releaseSpan, roadmapCalendar, STATUS_LABEL, tierOf } from "@valueflow/domain";
 import type { Calendar, Milestone, Project, Release, ReleaseState, YearMonth } from "@valueflow/domain";
 import { C, STATUS_COLOR, releaseToneColor } from "../theme.ts";
@@ -101,6 +101,22 @@ export function RoadmapTimeline({
       else next.add(key);
       return next;
     });
+  // A double-click is preceded by two clicks. Selecting a release scrolls the
+  // page to its card, so a click only selects once it is clear no second click
+  // is coming; a double-click cancels it and folds instead.
+  const pendingPick = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelPick = () => {
+    if (pendingPick.current) clearTimeout(pendingPick.current);
+    pendingPick.current = null;
+  };
+  useEffect(() => cancelPick, []);
+  const pickSoon = (id: string) => {
+    cancelPick();
+    pendingPick.current = setTimeout(() => {
+      pendingPick.current = null;
+      onPick(id);
+    }, 220);
+  };
 
   const byMonth = (a: Milestone, b: Milestone) => (a.month < b.month ? -1 : a.month > b.month ? 1 : 0);
   const loose = p.milestones.filter((m) => !releases.some((r) => r.milestoneIds.includes(m.id))).sort(byMonth);
@@ -235,9 +251,12 @@ export function RoadmapTimeline({
           aria-expanded={open}
           aria-label={`Release ${r.id} ${r.name}, ${st?.label ?? ""}, ${count}. Enter selects; double-click or Space ${open ? "folds" : "expands"} its milestones.`}
           style={{ cursor: "pointer" }}
-          onClick={() => onPick(r.id)}
+          onClick={(e) => {
+            if (e.detail <= 1) pickSoon(r.id);
+          }}
           onDoubleClick={(e) => {
             e.preventDefault();
+            cancelPick();
             toggle(g.key);
           }}
           onKeyDown={(e) => {

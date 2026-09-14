@@ -30,6 +30,8 @@ The database stores facts rather than computed readiness, tiers, release state, 
 
 SQLite runs with foreign keys and WAL mode. Migrations are additive and idempotent. Retired metrics and milestones retain history; explicit project deletion removes the project and its child records.
 
+The roadmap draws milestones and releases as spans, but only target and ship months are stored. A milestone's start is derived from its oldest snapshot or its creation instant when either precedes the target month, otherwise from a fixed lead; a release spans from its earliest milestone start to its ship month, and the axis covers only the months with planned work.
+
 ## Shared editing and identity
 
 The user and role selectors provide request attribution and workflow modes while authentication is deferred. Selection is tab-local. The server resolves an actor for each request and stores successful mutation history; it does not establish verified identity.
