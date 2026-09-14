@@ -7,6 +7,9 @@ import {
   impactOf,
   isMeasurable,
   metricLevel,
+  milestoneStart,
+  releaseSpan,
+  roadmapCalendar,
   nextMilestoneId,
   nextRelease,
   readiness,
@@ -266,5 +269,52 @@ describe("nextMilestoneId", () => {
     expect(nextMilestoneId(project("onboarding"))).toBe("MS-17");
     expect(nextMilestoneId({ milestones: [] })).toBe("MS-1");
     expect(nextMilestoneId({ milestones: [ms({ id: "weird" })] })).toBe("MS-1");
+  });
+});
+
+describe("milestoneStart", () => {
+  test("falls back to a fixed lead before the target", () => {
+    expect(milestoneStart(ms({ month: "2026-09" }))).toBe("2026-06");
+  });
+  test("uses the creation month when known", () => {
+    expect(milestoneStart(ms({ month: "2026-09", createdAt: "2026-02-10T09:00:00.000Z" }))).toBe("2026-02");
+  });
+  test("prefers the oldest snapshot over creation", () => {
+    const snap = { at: "2025-12-01T00:00:00.000Z", status: "backlog" as const, month: "2026-09", impact: ms().impact, metrics: [] };
+    expect(milestoneStart(ms({ month: "2026-09", createdAt: "2026-02-10T09:00:00.000Z", snapshots: [snap] }))).toBe("2025-12");
+  });
+  test("ignores evidence from the target month onwards and uses the lead instead", () => {
+    expect(milestoneStart(ms({ month: "2026-03", createdAt: "2026-07-01T00:00:00.000Z" }))).toBe("2025-12");
+    expect(milestoneStart(ms({ month: "2026-03", createdAt: "2026-03-02T00:00:00.000Z" }))).toBe("2025-12");
+  });
+});
+
+describe("releaseSpan", () => {
+  test("runs from the earliest linked milestone start to the ship month", () => {
+    const p = { milestones: [ms({ id: "A", month: "2026-05", createdAt: "2026-01-15T00:00:00.000Z" }), ms({ id: "B", month: "2026-08" }), ms({ id: "C", month: "2026-02", createdAt: "2025-06-01T00:00:00.000Z" })] };
+    expect(releaseSpan({ month: "2026-08", milestoneIds: ["A", "B"] }, p)).toEqual({ start: "2026-01", end: "2026-08" });
+  });
+  test("collapses to the ship month with no linked milestones", () => {
+    expect(releaseSpan({ month: "2026-11", milestoneIds: [] }, { milestones: [] })).toEqual({ start: "2026-11", end: "2026-11" });
+  });
+});
+
+describe("roadmapCalendar", () => {
+  test("covers exactly the planned months, from the earliest start to the latest ship month", () => {
+    const p = { milestones: [ms({ id: "A", month: "2026-05", createdAt: "2026-01-15T00:00:00.000Z" }), ms({ id: "B", month: "2026-10" })] };
+    const rc = roadmapCalendar(p, [{ month: "2026-12", milestoneIds: ["B"] }], cal);
+    expect(rc.months[0]).toBe("2026-01");
+    expect(rc.months[rc.months.length - 1]).toBe("2026-12");
+    expect(rc.months).toHaveLength(12);
+    expect(rc.today).toBe(8);
+    expect(rc.todayYm).toBe(cal.todayYm);
+  });
+  test("places today outside the axis when no work is planned around it", () => {
+    const rc = roadmapCalendar({ milestones: [ms({ month: "2027-03", createdAt: "2027-01-01T00:00:00.000Z" })] }, [], cal);
+    expect(rc.months).toEqual(["2027-01", "2027-02", "2027-03"]);
+    expect(rc.today).toBeLessThan(0);
+  });
+  test("falls back to the app calendar when nothing is planned", () => {
+    expect(roadmapCalendar({ milestones: [] }, [], cal)).toBe(cal);
   });
 });

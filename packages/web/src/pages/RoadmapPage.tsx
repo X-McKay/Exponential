@@ -67,22 +67,21 @@ export function RoadmapPage({
   return (
     <div style={{ padding: "16px 20px 30px" }}>
       <SectionCard title="Roadmap" pad="10px 8px 4px">
-        <div style={{ fontSize: 11, color: C.dim, margin: "0 8px 8px" }}>Target months for releases and milestones. Select a release to open its details below.</div>
+        <div style={{ fontSize: 11, color: C.dim, margin: "0 8px 8px" }}>The axis covers only the months with planned work. Each release spans from its first milestone's start to the month it ships. Click a release to open its details below; double-click it to fold its milestones into the bar.</div>
         <RoadmapTimeline p={p} releases={releases} states={states} onPick={selectRelease} picked={picked} cal={cal} />
         <div style={{ display: "flex", gap: 16, padding: "6px 8px 8px", fontSize: 11, color: C.dim, flexWrap: "wrap" }}>
           <span>
-            <span style={{ color: C.green }}>◆</span> ready
+            release tail: <span style={{ color: C.green }}>◆</span> ready <span style={{ color: C.amber }}>◆</span> at risk <span style={{ color: C.red }}>◆</span> blocked
           </span>
           <span>
-            <span style={{ color: C.amber }}>◆</span> at risk
+            milestone bar: <span style={{ color: C.green }}>▬</span> shipped <span style={{ color: C.indigoHi }}>▬</span> in eval <span style={{ color: C.amber }}>▬</span> in progress{" "}
+            <span style={{ color: C.backlog }}>▬</span> backlog
           </span>
           <span>
-            <span style={{ color: C.red }}>◆</span> blocked
+            target: <span style={{ color: C.green }}>◆</span> stretch <span style={{ color: C.indigo }}>◆</span> base <span style={{ color: C.amber }}>◆</span> below{" "}
+            <span style={{ color: C.dim }}>◇</span> unmeasured
           </span>
-          <span>
-            target dot: <span style={{ color: C.green }}>●</span> stretch <span style={{ color: C.indigo }}>●</span> base <span style={{ color: C.amber }}>●</span> below{" "}
-            <span style={{ color: C.dim }}>●</span> unmeasured
-          </span>
+          <span>hatched: after today</span>
         </div>
       </SectionCard>
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
