@@ -13,6 +13,9 @@ const blank = (project: Project, cal: Calendar): Milestone => ({
   name: "",
   status: "backlog",
   month: addMonths(cal.todayYm, 2),
+  plannedStart: null,
+  plannedEnd: null,
+  dependsOn: [],
   impact: { base: { fte: 5, time: 5 }, stretch: { fte: 8, time: 8 } },
   metrics: [],
 });
@@ -44,7 +47,9 @@ export function MilestoneEditor({
   const setMetric = (i: number, patch: Partial<Metric>) => setD((x) => ({ ...x, metrics: x.metrics.map((m, mi) => (mi === i ? { ...m, ...patch } : m)) }));
   const addMetric = () => setD((x) => ({ ...x, metrics: [...x.metrics, { id: `m${Date.now() % 100000}`, label: "", base: 80, stretch: 95, current: 0 }] }));
   const rmMetric = (i: number) => setD((x) => ({ ...x, metrics: x.metrics.filter((_, mi) => mi !== i) }));
-  const valid = d.name.trim().length > 0 && d.metrics.every((m) => m.label.trim().length > 0);
+  const toggleDependency = (id: string) => setD((x) => ({ ...x, dependsOn: (x.dependsOn ?? []).includes(id) ? (x.dependsOn ?? []).filter((mid) => mid !== id) : [...(x.dependsOn ?? []), id] }));
+  const scheduleValid = !d.plannedStart || !d.plannedEnd || d.plannedStart <= d.plannedEnd;
+  const valid = d.name.trim().length > 0 && scheduleValid && d.metrics.every((m) => m.label.trim().length > 0);
   const submit = async () => {
     if (!valid || saving) return;
     setSaving(true);
@@ -122,6 +127,32 @@ export function MilestoneEditor({
             ))}
           </select>
         </div>
+      </div>
+
+      <Lbl>Schedule</Lbl>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 11, color: C.dim, marginBottom: 3 }}>Planned start</div>
+          <input type="date" style={inpStyle} value={d.plannedStart ?? ""} onChange={(e) => set({ plannedStart: e.target.value || null })} />
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: C.dim, marginBottom: 3 }}>Planned end</div>
+          <input type="date" style={inpStyle} value={d.plannedEnd ?? ""} onChange={(e) => set({ plannedEnd: e.target.value || null })} />
+        </div>
+      </div>
+      {!scheduleValid && <div role="alert" style={{ color: C.redHi, fontSize: 11, marginTop: 5 }}>Planned end must be on or after planned start.</div>}
+      <div style={{ fontSize: 11, color: C.dim, marginTop: 5 }}>The roadmap draws a duration bar only from explicit dates. Without them, it shows the target marker.</div>
+
+      <Lbl>Depends on</Lbl>
+      <div role="group" aria-label="Milestone dependencies" style={{ display: "grid", gap: 5, background: C.inset, border: `1px solid ${C.line}`, borderRadius: 8, padding: 8 }}>
+        {project.milestones.filter((m) => m.id !== d.id).map((m) => (
+          <label key={m.id} style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 28, fontSize: 12, color: C.mut }}>
+            <input type="checkbox" checked={(d.dependsOn ?? []).includes(m.id)} onChange={() => toggleDependency(m.id)} />
+            <span style={{ color: C.dim, width: 42 }}>{m.id}</span>
+            <span>{m.name}</span>
+          </label>
+        ))}
+        {project.milestones.length <= 1 && <span style={{ color: C.dim, fontSize: 12 }}>No other milestones are available.</span>}
       </div>
 
       <Lbl>Value impact — reduction contributed when the gate clears</Lbl>

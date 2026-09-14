@@ -76,11 +76,37 @@ describe("projects", () => {
     expect(state.projects.map((p) => p.id)).toEqual(["ima", "sector"]);
     expect(state.releases.onboarding).toBeUndefined();
     expect(state.dev.onboarding).toBeUndefined();
-    for (const table of ["milestones", "metrics", "metric_readings", "governance_items", "releases", "release_criteria", "team_members", "project_repos"]) {
+    for (const table of ["milestones", "milestone_dependencies", "metrics", "metric_readings", "governance_items", "releases", "release_criteria", "team_members", "project_repos"]) {
       const n = app.db.query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM ${table} WHERE project_id = 'onboarding'`).get()?.n;
       expect(n).toBe(0);
     }
     expect((await app.get(routes.glance())).status).toBe(200);
+  });
+});
+
+describe("milestone schedules", () => {
+  test("persists explicit dates and dependencies while rejecting invalid graphs", async () => {
+    const app = testApp();
+    const project = (await stateOf(app)).projects.find((p) => p.id === "ima")!;
+    const first = project.milestones.find((m) => m.id === "MS-21")!;
+    const second = project.milestones.find((m) => m.id === "MS-22")!;
+
+    const scheduled = await app.send<Project["milestones"][number]>("PUT", routes.milestone("ima", first.id), { ...first, plannedStart: "2026-09-08", plannedEnd: "2026-10-02", dependsOn: [] });
+    expect(scheduled.status).toBe(200);
+    expect(scheduled.body).toMatchObject({ plannedStart: "2026-09-08", plannedEnd: "2026-10-02" });
+    expect(scheduled.body.dependsOn ?? []).toEqual([]);
+
+    const dependent = await app.send<Project["milestones"][number]>("PUT", routes.milestone("ima", second.id), { ...second, plannedStart: "2026-10-03", plannedEnd: "2026-11-20", dependsOn: [first.id] });
+    expect(dependent.status).toBe(200);
+    expect(dependent.body.dependsOn).toEqual([first.id]);
+    expect((await app.send("PUT", routes.milestone("ima", first.id), { ...scheduled.body, dependsOn: [second.id] })).status).toBe(409);
+    expect((await app.send("PUT", routes.milestone("ima", first.id), { ...scheduled.body, dependsOn: ["missing"] })).status).toBe(404);
+    expect((await app.send("PUT", routes.milestone("ima", first.id), { ...scheduled.body, plannedStart: "2026-10-03", plannedEnd: "2026-10-02" })).status).toBe(400);
+    expect((await app.send("PUT", routes.milestone("ima", first.id), { ...scheduled.body, dependsOn: [first.id] })).status).toBe(400);
+
+    expect((await app.send("DELETE", routes.milestone("ima", first.id))).status).toBe(200);
+    const after = (await stateOf(app)).projects.find((p) => p.id === "ima")!.milestones.find((m) => m.id === second.id)!;
+    expect(after.dependsOn ?? []).toEqual([]);
   });
 });
 

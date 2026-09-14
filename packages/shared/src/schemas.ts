@@ -67,12 +67,20 @@ export const MilestoneInputSchema = z.object({
   name: short(160),
   status: enumOf(MILESTONE_STATUSES),
   month,
+  plannedStart: isoDate.nullable().optional(),
+  plannedEnd: isoDate.nullable().optional(),
+  dependsOn: z.array(id).max(20).optional(),
   impact: ImpactSchema,
   metrics: z.array(MetricInputSchema).max(12).superRefine((items, ctx) => uniqueIds(items, ctx, "metric")),
 }).superRefine((value, ctx) => {
   if (value.impact.base.fte > value.impact.stretch.fte || value.impact.base.time > value.impact.stretch.time) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["impact", "stretch"], message: "stretch must be greater than or equal to base" });
   }
+  if (value.plannedStart && value.plannedEnd && value.plannedStart > value.plannedEnd) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["plannedEnd"], message: "planned end must be on or after planned start" });
+  }
+  if (value.dependsOn?.includes(value.id)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["dependsOn"], message: "a milestone cannot depend on itself" });
+  if (value.dependsOn && new Set(value.dependsOn).size !== value.dependsOn.length) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["dependsOn"], message: "dependencies must be unique" });
 });
 export type MilestoneInput = z.infer<typeof MilestoneInputSchema>;
 

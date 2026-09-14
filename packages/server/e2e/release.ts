@@ -101,7 +101,14 @@ try {
     check(project.milestones.every(m => m.metrics.every(x => x.current === 0 && x.readAt === null)), `review and create ${name} without fabricated readings`);
   }
   const project = created[0]!;
-  const ms = project.milestones[0]!;
+  let ms = project.milestones[0]!;
+  const next = project.milestones[1] ?? await call<Project["milestones"][number]>("POST", `/api/projects/${project.id}/milestones`, {
+    id: "MS-99", name: "Dependent rollout", status: "backlog", month: "2026-11", impact: { base: { fte: 0, time: 0 }, stretch: { fte: 0, time: 0 } }, metrics: [],
+  });
+  ms = await call<Project["milestones"][number]>("PUT", `/api/projects/${project.id}/milestones/${ms.id}`, { ...ms, plannedStart: "2026-09-08", plannedEnd: "2026-10-02", dependsOn: [] });
+  await call("PUT", `/api/projects/${project.id}/milestones/${next.id}`, { ...next, plannedStart: "2026-10-05", plannedEnd: "2026-11-20", dependsOn: [ms.id] });
+  const scheduled = (await call<AppState>("GET", "/api/state")).projects.find(p => p.id === project.id)!;
+  check(scheduled.milestones.find(m => m.id === next.id)?.dependsOn?.[0] === ms.id && scheduled.milestones.find(m => m.id === ms.id)?.plannedStart === "2026-09-08", "milestone schedules and dependencies persist");
   await call("PUT", `/api/projects/${project.id}/milestones/${ms.id}`, { ...ms, status: "shipped" });
   const metric = ms.metrics[0]!;
   await call("PUT", `/api/projects/${project.id}/milestones/${ms.id}/metrics/${metric.id}/readings`, { value: 96, source: "manual" });

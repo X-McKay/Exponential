@@ -505,6 +505,23 @@ export const MIGRATIONS: readonly string[] = [
   );
   INSERT INTO workspace_revision (id, revision) VALUES (1, 0);
   `,
+  // Explicit milestone schedule facts and dependency edges support the roadmap.
+  // Existing milestones remain unscheduled and continue to render at their target month.
+  `
+  ALTER TABLE milestones ADD COLUMN planned_start TEXT;
+  ALTER TABLE milestones ADD COLUMN planned_end TEXT;
+  CREATE TABLE milestone_dependencies (
+    project_id TEXT NOT NULL,
+    milestone_id TEXT NOT NULL,
+    depends_on_id TEXT NOT NULL,
+    sort INTEGER NOT NULL,
+    PRIMARY KEY (project_id, milestone_id, depends_on_id),
+    FOREIGN KEY (project_id, milestone_id) REFERENCES milestones(project_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id, depends_on_id) REFERENCES milestones(project_id, id) ON DELETE CASCADE,
+    CHECK (milestone_id <> depends_on_id)
+  );
+  CREATE INDEX milestone_dependencies_upstream ON milestone_dependencies(project_id, depends_on_id);
+  `,
 ];
 
 export const migrate = (db: Database): void => {

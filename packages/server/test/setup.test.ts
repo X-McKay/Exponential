@@ -212,16 +212,20 @@ describe("setup API", () => {
 
     const create = await json<Project>("POST", routes.setupCreate(draft.id), {
       project: { id: "kyc-refresh-automation", key: "PRJ-10", name: "KYC refresh automation", stage: "Pilot", description: "Agentic KYC refresh.", tier: 1, committee: null, repos: [{ name: "kyc-agent", url: "github.com/org/kyc-agent" }], team: [{ ini: "PN", name: "Priya Nair", role: "Sponsor" }], targets: { fte: 35, time: 40 } },
-      milestones: [{ id: "MS-1", name: "Document collection agent", status: "progress", month: "2026-12", impact: { base: { fte: 15, time: 20 }, stretch: { fte: 20, time: 25 } }, metrics: [{ id: "m1", label: "Documents auto-collected", base: 70, stretch: 90, current: 0 }] }],
+      milestones: [
+        { id: "MS-1", name: "Document collection agent", status: "progress", month: "2026-12", plannedStart: "2026-10-01", plannedEnd: "2026-12-15", dependsOn: ["MS-2"], impact: { base: { fte: 15, time: 20 }, stretch: { fte: 20, time: 25 } }, metrics: [{ id: "m1", label: "Documents auto-collected", base: 70, stretch: 90, current: 0 }] },
+        { id: "MS-2", name: "Source access", status: "shipped", month: "2026-09", impact: { base: { fte: 0, time: 0 }, stretch: { fte: 0, time: 0 } }, metrics: [] },
+      ],
       governance: [{ id: "ai-approval-committee-review", cat: "AI governance", name: "AI approval committee review", status: "missing", owner: "PN", date: null, detail: "Required before pilot." }],
       releases: [{ id: "R1", name: "Pilot", month: "2027-01", milestoneIds: ["MS-1"], criteria: [{ type: "gate", ms: "MS-1", label: "Collection base gate" }, { type: "gov", gid: "ai-approval-committee-review", label: "Committee approval" }, { type: "manual", ok: false, label: "Ops sign-off" }] }],
     });
     expect(create.status).toBe(201);
-    expect(create.body.milestones.length).toBe(1);
+    expect(create.body.milestones.length).toBe(2);
+    expect(create.body.milestones.find((m) => m.id === "MS-1")?.dependsOn).toEqual(["MS-2"]);
     const state = (await call<AppState>(new Request(BASE + routes.state()))).body;
     expect(state.projects.map((p) => p.id)).toContain("kyc-refresh-automation");
     expect(state.releases["kyc-refresh-automation"]?.[0]?.criteria.length).toBe(3);
-    expect(state.events[0]?.text).toBe("KYC refresh automation set up from 3 documents: 1 milestones, 1 governance items, 1 releases");
+    expect(state.events[0]?.text).toBe("KYC refresh automation set up from 3 documents: 2 milestones, 1 governance items, 1 releases");
     expect((await call(new Request(BASE + routes.setupDraft(draft.id)))).status).toBe(404);
     expect(app.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM setup_drafts").get()?.n).toBe(0);
   });

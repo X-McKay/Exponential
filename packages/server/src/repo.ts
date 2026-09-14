@@ -46,12 +46,19 @@ interface MilestoneRow {
   name: string;
   status: MilestoneStatus;
   month: string;
+  planned_start: string | null;
+  planned_end: string | null;
   base_fte: number;
   base_time: number;
   stretch_fte: number;
   stretch_time: number;
   retired_at: string | null;
   created_at: string | null;
+}
+interface MilestoneDependencyRow {
+  project_id: string;
+  milestone_id: string;
+  depends_on_id: string;
 }
 interface MetricRow {
   project_id: string;
@@ -308,6 +315,7 @@ export const loadState = (db: Database, now: Date = new Date(), prices: Record<s
   const milestoneRows = db.query<MilestoneRow, []>("SELECT * FROM milestones ORDER BY sort").all();
   const milestones = groupBy(milestoneRows.filter((r) => r.retired_at === null), (r) => r.project_id);
   const historicalMilestones = groupBy(milestoneRows.filter((r) => r.retired_at !== null), (r) => r.project_id);
+  const dependencies = groupBy(db.query<MilestoneDependencyRow, []>("SELECT * FROM milestone_dependencies ORDER BY sort").all(), (r) => `${r.project_id} ${r.milestone_id}`);
   const metricRows = db.query<MetricRow, []>("SELECT * FROM metrics ORDER BY sort").all();
   const metrics = groupBy(metricRows.filter((r) => r.retired_at === null), (r) => `${r.project_id} ${r.milestone_id}`);
   const historicalMetrics = groupBy(metricRows, (r) => `${r.project_id} ${r.milestone_id}`);
@@ -348,6 +356,9 @@ export const loadState = (db: Database, now: Date = new Date(), prices: Record<s
       ...(m.created_at === null ? {} : { createdAt: m.created_at }),
       status: m.status,
       month: m.month,
+      ...(m.planned_start === null ? {} : { plannedStart: m.planned_start }),
+      ...(m.planned_end === null ? {} : { plannedEnd: m.planned_end }),
+      ...((dependencies.get(`${p.id} ${m.id}`) ?? []).length === 0 ? {} : { dependsOn: (dependencies.get(`${p.id} ${m.id}`) ?? []).map((d) => d.depends_on_id) }),
       impact: { base: { fte: m.base_fte, time: m.base_time }, stretch: { fte: m.stretch_fte, time: m.stretch_time } },
       metrics: ((includeRetiredMetrics ? historicalMetrics.get(`${p.id} ${m.id}`) : metrics.get(`${p.id} ${m.id}`)) ?? []).map(
         (x): Metric => {
@@ -975,6 +986,27 @@ export const upsertMilestone = (db: Database, pid: string, input: MilestoneInput
   if (mode === "create" && milestoneRecordExists(db, pid, input.id)) throw new Conflict(`milestone ${pid}/${input.id} already exists`);
   if (mode === "update" && !exists) throw new NotFound(`milestone ${pid}/${input.id} not found`);
 
+  const dependsOn = input.dependsOn ?? [];
+  for (const dependency of dependsOn) {
+    if (!milestoneExists(db, pid, dependency)) throw new NotFound(`dependency ${pid}/${dependency} not found`);
+  }
+  const edges = groupBy(
+    db.query<MilestoneDependencyRow, [string, string]>("SELECT project_id, milestone_id, depends_on_id FROM milestone_dependencies WHERE project_id = ? AND milestone_id <> ?").all(pid, input.id),
+    (row) => row.milestone_id,
+  );
+  edges.set(input.id, dependsOn.map((depends_on_id) => ({ project_id: pid, milestone_id: input.id, depends_on_id })));
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (id: string): void => {
+    if (visiting.has(id)) throw new Conflict("milestone dependencies must not contain a cycle");
+    if (visited.has(id)) return;
+    visiting.add(id);
+    for (const edge of edges.get(id) ?? []) visit(edge.depends_on_id);
+    visiting.delete(id);
+    visited.add(id);
+  };
+  visit(input.id);
+
   const before = exists ? db.query<{ status: MilestoneStatus }, [string, string]>("SELECT status FROM milestones WHERE project_id = ? AND id = ?").get(pid, input.id) : null;
   db.transaction(() => {
     // Preserve the exact pre-edit definition as well as the post-edit one;
@@ -982,8 +1014,8 @@ export const upsertMilestone = (db: Database, pid: string, input: MilestoneInput
     if (exists) snapshotMilestone(db, pid, input.id, now.toISOString());
     if (exists) {
       db.query(
-        "UPDATE milestones SET name = ?, status = ?, month = ?, base_fte = ?, base_time = ?, stretch_fte = ?, stretch_time = ? WHERE project_id = ? AND id = ?",
-      ).run(input.name, input.status, input.month, input.impact.base.fte, input.impact.base.time, input.impact.stretch.fte, input.impact.stretch.time, pid, input.id);
+        "UPDATE milestones SET name = ?, status = ?, month = ?, planned_start = ?, planned_end = ?, base_fte = ?, base_time = ?, stretch_fte = ?, stretch_time = ? WHERE project_id = ? AND id = ?",
+      ).run(input.name, input.status, input.month, input.plannedStart ?? null, input.plannedEnd ?? null, input.impact.base.fte, input.impact.base.time, input.impact.stretch.fte, input.impact.stretch.time, pid, input.id);
       if (before && before.status !== input.status) {
         const at = now.toISOString();
         const text =
@@ -997,9 +1029,11 @@ export const upsertMilestone = (db: Database, pid: string, input: MilestoneInput
     } else {
       const sort = db.query<{ s: number }, [string]>("SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM milestones WHERE project_id = ?").get(pid)?.s ?? 0;
       db.query(
-        "INSERT INTO milestones (project_id, id, name, status, month, base_fte, base_time, stretch_fte, stretch_time, sort, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-      ).run(pid, input.id, input.name, input.status, input.month, input.impact.base.fte, input.impact.base.time, input.impact.stretch.fte, input.impact.stretch.time, sort, now.toISOString());
+        "INSERT INTO milestones (project_id, id, name, status, month, planned_start, planned_end, base_fte, base_time, stretch_fte, stretch_time, sort, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      ).run(pid, input.id, input.name, input.status, input.month, input.plannedStart ?? null, input.plannedEnd ?? null, input.impact.base.fte, input.impact.base.time, input.impact.stretch.fte, input.impact.stretch.time, sort, now.toISOString());
     }
+    db.query("DELETE FROM milestone_dependencies WHERE project_id = ? AND milestone_id = ?").run(pid, input.id);
+    dependsOn.forEach((dependency, sort) => db.query("INSERT INTO milestone_dependencies (project_id, milestone_id, depends_on_id, sort) VALUES (?,?,?,?)").run(pid, input.id, dependency, sort));
     const keep = input.metrics.map((x) => x.id);
     const existing = db
       .query<{ id: string }, [string, string]>("SELECT id FROM metrics WHERE project_id = ? AND milestone_id = ?")
@@ -1046,6 +1080,7 @@ export const deleteMilestone = (db: Database, pid: string, mid: string, now = ne
     snapshotMilestone(db, pid, mid, at);
     db.query("UPDATE milestones SET retired_at = ? WHERE project_id = ? AND id = ?").run(at, pid, mid);
     db.query("UPDATE metrics SET retired_at = COALESCE(retired_at, ?) WHERE project_id = ? AND milestone_id = ?").run(at, pid, mid);
+    db.query("DELETE FROM milestone_dependencies WHERE project_id = ? AND (milestone_id = ? OR depends_on_id = ?)").run(pid, mid, mid);
   })();
 };
 

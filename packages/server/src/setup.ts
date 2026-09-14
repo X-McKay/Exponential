@@ -13,7 +13,7 @@ import type { SetupCreateInput } from "@valueflow/shared";
 import type { ExtractedSource } from "./extract.ts";
 import { extractJson } from "./llm.ts";
 import type { ChatMessage, Llm } from "./llm.ts";
-import { createGovernanceItem, deleteSetupDraft, insertSetupDraft, loadSetupDraft, loadState, recordEvent, updateSetupDraft, upsertMilestone, upsertProject, upsertRelease } from "./repo.ts";
+import { Conflict, createGovernanceItem, deleteSetupDraft, insertSetupDraft, loadSetupDraft, loadState, recordEvent, updateSetupDraft, upsertMilestone, upsertProject, upsertRelease } from "./repo.ts";
 
 const STAGES = ["Discovery", "Pilot", "Scaling", "Sustain"];
 const CATEGORIES = ["Design & architecture", "AI governance", "Operations", "Release & adoption"];
@@ -338,7 +338,15 @@ export const createFromSetup = (db: Database, id: string, input: SetupCreateInpu
   const { draft } = loadSetupDraft(db, id);
   db.transaction(() => {
     upsertProject(db, input.project, "create");
-    for (const m of input.milestones) upsertMilestone(db, input.project.id, m, "create", now);
+    const pending = [...input.milestones];
+    const created = new Set<string>();
+    while (pending.length > 0) {
+      const index = pending.findIndex((m) => (m.dependsOn ?? []).every((dependency) => created.has(dependency)));
+      if (index < 0) throw new Conflict("setup milestone dependencies must reference another setup milestone and must not contain a cycle");
+      const [milestone] = pending.splice(index, 1);
+      upsertMilestone(db, input.project.id, milestone!, "create", now);
+      created.add(milestone!.id);
+    }
     for (const g of input.governance) createGovernanceItem(db, input.project.id, g);
     for (const r of input.releases) upsertRelease(db, input.project.id, r, "create");
     const at = now.toISOString();

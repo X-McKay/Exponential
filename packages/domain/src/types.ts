@@ -71,6 +71,11 @@ export interface Milestone {
   status: MilestoneStatus;
   /** Target (or shipped) month as `YYYY-MM`; see calendar.ts. */
   month: string;
+  /** Explicit schedule dates. When absent, roadmap views show only the target marker. */
+  plannedStart?: string | null;
+  plannedEnd?: string | null;
+  /** Milestone ids in the same project that must finish first. */
+  dependsOn?: string[];
   impact: Impact;
   metrics: Metric[];
   /** Historical definitions captured by the server; absent for in-memory fixtures. */
