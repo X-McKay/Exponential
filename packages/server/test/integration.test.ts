@@ -74,7 +74,7 @@ describe("integration: metric crosses a gate", () => {
     expect(history.slice(-2).map((r) => r.value)).toEqual([90, 80]);
   });
 
-  test("shipped milestone crossing stretch raises realized value on the portfolio", async () => {
+  test("shipped milestone crossing stretch raises eligible value on the portfolio", async () => {
     const app = testApp();
     const before = (await app.get<AppState>(routes.state())).body.projects[0]!;
     expect(before.milestones.find((m) => m.id === "MS-12")!.metrics.map((x) => x.current)).toEqual([87, 82]);

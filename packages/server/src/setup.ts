@@ -145,12 +145,13 @@ const DRAFT_SCHEMA = {
 
 const SYSTEM = (todayYm: string) =>
   [
-    "You are the ValueFlow project-setup agent. From a project name, a brief, and the documents provided, draft the complete project record for an AI-project delivery platform.",
-    "ValueFlow tracks value that is only realized when milestones ship AND their eval metrics clear a gate. Model the project that way:",
+    "You are the Exponential project-setup agent. From a project name, a brief, and the documents provided, draft the complete project record for an AI-project delivery platform.",
+    "Exponential tracks value that is only eligible when milestones ship AND their eval metrics clear a gate. Model the project that way:",
     `- stage: one of ${STAGES.join(", ")}.`,
     "- tier: AI risk tier 1 (high: regulated, irreversible, external), 2 (medium: human-in-the-loop, internal), 3 (low), or 0 if undeterminable.",
     "- targets: percentage reductions the project claims (FTE, time). Use the documents' numbers; if none, estimate conservatively and say so.",
     `- milestones: 3-8 deliverables with a target month (YYYY-MM; today is ${todayYm}), a status (backlog unless the documents say work has started, shipped only if they say it shipped), base and stretch impact (percent of the targets each contributes; bases should roughly sum to the targets), and 1-3 measurable eval metrics with base and stretch gates in percent.`,
+    "- committee: NEVER infer an approval from a charter, planned date or project key. Return empty date and ref unless the documents explicitly state the approval date AND reference. No approval, pending approval, or missing evidence means empty strings and low confidence.",
     `- governance: the items a project like this needs across ${CATEGORIES.join(", ")} (design doc, architecture review, security review, AI committee review, model risk assessment, eval sign-off, DPIA, system card, runbook, SLA, monitoring, release process, UAT, documentation). Status is approved ONLY when a document states it was approved; in_review or draft when work is described; otherwise missing.`,
     "- releases: 1-4 releases grouping milestones, each with go-live criteria. A criterion of type gate references a milestone name (its eval gate must clear); type gov references a governance item name (it must be approved); type manual is a sign-off with no reference. Never point a gate at a governance item.",
     "- stretch impact must exceed base impact for every milestone.",
@@ -203,7 +204,7 @@ export const normalizeDraft = (raw: unknown, todayYm: string): ProjectDraft => {
   const tier = tierRaw === 1 || tierRaw === 2 || tierRaw === 3 ? tierRaw : null;
   const cm = val(o.committee);
   const committeeDate = str(cm.date, 10);
-  const committee = /^\d{4}-\d{2}-\d{2}$/.test(committeeDate) && str(cm.ref, 40) ? { date: committeeDate, ref: str(cm.ref, 40) } : null;
+  const committee = g("committee").confidence === "high" && str(g("committee").source, 200) && /^\d{4}-\d{2}-\d{2}$/.test(committeeDate) && str(cm.ref, 40) ? { date: committeeDate, ref: str(cm.ref, 40) } : null;
   const tg = val(o.targets);
   const defaultMonth = addMonths(todayYm, 3);
   const milestoneNames = new Set(list(o.milestones, 10).map((m) => str(val(m).name, 160)));

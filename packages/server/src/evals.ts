@@ -61,7 +61,7 @@ export const ruleScores = (input: RuleInput, at: string): RunScore[] => {
 const RUBRIC: Record<AgentKind, string> = {
   deck: "A slide outline of 8–12 slides for executives: value picture first, then gates, releases, governance, risks, asks; every number exact.",
   comms: "A business communication under 350 words that leads with what changed and what needs a decision; numbers exact; tone plain and direct.",
-  ideation: "8–12 distinct, concrete options, each with rationale from the briefing, an effort size, and the milestone or metric it moves; ranked by impact on realized value.",
+  ideation: "8–12 distinct, concrete options, each with rationale from the briefing, an effort size, and the milestone or metric it moves; ranked by impact on eligible value.",
   audit: "Findings ordered by severity, each with evidence cited from the briefing, the risk, and a concrete recommendation; attention set only for decisions needed this week.",
   chat: "A direct answer to the question from the briefing only, with links to the right page and, where warranted, a well-formed proposal.",
   rules: "One verdict per standing rule (fires / does not fire) with the evidence from the briefing, and proposals only for rules that fired, each tied to its rule.",
@@ -187,9 +187,9 @@ export const runBenchmark = async (db: Database, llm: Llm, now: Date, agentId?: 
     if (!agent) continue;
     const run =
       agent.kind === "curator"
-        ? await curateGlance(db, llm, model ? { ...agent, model } : agent, new Date(), { benchmark: c.id })
-        : await runAgent(db, llm, { agentId: c.agentId, proj: c.proj, instruction: c.instruction }, new Date(), { benchmark: c.id, ...(model ? { model } : {}) });
-    if (run.state !== "failed") await judgeRun(db, llm, run.id, new Date()).catch(() => []);
+        ? await curateGlance(db, llm, model ? { ...agent, model } : agent, now, { benchmark: c.id })
+        : await runAgent(db, llm, { agentId: c.agentId, proj: c.proj, instruction: c.instruction }, now, { benchmark: c.id, ...(model ? { model } : {}) });
+    if (run.state !== "failed") await judgeRun(db, llm, run.id, now).catch(() => []);
     out.push(run);
     onProgress?.(i + 1, cases.length);
   }

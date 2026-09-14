@@ -156,7 +156,7 @@ export const RULES = (asOf: string): Rule[] => {
 
 /** Fixed questions the benchmark re-runs so prompt and model changes can be compared. */
 export const EVAL_CASES: EvalCase[] = [
-  { id: "slider-onboarding-q3", agentId: "slider", proj: "onboarding", instruction: "A Q3 value review deck for the steering group.", expectations: ["States 15% of the 40% FTE target is realized", "Names R2 Ingestion GA as at risk with 1 of 4 criteria met", "Lists Document ingestion pipeline as below its base gate"] },
+  { id: "slider-onboarding-q3", agentId: "slider", proj: "onboarding", instruction: "A Q3 value review deck for the steering group.", expectations: ["States 15% of the 40% FTE target is eligible", "Names R2 Ingestion GA as at risk with 1 of 4 criteria met", "Lists Document ingestion pipeline as below its base gate"] },
   { id: "slider-ima-airc", agentId: "slider", proj: "ima", instruction: "An AIRC pre-read for the quarterly Tier 1 re-review.", expectations: ["Notes the project is Tier 1 with quarterly re-review", "Shows rule recall 86% against the 88% base gate", "Lists the missing governance items: Product SLA, UAT process, User & ops documentation"] },
   { id: "comma-onboarding-update", agentId: "comma", proj: "onboarding", instruction: "This week's stakeholder update.", expectations: ["Mentions the failed build #1148 on doc-ingest-pipeline", "Mentions ops documentation moving to In review", "Stays under 350 words"] },
   { id: "comma-ima-memo", agentId: "comma", proj: "ima", instruction: "A decision memo on the recall gate: 88% base as set, or 90% as the SMEs want.", expectations: ["States current recall is 86%", "Lays out both thresholds with a consequence for each", "Ends with a clear recommendation and who decides"] },

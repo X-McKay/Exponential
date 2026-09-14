@@ -12,7 +12,7 @@
 
 import { addMonths, calendarOf, monthLabel } from "./calendar.ts";
 import type { Calendar } from "./calendar.ts";
-import { blockers, govCounts, isMeasurable, metricLevel, realized, releaseState, tierOf } from "./derive.ts";
+import { blockers, govCounts, isMeasurable, metricLevel, eligible, releaseState, tierOf } from "./derive.ts";
 import type { CriterionEval, ReleaseState } from "./derive.ts";
 import { attentionRuns, latestRunOfKind } from "./agents.ts";
 import { deriveUpcoming, recentEvents } from "./feed.ts";
@@ -50,7 +50,7 @@ export type Block =
   | (BlockBase & { kind: "ci_failing"; pr: PullRequest; build: Build | null })
   | (BlockBase & { kind: "tier1_gaps"; counts: Record<GovStatus, number>; missing: string[] })
   | (BlockBase & { kind: "near_stretch"; milestone: Milestone; metrics: Metric[]; fteUpside: number })
-  | (BlockBase & { kind: "value_trajectory"; milestones: Milestone[]; historicalMilestones?: Milestone[]; dim: Dim; target: number; realized: number })
+  | (BlockBase & { kind: "value_trajectory"; milestones: Milestone[]; historicalMilestones?: Milestone[]; dim: Dim; target: number; eligible: number })
   | (BlockBase & { kind: "ready_release"; release: Release })
   | (BlockBase & { kind: "agent_flag"; run: AgentRun; agentName: string })
   | (BlockBase & { kind: "brief"; run: AgentRun; agentName: string })
@@ -131,7 +131,7 @@ export const detectSignals = (state: AppState, cal: Calendar = calendarOf(state)
         case "Ready":
           readyRel.push({ p, r, st });
           break;
-        case "Shipped":
+        case "Not configured":
           break;
       }
     }
@@ -168,7 +168,7 @@ export const detectSignals = (state: AppState, cal: Calendar = calendarOf(state)
   const t1gaps = state.projects.filter((p) => p.tier === 1 && blockers(p) > 0);
   const flags = attentionRuns(state.runs, cal.asOf).filter((r) => state.projects.some((p) => p.id === r.proj));
   const brief = latestRunOfKind("brief", state.agents, state.runs, cal.asOf);
-  const ratio = (p: Project): number => (p.targets.fte > 0 ? realized(p, "fte") / p.targets.fte : 0);
+  const ratio = (p: Project): number => (p.targets.fte > 0 ? eligible(p, "fte") / p.targets.fte : 0);
   const bestValue = [...state.projects].sort((a, b) => ratio(b) - ratio(a))[0] ?? null;
   const prices = state.llm?.prices ?? {};
   const budgets = state.budgets
@@ -412,12 +412,12 @@ export const rankBlocks = (s: Signals, state: AppState): Block[] => {
       proj: p.id,
       tab: "value",
       projName: shortName(p),
-      title: `${realized(p, "fte")}% of ${p.targets.fte}% FTE target eligible`,
+      title: `${eligible(p, "fte")}% of ${p.targets.fte}% FTE target eligible`,
       milestones: p.milestones,
       ...(p.historicalMilestones?.length ? { historicalMilestones: p.historicalMilestones } : {}),
       dim: "fte",
       target: p.targets.fte,
-      realized: realized(p, "fte"),
+      eligible: eligible(p, "fte"),
     });
   }
 
@@ -511,7 +511,7 @@ export type ResolvedWidget =
   | { type: "gates"; project: Project; milestone: Milestone }
   | { type: "release"; project: Project; release: Release; state: ReleaseState; rows: CriterionRow[] }
   | { type: "governance"; project: Project; counts: Record<GovStatus, number>; missing: string[] }
-  | { type: "value"; project: Project; dim: Dim; target: number; realized: number }
+  | { type: "value"; project: Project; dim: Dim; target: number; eligible: number }
   | { type: "proposals"; proposals: Proposal[] }
   | { type: "ci"; project: Project; pr: PullRequest; build: Build | null }
   | { type: "upcoming"; items: Upcoming[] }
@@ -545,7 +545,7 @@ export const resolveWidget = (w: Widget, state: AppState, cal: Calendar = calend
     }
     case "value": {
       const p = project(w.proj);
-      return p ? { type: "value", project: p, dim: w.dim, target: p.targets[w.dim], realized: realized(p, w.dim) } : null;
+      return p ? { type: "value", project: p, dim: w.dim, target: p.targets[w.dim], eligible: eligible(p, w.dim) } : null;
     }
     case "proposals": {
       const ids = new Set(w.ids);
@@ -751,7 +751,7 @@ export const describeBlock = (b: Block): string => {
     case "near_stretch":
       return `${head} — ${b.metrics.map((x) => `${x.label} ${x.current}% vs stretch ${x.stretch}%`).join(", ")}`;
     case "value_trajectory":
-      return `${head} — eligible ${b.realized}% of ${b.target}%`;
+      return `${head} — eligible ${b.eligible}% of ${b.target}%`;
     case "ready_release":
       return head;
     case "agent_flag":

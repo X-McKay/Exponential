@@ -1,4 +1,4 @@
-# ValueFlow task runner. `just` lists recipes; `just <recipe>` runs one.
+# Exponential task runner. `just` lists recipes; `just <recipe>` runs one.
 # Every recipe wraps a `bun run` script or a `nix` command, so nothing here
 # is required: it is a memorable front door to the workflows in README.md.
 
@@ -14,18 +14,23 @@ default:
 
 # ---- setup ----------------------------------------------------------------
 
-# Install dependencies and seed the database (safe to re-run).
-setup: deps seed
-    @echo "ready: run 'just dev' and open http://localhost:{{port}}"
+# Check prerequisites, create .env when absent, and install locked dependencies.
+# This never seeds or replaces application data.
+setup:
+    bash scripts/setup.sh
+
+# Report required and optional development tools without changing anything.
+doctor:
+    bash scripts/doctor.sh
 
 # Install dependencies from the lockfile.
 deps:
     @command -v bun >/dev/null || { echo "bun not found: https://bun.sh (brew install oven-sh/bun/bun)"; exit 1; }
     bun install --frozen-lockfile
 
-# Wipe the database and re-seed it from the sample fixtures.
-seed:
-    bun run seed
+# Wipe the configured database and replace it with disposable demo fixtures.
+demo-reset:
+    bun run demo:reset
 
 # Pull development facts for every project from SYNC_SOURCE (sample|github).
 sync:
@@ -66,29 +71,29 @@ start:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -f '{{pidfile}}' ] && kill -0 "$(cat '{{pidfile}}')" 2>/dev/null; then
-        echo "ValueFlow already running (pid $(cat '{{pidfile}}')) on http://localhost:{{port}}"; exit 0
+        echo "Exponential already running (pid $(cat '{{pidfile}}')) on http://localhost:{{port}}"; exit 0
     fi
     mkdir -p "$(dirname '{{logfile}}')"
     PORT={{port}} nohup bun run dev >'{{logfile}}' 2>&1 &
     echo $! >'{{pidfile}}'
     for _ in $(seq 1 40); do
         if curl -sf "http://localhost:{{port}}/api/state" >/dev/null; then
-            echo "ValueFlow running (pid $(cat '{{pidfile}}')) on http://localhost:{{port}}"; exit 0
+            echo "Exponential running (pid $(cat '{{pidfile}}')) on http://localhost:{{port}}"; exit 0
         fi
         if ! kill -0 "$(cat '{{pidfile}}')" 2>/dev/null; then
-            echo "ValueFlow exited during startup; last log lines:" >&2; tail -n 20 '{{logfile}}' >&2; rm -f '{{pidfile}}'; exit 1
+            echo "Exponential exited during startup; last log lines:" >&2; tail -n 20 '{{logfile}}' >&2; rm -f '{{pidfile}}'; exit 1
         fi
         sleep 0.25
     done
-    echo "ValueFlow did not answer on port {{port}} in time; see 'just logs'" >&2; exit 1
+    echo "Exponential did not answer on port {{port}} in time; see 'just logs'" >&2; exit 1
 
 # Stop the background dev server.
 stop:
     @if [ -f '{{pidfile}}' ]; then \
         pid=$(cat '{{pidfile}}'); \
-        kill "$pid" 2>/dev/null && echo "stopped ValueFlow (pid $pid)" || echo "ValueFlow was not running (stale pid $pid)"; \
+        kill "$pid" 2>/dev/null && echo "stopped Exponential (pid $pid)" || echo "Exponential was not running (stale pid $pid)"; \
         rm -f '{{pidfile}}'; \
-    else echo "ValueFlow is not running"; fi
+    else echo "Exponential is not running"; fi
 
 # Restart the background dev server.
 restart: stop start
@@ -96,8 +101,8 @@ restart: stop start
 # Show whether the background dev server is running.
 status:
     @if [ -f '{{pidfile}}' ] && kill -0 "$(cat '{{pidfile}}')" 2>/dev/null; then \
-        echo "ValueFlow running (pid $(cat '{{pidfile}}')) on http://localhost:{{port}}"; \
-    else echo "ValueFlow is not running"; fi
+        echo "Exponential running (pid $(cat '{{pidfile}}')) on http://localhost:{{port}}"; \
+    else echo "Exponential is not running"; fi
 
 # Tail the background dev server log.
 logs:
@@ -133,10 +138,25 @@ watch:
 build:
     bun run build
 
-# Exactly what the GitHub Actions Bun job runs.
-ci: deps typecheck lint
-    bun test
-    bun run build
+# Local release checks before the container build.
+ci: deps
+    bun run release:check
+
+# Check links in maintained Markdown files.
+docs-check:
+    bun run docs:check
+
+# Verify that repository skills are byte-identical for Claude and Codex.
+skills-check:
+    bun run skills:check
+
+# Build the release image with Podman or Docker.
+container-build:
+    bun run container:build
+
+# Run the production acceptance suite against the release image.
+container-test:
+    bun run container:test
 
 # ---- nix -------------------------------------------------------------------
 
@@ -165,7 +185,7 @@ nix-hash:
 
 # ---- housekeeping ----------------------------------------------------------
 
-# Remove the database (a new one is seeded on the next start).
+# Remove the local database (the next start creates a neutral workspace).
 reset: stop
     rm -f data/valueflow.sqlite data/valueflow.sqlite-wal data/valueflow.sqlite-shm
     @echo "database removed"

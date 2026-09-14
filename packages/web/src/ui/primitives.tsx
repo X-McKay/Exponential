@@ -230,6 +230,7 @@ export function Btn({ children, onClick, tone = "default", disabled }: { childre
       type="button"
       onClick={disabled ? undefined : onClick}
       aria-disabled={disabled}
+      disabled={disabled}
       style={{
         all: "unset",
         boxSizing: "border-box",

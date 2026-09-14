@@ -6,15 +6,14 @@ import { runDueComms } from "./comms.ts";
 import { runDuePm } from "./pm.ts";
 import type { Skipped } from "./runner.ts";
 import { sourceFromEnv } from "./connectors/index.ts";
-import { llmFromEnv } from "./llm.ts";
-import { openDb } from "./db.ts";
-import { ensureAgents, ensureSeeded } from "./seed.ts";
+import { createSettings } from "./settings.ts";
+import { DEFAULT_DB_PATH, openDb } from "./db.ts";
+import { initializeWorkspace } from "./seed.ts";
 import { syncAll, syncMissing } from "./sync.ts";
 import { loadDotEnv } from "./env.ts";
 import { staticHandler } from "./static.ts";
 import { accessFromEnv } from "./access.ts";
 import { recoverInterruptedRuns } from "./recovery.ts";
-import index from "../../web/src/index.html";
 
 loadDotEnv();
 
@@ -24,44 +23,36 @@ if (pinned && Number.isNaN(pinned.getTime())) throw new Error(`VALUEFLOW_NOW is 
 const now = () => pinned ?? new Date();
 
 const db = openDb();
-if (ensureSeeded(db, now())) console.log(`seeded database with sample data as of ${now().toISOString().slice(0, 10)}`);
-const added = ensureAgents(db);
-if (added.length) console.log(`installed workspace agents: ${added.join(", ")}`);
+initializeWorkspace(db);
 const interrupted = recoverInterruptedRuns(db, now());
 if (interrupted) console.log(`marked ${interrupted} interrupted run(s) failed`);
 
 /** `SYNC_SOURCE=sample|github|none`; `SYNC_INTERVAL_MIN=30` re-syncs every project on a timer. */
 const source = sourceFromEnv(process.env);
 /** `LLM_BASE_URL` (OpenAI-compatible) enables agent runs; `AGENT_SCHEDULE=off` disables nightly runs. */
-const llm = llmFromEnv(process.env);
+const settings = createSettings(process.env.VALUEFLOW_SETTINGS ?? `${process.env.VALUEFLOW_DB ?? DEFAULT_DB_PATH}.settings.json`, process.env);
 /** `BRIEF_WEBHOOK_URL` also posts the weekly brief as JSON ({ text, title, summary, body }) to Slack, Teams, Zapier, or your own endpoint. */
 const deliverBrief = process.env.BRIEF_WEBHOOK_URL ? webhookDelivery(process.env.BRIEF_WEBHOOK_URL) : null;
 /** `GLANCE_CURATE=off` keeps Glance in the composer's default order instead of re-curating when facts move. */
-const app = createApp(db, { now, source, llm, autoJudge: process.env.EVAL_JUDGE !== "off", deliverBrief, autoCurate: process.env.GLANCE_CURATE !== "off" });
-if (llm) {
-  llm
-    .model()
-    .then((m) => {
-      const d = llm.describe();
-      console.log(`agents run against ${m} at ${d.baseUrl}${d.models.length > 1 ? `; scout candidates: ${d.models.filter((x) => x !== m).join(", ")}` : ""}${d.judgeModel ? `; judge: ${d.judgeModel}` : ""}`);
-    })
-    .catch((e: unknown) => console.error("LLM unreachable:", e instanceof Error ? e.message : e));
-  if (process.env.AGENT_SCHEDULE !== "off") {
-    const tick = () => {
-      const skipped: Skipped[] = [];
-      return runDue(db, llm, now(), { deliverBrief }, skipped)
-        .then(async (runs) => { await runDuePm(db, llm, now()); await runDueComms(db, llm, now()); return runs; })
-        .then((runs) => {
-          if (runs.length) console.log(`scheduled agents: ${runs.length} run${runs.length === 1 ? "" : "s"}, ${runs.filter((r) => r.state === "failed").length} failed`);
-          if (skipped.length) console.log(`scheduled agents: ${skipped.length} run${skipped.length === 1 ? "" : "s"} held back by budget (${skipped[0]?.reason})`);
-        })
-        .catch((e: unknown) => console.error("scheduled agents failed", e));
-    };
-    setTimeout(tick, 60_000);
-    setInterval(tick, 30 * 60_000);
-  }
-} else {
-  console.log("agents disabled: set LLM_BASE_URL to enable runs");
+const app = createApp(db, { now, source, settings, autoJudge: process.env.EVAL_JUDGE === "on", deliverBrief, autoCurate: process.env.GLANCE_CURATE === "on" });
+// Scheduling is opt-in. Capture one provider for the whole tick and coalesce overlaps.
+let ticking = false;
+const tick = async () => {
+  const llm = settings.getLlm();
+  if (!llm || ticking) return;
+  ticking = true;
+  try {
+    const skipped: Skipped[] = [];
+    const runs = await runDue(db, llm, now(), { deliverBrief }, skipped);
+    await runDuePm(db, llm, now());
+    await runDueComms(db, llm, now());
+    if (runs.length || skipped.length) console.log(`scheduled agents: ${runs.length} runs, ${skipped.length} held by budget`);
+  } catch (e) { console.error("scheduled agents failed", e); }
+  finally { ticking = false; }
+};
+if (process.env.AGENT_SCHEDULE === "on") {
+  setTimeout(() => void tick(), 60_000);
+  setInterval(() => void tick(), 30 * 60_000);
 }
 if (source) {
   const first = await syncMissing(db, source, now());
@@ -90,7 +81,7 @@ const server = Bun.serve({
   // In development Bun bundles the React app on the fly with HMR; in
   // production the pre-built bundle in web/dist is served as static files.
   // Authenticated instances serve the built app through the access guard.
-  routes: production || process.env.VALUEFLOW_ACCESS_TOKEN ? undefined : { "/": index },
+  routes: process.env.NODE_ENV === "production" || process.env.VALUEFLOW_ACCESS_TOKEN ? undefined : { "/": (await import("../../web/src/index.html")).default },
   async fetch(req) {
     const denied = access.check(req);
     if (denied) return denied;
@@ -100,4 +91,19 @@ const server = Bun.serve({
   },
 });
 
-console.log(`ValueFlow ${production ? "(production)" : "(dev)"} listening on http://localhost:${server.port}`);
+console.log(`Exponential ${production ? "(production)" : "(dev)"} listening on http://localhost:${server.port}`);
+
+// Allow in-flight HTTP work to drain before closing SQLite on deployment shutdown.
+let stopping = false;
+const shutdown = async () => {
+  if (stopping) return;
+  stopping = true;
+  const deadline = setTimeout(() => process.exit(0), 15_000);
+  deadline.unref();
+  await server.stop(false);
+  if (!ticking) { db.close(); process.exit(0); }
+  // Background work holds reservations; interruption remains visible on next startup.
+  process.exit(0);
+};
+process.on("SIGTERM", () => void shutdown());
+process.on("SIGINT", () => void shutdown());

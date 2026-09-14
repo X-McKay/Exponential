@@ -4,11 +4,10 @@
 // when facts change (a sync finds a merged PR or a failed build, an eval
 // records a reading, a milestone ships, a governance item moves). The
 // "Coming up" list is derived from user-entered calendar events plus the
-// target months of releases that have not shipped.
+// target months of planned releases.
 
 import { monthLabel } from "./calendar.ts";
 import type { Calendar } from "./calendar.ts";
-import { releaseState } from "./derive.ts";
 import type { AppState, DevFacts, Event, FeedType, ProjectTab } from "./types.ts";
 
 const HOUR = 3_600_000;
@@ -76,7 +75,7 @@ export interface Upcoming {
   release?: { pid: string; rid: string };
 }
 
-/** Dated calendar events from today on, merged with unshipped releases' target months. */
+/** Dated calendar events from today on, merged with planned release target months. */
 export const deriveUpcoming = (state: Pick<AppState, "calendar" | "releases" | "projects">, cal: Calendar, limit = 8): Upcoming[] => {
   const today = cal.asOf.slice(0, 10);
   const items: Upcoming[] = state.calendar
@@ -85,7 +84,6 @@ export const deriveUpcoming = (state: Pick<AppState, "calendar" | "releases" | "
   for (const p of state.projects) {
     for (const r of state.releases[p.id] ?? []) {
       if (r.month < cal.todayYm) continue;
-      if (releaseState(r, p, cal).label === "Shipped") continue;
       items.push({ date: monthLabel(r.month, cal.todayYm), at: `${r.month}-01`, proj: p.id, tab: "roadmap", text: `${r.id} · ${r.name} target`, sub: null, release: { pid: p.id, rid: r.id } });
     }
   }

@@ -22,7 +22,7 @@ interface Working {
   releases: DraftRelease[];
 }
 
-const fromDraft = (d: ProjectDraft): Working => ({
+export const fromDraft = (d: ProjectDraft): Working => ({
   description: d.description.value,
   stage: d.stage.value,
   tier: d.tier.value,
@@ -87,7 +87,7 @@ function Section({ title, count, right, children }: { title: string; count?: str
 
 // ---- compose the create payload ------------------------------------------------
 
-const compose = (name: string, key: string, w: Working, excluded: Set<string>, existingIds: string[], defaultOwner: string): SetupCreateInput => {
+export const compose = (name: string, key: string, w: Working, excluded: Set<string>, existingIds: string[], defaultOwner: string): SetupCreateInput => {
   const inc = (path: string) => !excluded.has(path);
   const team = w.team.filter((_, i) => inc(`team.${i}`)).map((t) => ({ ini: (t.ini || initialsOf(t.name)).toUpperCase().slice(0, 3), name: t.name.trim(), role: t.role.trim() || "Team member" }));
   const iniFor = (owner: string): string => {
@@ -193,7 +193,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
       const d = await api.setupAnalyze(form);
       setDraft(d);
       setW(fromDraft(d.draft));
-      setExcluded(new Set());
+      setExcluded(new Set(["committee"]));
       setEdited(new Set());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -400,7 +400,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
         ))}
       </div>
       <div style={{ fontSize: 12, color: C.mut, lineHeight: 1.5 }}>
-        Untick anything you do not want, edit anything that is off, or tell the agent what to change below. Colours show how sure it was: <span style={{ color: C.green }}>high</span>,{" "}
+        Committee approval is excluded until you explicitly confirm its evidence. Untick anything you do not want, edit anything that is off, or tell the agent what to change below. Colours show how sure it was: <span style={{ color: C.green }}>high</span>,{" "}
         <span style={{ color: C.amber }}>medium</span>, <span style={{ color: C.dim }}>low</span>.
       </div>
       {d.notes.length > 0 && (

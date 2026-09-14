@@ -31,7 +31,7 @@ export const accessFromEnv = (env: Record<string, string | undefined>, port: num
   const hostname = env.HOST ?? "127.0.0.1";
   const token = env.VALUEFLOW_ACCESS_TOKEN?.trim();
   const local = ["127.0.0.1", "::1", "localhost"].includes(hostname);
-  if (!local && (!token || token.length < 32)) throw new Error("Non-loopback HOST requires VALUEFLOW_ACCESS_TOKEN with at least 32 characters and a trusted authenticating proxy.");
+  if (!local && env.VALUEFLOW_TRUSTED_WORKSPACE !== "on" && (!token || token.length < 32)) throw new Error("Non-loopback HOST requires VALUEFLOW_ACCESS_TOKEN with at least 32 characters and a trusted authenticating proxy.");
   if (token && token.length < 32) throw new Error("VALUEFLOW_ACCESS_TOKEN must contain at least 32 characters.");
   const origins = [`http://localhost:${port}`, `http://127.0.0.1:${port}`, `http://[::1]:${port}`, ...(env.VALUEFLOW_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean)];
   for (const origin of origins) {

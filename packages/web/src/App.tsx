@@ -1,3 +1,5 @@
+import { sessionRole } from "./api/session.ts";
+import { SessionSelector } from "./ui/SessionSelector.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { PROJECT_TABS, blockers, calendarOf, dayLabel, pendingProposals } from "@valueflow/domain";
@@ -23,8 +25,9 @@ import { ValuePage } from "./pages/ValuePage.tsx";
 import { CHORDS, useKeyboard, useNarrow, useView } from "./router.ts";
 import type { AgentsSection, Page, View } from "./router.ts";
 import { useStore } from "./state/store.ts";
-import { Avatar, JobBar, Kbd, Skeleton, TierBadge, Tip, Toasts, reset } from "./ui/primitives.tsx";
-import { C, FONT, TIER_COLOR, applyTheme, readTheme } from "./theme.ts";
+import { JobBar, Kbd, Skeleton, TierBadge, Tip, Toasts, reset } from "./ui/primitives.tsx";
+import { BrandMark } from "./ui/BrandMark.tsx";
+import { C, FONT, applyTheme, readTheme } from "./theme.ts";
 import type { ThemeChoice } from "./theme.ts";
 
 const TAB_LABEL: Record<ProjectTab, string> = { overview: "Overview", value: "Value", roadmap: "Roadmap", development: "Development", governance: "Governance" };
@@ -64,6 +67,10 @@ const ICONS = {
     </svg>
   ),
 } as const;
+
+function SidebarIcon() {
+  return <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="2" y="2.5" width="12" height="11" rx="2" /><path d="M6 3v10" /></svg>;
+}
 
 function NavItem({
   label,
@@ -129,7 +136,7 @@ const SKELETON_ROWS = [0.55, 0.7, 0.45];
 /** Layout-shaped placeholder while /api/state loads: sidebar, header, a KPI row, two cards. */
 function LoadingShell() {
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: C.bg, fontFamily: FONT }} aria-busy aria-label="Loading ValueFlow">
+    <div style={{ display: "flex", minHeight: "100vh", background: C.bg, fontFamily: FONT }} aria-busy aria-label="Loading Exponential">
       <aside style={{ width: 232, flexShrink: 0, borderRight: `1px solid ${C.line}`, padding: "14px 10px" }}>
         <Skeleton w={110} h={16} style={{ margin: "6px 8px 18px" }} />
         <Skeleton h={28} style={{ marginBottom: 12 }} />
@@ -165,6 +172,12 @@ export function App() {
   const [palette, setPalette] = useState(false);
   const [chat, setChat] = useState(false);
   const narrow = useNarrow();
+  const [sidebarHidden, setSidebarHidden] = useState(() => {
+    try { return localStorage.getItem("valueflow.sidebarHidden") === "true"; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("valueflow.sidebarHidden", String(sidebarHidden)); } catch { /* Storage may be unavailable. */ }
+  }, [sidebarHidden]);
   const [lastProject, setLastProject] = useState<string | null>(null);
   const [editor, setEditor] = useState<{ kind: "project"; pid: string | null } | { kind: "setup" } | { kind: "agents" } | { kind: "workspace" } | null>(null);
   const [theme, setTheme] = useState<ThemeChoice>(readTheme);
@@ -328,14 +341,17 @@ export function App() {
             await store.saveWorkspace(w);
             closeEditor();
           }}
-          onClose={closeEditor}
+          onClose={() => { closeEditor(); void store.reload(); }}
         />
       )}
-      {!narrow && (
-        <aside style={{ width: 232, flexShrink: 0, borderRight: `1px solid ${C.line}`, padding: "14px 10px", display: "flex", flexDirection: "column" }}>
+      {!narrow && !sidebarHidden && (
+        <aside id="workspace-sidebar" style={{ width: 232, flexShrink: 0, borderRight: `1px solid ${C.line}`, padding: "14px 10px", display: "flex", flexDirection: "column" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px 12px" }}>
-            <span style={{ width: 20, height: 20, borderRadius: 6, background: "linear-gradient(135deg,#5C6AF0,#8B5CF0)", boxShadow: `0 0 12px ${C.accentLine2}` }} />
-            <span style={{ fontSize: 14, fontWeight: 550, letterSpacing: "-0.01em" }}>ValueFlow</span>
+            <span style={{ borderRadius: "50%", boxShadow: `0 0 14px ${C.accentLine2}` }}><BrandMark size={22} /></span>
+            <span style={{ fontSize: 14, fontWeight: 550, letterSpacing: "-0.01em", flex: 1 }}>Exponential</span>
+            <button type="button" className="vf-ghost" aria-label="Hide sidebar" title="Hide sidebar" aria-expanded={true} aria-controls="workspace-sidebar" onClick={() => setSidebarHidden(true)} style={{ ...reset, padding: 5, borderRadius: 5, color: C.mut }}>
+              <SidebarIcon />
+            </button>
           </div>
           <button
             type="button"
@@ -355,10 +371,6 @@ export function App() {
           <NavItem label="Portfolio" icon="portfolio" keys={["g", "p"]} active={view.page === "portfolio"} onClick={() => go("portfolio", null)} />
           <NavItem label="Agents" icon="agents" keys={["g", "a"]} active={view.page === "agents"} onClick={() => go("agents", null)} />
           <NavItem label="Data" icon="data" active={view.page === "data"} onClick={() => go("data", null)} />
-          <div style={{ padding: "16px 8px 6px", fontSize: 11, color: C.dim, letterSpacing: "0.06em", textTransform: "uppercase" }}>Projects</div>
-          {projects.map((p) => (
-            <NavItem key={p.id} label={p.name} dot={p.tier ? TIER_COLOR[p.tier] : C.dim} active={view.projectId === p.id} onClick={() => openProject(p.id)} />
-          ))}
           <div style={{ flex: 1 }} />
           <Tip label={themeLabel[theme]} side="right" style={{ display: "flex", width: "100%" }}>
             <button
@@ -388,24 +400,22 @@ export function App() {
               <span style={{ flex: 1, textAlign: "left" }}>{theme === "system" ? "System theme" : theme === "light" ? "Light theme" : "Dark theme"}</span>
             </button>
           </Tip>
-          <Tip label="Workspace settings" side="right" style={{ display: "flex", width: "100%" }}>
-            <button
-              type="button"
-              className="vf-nav"
-              onClick={() => setEditor({ kind: "workspace" })}
-              style={{ ...reset, display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "10px 8px 6px", borderTop: `1px solid ${C.line}`, borderRadius: 0 }}
-            >
-              <Avatar ini={user.ini} size={22} />
-              <span style={{ fontSize: 12, color: C.mut, flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.name}</span>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: C.green, display: "block" }} />
-            </button>
-          </Tip>
+          <SessionSelector onSettings={() => setEditor({ kind: "workspace" })} />
         </aside>
       )}
 
       <main style={{ flex: 1, minWidth: 0 }}>
+        {sessionRole() === "viewer" && <div role="status" style={{ padding: "10px 20px", color: C.mut, borderBottom: `1px solid ${C.line}` }}>Viewer mode: shared data is read-only. Select Editor or Administrator to make changes.</div>}
+        {!narrow && sidebarHidden && (
+          <div style={{ padding: "8px 20px", borderBottom: `1px solid ${C.line}` }}>
+            <button type="button" className="vf-ghost" aria-expanded={false} onClick={() => setSidebarHidden(false)} style={{ ...reset, display: "inline-flex", alignItems: "center", gap: 7, padding: "4px 6px", borderRadius: 5, color: C.mut, fontSize: 12 }}>
+              <SidebarIcon /> Show sidebar
+            </button>
+          </div>
+        )}
         {narrow && (
           <nav className="vf-topnav" aria-label="Pages">
+            <button onClick={() => setEditor({ kind: "workspace" })}>{user.name} · {sessionRole()} · Settings</button>
             {(
               [
                 ["glance", "Glance"],

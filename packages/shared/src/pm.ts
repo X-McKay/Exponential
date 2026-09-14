@@ -10,7 +10,7 @@ const id = z.string().trim().min(1).max(64);
 const short = (n: number) => z.string().trim().min(1).max(n);
 export const PMCommitmentInputSchema = z.object({ id: id.optional(), title: short(240), owner: short(80), due: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => { const date = new Date(value); return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value; }, "Invalid calendar date").nullable().default(null), status: z.enum(PMCommitmentStatus).default("open") });
 export const PMAssignmentCreateSchema = z.object({ projectId: id, objective: short(2000), enabled: z.boolean().default(true), onChange: z.boolean().default(false), cadence: z.enum(["weekly", "manual"]).default("manual"), owner: short(80), commitments: z.array(PMCommitmentInputSchema).max(100).default([]) });
-export const PMAssignmentUpdateSchema = PMAssignmentCreateSchema.partial().omit({ projectId: true }).extend({ expectedUpdatedAt: z.string().datetime().optional() });
+export const PMAssignmentUpdateSchema = PMAssignmentCreateSchema.partial().omit({ projectId: true }).extend({ expectedUpdatedAt: z.string().datetime() });
 export const PMRunInputSchema = z.object({ instruction: z.string().trim().max(4000).optional() });
 export type PMAssignmentCreate = z.infer<typeof PMAssignmentCreateSchema>;
 export type PMAssignmentUpdate = z.infer<typeof PMAssignmentUpdateSchema>;

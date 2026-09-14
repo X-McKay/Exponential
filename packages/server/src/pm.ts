@@ -27,11 +27,12 @@ export const createAssignment = (db: Database, input: PMAssignmentCreate, now: D
 };
 export const updateAssignment = (db: Database, id: string, input: PMAssignmentUpdate, now: Date): PMAssignment => {
   const current = getAssignment(db,id);
-  if (input.expectedUpdatedAt && input.expectedUpdatedAt !== current.updatedAt) throw new Conflict("Assignment changed since you opened it. Refresh before saving.");
+  if (input.expectedUpdatedAt !== current.updatedAt) throw new Conflict("Assignment changed since you opened it. Refresh before saving.");
   const at = new Date(Math.max(now.getTime(), new Date(current.updatedAt).getTime() + 1)).toISOString();
   const merged = { ...current, ...input };
   db.transaction(() => {
-    db.query("UPDATE pm_assignments SET objective=?,enabled=?,on_change=?,cadence=?,owner=?,updated_at=? WHERE id=?").run(merged.objective,merged.enabled?1:0,merged.onChange?1:0,merged.cadence,merged.owner,at,id);
+    const changed = db.query("UPDATE pm_assignments SET objective=?,enabled=?,on_change=?,cadence=?,owner=?,updated_at=? WHERE id=? AND updated_at=?").run(merged.objective,merged.enabled?1:0,merged.onChange?1:0,merged.cadence,merged.owner,at,id,input.expectedUpdatedAt).changes;
+    if (!changed) throw new Conflict("Assignment changed since you opened it. Refresh before saving.");
     if (input.commitments) { const old = new Map(current.commitments.map(c => [c.id, c])); db.query("DELETE FROM pm_commitments WHERE assignment_id=?").run(id); for (const c of input.commitments) { const cid=c.id??randomUUID(); const prior=old.get(cid); db.query("INSERT INTO pm_commitments (id,assignment_id,title,owner,due,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)").run(cid,id,c.title,c.owner,c.due,c.status,prior?.createdAt ?? at,at); } }
   })(); return getAssignment(db,id);
 };

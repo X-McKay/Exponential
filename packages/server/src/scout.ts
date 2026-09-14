@@ -129,7 +129,7 @@ export const scoutModels = async (db: Database, llm: Llm, scout: Agent, now: Dat
     options.onProgress?.(0, jobs.length);
     t.step("request", `${jobs.length} benchmark batch${jobs.length === 1 ? "" : "es"} to run: ${jobs.map((j) => `${j.agent.name} on ${j.model}`).join(", ") || "none, all measured already"}`);
     for (const job of jobs) {
-      await runBenchmark(db, llm, new Date(), job.agent.id, undefined, job.model);
+      await runBenchmark(db, llm, now, job.agent.id, undefined, job.model);
       done += 1;
       options.onProgress?.(done, jobs.length);
       t.step("reply", `${job.agent.name} on ${job.model} benchmarked (${done} of ${jobs.length})`);

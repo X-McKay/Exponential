@@ -21,6 +21,7 @@ export interface LiveRun {
 }
 
 export type LiveMessage =
+  | { kind: "changed" }
   | { kind: "started"; run: Pick<AgentRun, "id" | "agentId" | "proj" | "startedAt" | "instruction" | "benchmark"> }
   | { kind: "step"; event: RunEvent }
   | { kind: "token"; runId: string; text: string }
@@ -29,6 +30,7 @@ export type LiveMessage =
 /** Apply one message to the live map; returns the same map when nothing changed. */
 export const applyLive = (live: Record<string, LiveRun>, m: LiveMessage): Record<string, LiveRun> => {
   switch (m.kind) {
+    case "changed": return live;
     case "started":
       return { ...live, [m.run.id]: { ...m.run, steps: [], text: "", state: "working" } };
     case "step": {
@@ -60,7 +62,9 @@ export const subscribeLive = (onMessage: (m: LiveMessage) => void, onOpen?: () =
     source.addEventListener("open", () => onOpen?.());
     source.addEventListener("message", (e: MessageEvent<string>) => {
       try {
-        onMessage(JSON.parse(e.data) as LiveMessage);
+        const message = JSON.parse(e.data) as LiveMessage;
+        if (message.kind === "changed") window.dispatchEvent(new Event("valueflow:changed"));
+        onMessage(message);
       } catch {
         /* a malformed frame is not worth breaking the channel */
       }
@@ -93,8 +97,16 @@ export const partialField = (json: string, key: string): string | null => {
     if (ch === "\\") {
       const next = json[i + 1];
       if (next === undefined) break;
-      out += next === "n" ? "\n" : next === "t" ? "\t" : next === "u" ? "" : next;
-      i += next === "u" ? 5 : 1;
+      if (next === "u") {
+        const code = json.slice(i + 2, i + 6);
+        if (!/^[0-9a-fA-F]{4}$/.test(code)) break;
+        out += String.fromCharCode(parseInt(code, 16));
+        i += 5;
+      } else {
+        const escapes: Record<string, string> = { n: "\n", t: "\t", r: "\r", b: "\b", f: "\f" };
+        out += escapes[next] ?? next;
+        i += 1;
+      }
       continue;
     }
     if (ch === '"') break;

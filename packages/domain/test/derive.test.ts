@@ -10,7 +10,6 @@ import {
   nextMilestoneId,
   nextRelease,
   readiness,
-  realized,
   eligible,
   releaseState,
   seedState,
@@ -82,9 +81,9 @@ describe("tierOf", () => {
   });
 });
 
-describe("impactOf / realized", () => {
+describe("impactOf / eligible", () => {
   test("names gated delivery value as eligible until observed benefit exists", () => {
-    expect(eligible(project("onboarding"), "fte")).toBe(realized(project("onboarding"), "fte"));
+    expect(eligible(project("onboarding"), "fte")).toBe(eligible(project("onboarding"), "fte"));
   });
   test("impact follows tier", () => {
     expect(impactOf(ms(), "fte")).toBe(10);
@@ -93,20 +92,20 @@ describe("impactOf / realized", () => {
     expect(impactOf(stretch, "fte")).toBe(15);
     expect(impactOf(ms({ status: "backlog" }), "fte")).toBe(0);
   });
-  test("realized counts only shipped milestones", () => {
+  test("eligible counts only shipped milestones", () => {
     const p = project("onboarding");
     // MS-12 shipped at base (87/82 vs 80/80) → 10, MS-15 shipped at base (71 vs 60) → 5; MS-13 is in eval, not shipped.
-    expect(realized(p, "fte")).toBe(15);
-    expect(realized(p, "time")).toBe(15);
-    expect(realized(project("ima"), "fte")).toBe(0);
+    expect(eligible(p, "fte")).toBe(15);
+    expect(eligible(p, "time")).toBe(15);
+    expect(eligible(project("ima"), "fte")).toBe(0);
   });
-  test("realized reacts to a metric crossing a gate", () => {
+  test("eligible reacts to a metric crossing a gate", () => {
     const p = project("onboarding");
     const m12 = p.milestones.find((m) => m.id === "MS-12")!;
     m12.metrics.forEach((x) => (x.current = 95));
-    expect(realized(p, "fte")).toBe(20);
+    expect(eligible(p, "fte")).toBe(20);
     m12.metrics[0]!.current = 79;
-    expect(realized(p, "fte")).toBe(5);
+    expect(eligible(p, "fte")).toBe(5);
   });
 });
 
@@ -213,7 +212,7 @@ describe("releaseState", () => {
 });
 
 describe("burnupSeries", () => {
-  test("realized is flat after today; committed starts today; ceiling is monotone", () => {
+  test("eligible is flat after today; committed starts today; ceiling is monotone", () => {
     const s = burnupSeries(project("onboarding").milestones, "fte", cal);
     expect(cal.months.length).toBe(15);
     expect(cal.today).toBe(8);

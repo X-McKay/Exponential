@@ -1,3 +1,7 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { actorContext, selectActor, listMembers, createMember } from "./identity.ts";
+import { LlmSettingsSchema, MemberInputSchema } from "@valueflow/shared";
+import type { Settings } from "./settings.ts";
 // ================= HTTP app =================
 //
 // A framework-free router over Bun's fetch handler so the whole API can be
@@ -62,7 +66,7 @@ import { nextRuleId } from "@valueflow/domain";
 import type { Rule } from "@valueflow/domain";
 import { askWorkspace } from "./chat.ts";
 import { briefIsCurrent, curateGlance } from "./curator.ts";
-import { liveResponse } from "./live.ts";
+import { liveBus, liveResponse } from "./live.ts";
 import { getRun, loadRunEvents } from "./repo.ts";
 import { recordGlanceView } from "./repo.ts";
 import type { BriefDelivery } from "./brief.ts";
@@ -95,6 +99,7 @@ interface Route {
 }
 
 const json = (body: unknown, status = 200): Response => Response.json(body, { status });
+const REVISION_HEADER = "x-valueflow-revision";
 
 class HttpError extends Error {
   constructor(
@@ -145,6 +150,7 @@ export interface AppOptions {
   source?: RepoSource | null;
   /** The model agents run against; null disables runs. */
   llm?: Llm | null;
+  settings?: Settings;
   /** Grade every finished run with the LLM judge in the background (default on when a model is configured). */
   autoJudge?: boolean;
   /** Where the weekly brief goes besides the app; null keeps it in-app only. */
@@ -164,15 +170,41 @@ export interface JobStatus {
 
 export const createApp = (db: Database, options: AppOptions = {}): App => {
   const now = options.now ?? (() => new Date());
+  const revision = (): number => db.query<{ revision: number }, []>("SELECT revision FROM workspace_revision WHERE id=1").get()?.revision ?? 0;
+  const versioned = (response: Response): Response => {
+    response.headers.set(REVISION_HEADER, String(revision()));
+    return response;
+  };
+  /** Atomically claim the next shared-workspace revision before a mutation starts.
+   * Browser clients send the revision from their latest response, so stale tabs
+   * fail instead of silently replacing newer facts. Headerless internal clients
+   * remain supported for tests and trusted integrations. */
+  const claimRevision = (req: Request): number => {
+    const supplied = req.headers.get(REVISION_HEADER);
+    if (supplied !== null && !/^\d+$/.test(supplied)) throw new HttpError(400, "Invalid workspace revision.");
+    const claimed = supplied === null
+      ? db.query<{ revision: number }, []>("UPDATE workspace_revision SET revision=revision+1 WHERE id=1 RETURNING revision").get()
+      : db.query<{ revision: number }, [number]>("UPDATE workspace_revision SET revision=revision+1 WHERE id=1 AND revision=? RETURNING revision").get(Number(supplied));
+    if (!claimed) throw new Conflict("Workspace data changed in another session. Your draft was not saved; review the latest data and try again.");
+    return claimed.revision;
+  };
+  /** A rejected mutation returns its claim when no later mutation has used it. */
+  const releaseRevision = (claimed: number): void => {
+    db.query("UPDATE workspace_revision SET revision=revision-1 WHERE id=1 AND revision=?").run(claimed);
+  };
   const source = options.source ?? null;
-  const llm = options.llm ?? null;
+  const providers = new AsyncLocalStorage<{ llm: Llm | null }>();
+  const configuredLlm = () => options.settings ? options.settings.getLlm() : options.llm ?? null;
+  const getLlm = () => providers.getStore()?.llm === undefined ? configuredLlm() : providers.getStore()!.llm;
   const validateModel = (spec: string | null | undefined): void => {
+    const llm = getLlm();
     if (spec?.includes("@") && !llm?.validateModel) throw new HttpError(400, "model endpoints must be configured on the server");
     try { llm?.validateModel?.(spec); }
     catch (e) { throw new HttpError(400, e instanceof Error ? e.message : "invalid model selection"); }
   };
   const autoJudge = options.autoJudge ?? true;
   const judgeLater = (runId: string) => {
+    const llm = getLlm();
     if (!llm || !autoJudge) return;
     const model = llm;
     setTimeout(() => {
@@ -185,6 +217,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   let lastCurationHash: string | null = null;
   /** One curation at a time, never twice for the same facts (a failed attempt is not retried until facts move). */
   const curateLater = (s: ReturnType<typeof loadState>) => {
+    const llm = getLlm();
     if (!llm || !autoCurate || curating) return;
     const curator = s.agents.find((a) => a.kind === "curator");
     if (!curator || briefIsCurrent(s)) return;
@@ -220,9 +253,10 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     }, 0);
     return benchmarkStatus;
   };
-  const state = () => ({ ...loadState(db, now(), llm?.describe().prices), syncSource: source?.name ?? null, llm: llm ? llm.describe() : null });
+  const state = () => { const llm = getLlm(); return { ...loadState(db, now(), llm?.describe().prices), syncSource: source?.name ?? null, llm: llm ? llm.describe() : null }; };
   /** A run that would take a budget past its ceiling is refused with the reason. */
   const withinBudget = (agentId: string, proj: string | null): void => {
+    const llm = getLlm();
     if (!llm) return;
     const reason = overBudget(state(), llm.describe().prices, agentId, proj);
     if (reason) throw new HttpError(409, `over budget: ${reason}`);
@@ -235,6 +269,27 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   };
   const p = (params: Params, k: string): string => params[k] ?? "";
 
+  on("GET", "/api/health", () => json({ ok: true, version: "0.1.0", auth: "deferred" }));
+  on("GET", "/api/members", () => json({ members: listMembers(db), actor: actorContext.getStore() ?? null }));
+  on("POST", "/api/members", async req => {
+    const input = await parseBody(req, MemberInputSchema);
+    return json(createMember(db, input.name, input.role), 201);
+  });
+  on("GET", "/api/settings/llm", () => {
+    if (!options.settings) throw new HttpError(409, "Runtime settings are not enabled.");
+    return json(options.settings.status());
+  });
+  on("PUT", "/api/settings/llm", async req => {
+    if (!options.settings) throw new HttpError(409, "Runtime settings are not enabled.");
+    const input = await parseBody(req, LlmSettingsSchema);
+    try { return json(options.settings.save(input)); }
+    catch { throw new HttpError(409, "Could not save settings. Reopen settings and check the configuration and server storage."); }
+  });
+  on("POST", "/api/settings/llm/test", async () => {
+    if (!options.settings) throw new HttpError(409, "Runtime settings are not enabled.");
+    try { return json(await options.settings.test()); }
+    catch { throw new HttpError(400, "Connection failed. Check the API base URL, token, model name and provider availability."); }
+  });
   on("GET", patterns.state, () => {
     const s = state();
     curateLater(s);
@@ -245,6 +300,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   on("GET", patterns.commsAssignment, (_req, params) => json(comms.getDetail(db, p(params, "id"))));
   on("PUT", patterns.commsAssignment, async (req, params) => json(comms.updateAssignment(db, p(params, "id"), await parseBody(req, CommsAssignmentUpdateSchema), now())));
   on("POST", patterns.commsRun, async (req, params) => {
+    const llm = getLlm();
     if (!llm) throw new HttpError(409, "No model configured. Connect a model to draft communications.");
     const body = await parseBody(req, CommsRunInputSchema);
     return json(await comms.runAssignment(db, llm, p(params, "id"), now(), "manual", body.instruction, body.mode), 201);
@@ -271,6 +327,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   on("PUT", patterns.pmAssignment, async (req, params) => json(updateAssignment(db, p(params, "id"), await parseBody(req, PMAssignmentUpdateSchema), now())));
   on("GET", patterns.pmRuns, (_req, params) => json(listRuns(db, p(params, "id"))));
   on("POST", patterns.pmRun, async (req, params) => {
+    const llm = getLlm();
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
     const body = await parseBody(req, PMRunInputSchema);
     return json(await runAssignment(db, llm, p(params, "id"), now(), "manual", body.instruction), 201);
@@ -281,6 +338,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     return json(loadWorkspace(db));
   });
   on("POST", patterns.glanceCurate, async () => {
+    const llm = getLlm();
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
     const curator = state().agents.find((a) => a.kind === "curator");
     if (!curator) throw new HttpError(409, "no curator agent is installed");
@@ -291,6 +349,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   });
   // The project brief: `?force=1` rewrites; otherwise a brief that still matches the facts is returned as is, without a model call.
   on("POST", patterns.projectBrief, async (req, params) => {
+    const llm = getLlm();
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
     const s = state();
     const project = findProject(s, p(params, "pid"));
@@ -462,6 +521,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   });
   // Project setup from documents: multipart with name, brief, snippet[] and file[] parts.
   on("POST", patterns.setup, async (req) => {
+    const llm = getLlm();
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
     let form: FormData;
     try {
@@ -494,6 +554,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   });
   on("GET", patterns.setupDraft, (_req, params) => json(loadSetupDraft(db, p(params, "id")).draft));
   on("POST", patterns.setupRefine, async (req, params) => {
+    const llm = getLlm();
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
     const body = await parseBody(req, SetupRefineInputSchema);
     return json(await refineSetup(db, llm, p(params, "id"), body.feedback, now()));
@@ -505,6 +566,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   });
 
   on("POST", patterns.proposalAccept, (_req, params) => {
+    const llm = getLlm();
     const proposal = findProposal(db, p(params, "id"), now());
     if (proposal.action.type === "agent_model") validateModel(proposal.action.model);
     const accepted = acceptProposal(db, proposal, now());
@@ -518,6 +580,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   });
   on("POST", patterns.proposalDismiss, (_req, params) => json(dismissProposal(db, findProposal(db, p(params, "id"), now()), now())));
   on("POST", patterns.agentRuns, async (req, params) => {
+    const llm = getLlm();
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
     const body = await parseBody(req, RunAgentInputSchema.omit({ agentId: true }));
     withinBudget(p(params, "aid"), body.proj ?? null);
@@ -528,6 +591,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     return json(run, 201);
   });
   on("POST", patterns.chat, async (req) => {
+    const llm = getLlm();
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
     const body = await parseBody(req, ChatInputSchema);
     withinBudget(state().agents.find((a) => a.kind === "chat")?.id ?? "ask", body.proj);
@@ -544,11 +608,13 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     return json(state().runs.find((r) => r.id === p(params, "id")) ?? null);
   });
   on("POST", patterns.runJudge, async (_req, params) => {
+    const llm = getLlm();
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
     return json(await judgeRun(db, llm, p(params, "id"), now()));
   });
   on("GET", patterns.benchmark, () => json(benchmarkStatus));
   on("POST", patterns.benchmark, async (req) => {
+    const llm = getLlm();
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
     const body = await parseBody(req, BenchmarkInputSchema);
     withinBudget(body.agentId ?? "", null);
@@ -556,6 +622,7 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     return json(startJob("benchmark", (progress) => runBenchmark(db, model, now(), body.agentId, progress)), 202);
   });
   on("POST", patterns.scout, async (req) => {
+    const llm = getLlm();
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
     const body = await parseBody(req, ScoutInputSchema);
     for (const spec of body.models ?? []) validateModel(spec);
@@ -591,19 +658,35 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
       if (!params) continue;
       pathMatched = true;
       if (r.method !== req.method) continue;
+      let claimedRevision: number | null = null;
       try {
-        return await r.handler(req, params);
+        let actor;
+        try { actor = selectActor(db, req); } catch { throw new HttpError(400, "Select a valid workspace user and role."); }
+        const reading = req.method === "GET";
+        const presence = url.pathname === patterns.glanceSeen;
+        if (actor?.role === "viewer" && !reading && !presence) throw new HttpError(403, "Viewer mode is read-only. Switch role to make changes.");
+        if (actor && actor.role !== "admin" && (url.pathname.startsWith("/api/settings/") || (!reading && url.pathname === "/api/members"))) throw new HttpError(403, "Switch to Administrator to manage workspace settings.");
+        if (!reading && !presence) claimedRevision = claimRevision(req);
+        const response = await providers.run({ llm: configuredLlm() }, () => actorContext.run(actor, async () => {
+          const handled = await r.handler(req, params);
+          if (!reading && !presence) db.query("INSERT INTO mutation_audit (at,member_id,member_name,role,method,path,status) VALUES (?,?,?,?,?,?,?)")
+            .run(now().toISOString(), actor?.id ?? null, actor?.name ?? "Workspace", actor?.role ?? "admin", req.method, url.pathname, handled.status);
+          if (!reading && !presence && handled.ok) liveBus.emit({ kind: "changed" });
+          return handled;
+        }));
+        return versioned(response);
       } catch (err) {
-        if (err instanceof HttpError) return json({ error: err.message, issues: err.issues }, err.status);
-        if (err instanceof NotFound) return json({ error: err.message }, 404);
-        if (err instanceof Conflict) return json({ error: err.message }, 409);
-        if (err instanceof ProposalRejected) return json({ error: err.message }, 409);
-        if (err instanceof UsageBudgetError) return json({ error: err.message }, 409);
+        if (claimedRevision !== null) releaseRevision(claimedRevision);
+        if (err instanceof HttpError) return versioned(json({ error: err.message, issues: err.issues }, err.status));
+        if (err instanceof NotFound) return versioned(json({ error: err.message }, 404));
+        if (err instanceof Conflict) return versioned(json({ error: err.message }, 409));
+        if (err instanceof ProposalRejected) return versioned(json({ error: err.message }, 409));
+        if (err instanceof UsageBudgetError) return versioned(json({ error: err.message }, 409));
         console.error(err);
-        return json({ error: "internal error" }, 500);
+        return versioned(json({ error: "internal error" }, 500));
       }
     }
-    return json({ error: pathMatched ? "method not allowed" : "not found" }, pathMatched ? 405 : 404);
+    return versioned(json({ error: pathMatched ? "method not allowed" : "not found" }, pathMatched ? 405 : 404));
   };
 
   return { handleApi, db, now };

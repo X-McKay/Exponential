@@ -163,7 +163,7 @@ export const readinessColor = (r: number): string => (r > 0.8 ? C.green : r > 0.
 
 export const gradeColor = (g: string): string => (g.startsWith("A") ? C.green : g.startsWith("B") ? C.amber : C.red);
 
-export const FONT = "'Inter','SF Pro Text',system-ui,sans-serif";
+export const FONT = "'Google Sans Flex',system-ui,sans-serif";
 
 // ---- theme choice ----------------------------------------------------------
 

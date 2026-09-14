@@ -1,0 +1,14 @@
+services:
+  valueflow:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      VALUEFLOW_TRUSTED_WORKSPACE: "on"
+      VALUEFLOW_ORIGINS: "${VALUEFLOW_ORIGINS:-http://localhost:3000}"
+    volumes:
+      - valueflow-data:/app/data
+    stop_grace_period: 4m
+volumes:
+  valueflow-data:

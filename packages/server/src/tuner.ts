@@ -79,7 +79,7 @@ export const buildTunerMessages = (tuner: Agent, state: AppState, target: Agent)
   {
     role: "system",
     content: [
-      `You are ${tuner.name}, the prompt tuner in ValueFlow. You improve another agent's extra instructions from measured evidence only: judge critiques, unsupported claims, failed expectations, people's ratings.`,
+      `You are ${tuner.name}, the prompt tuner in Exponential. You improve another agent's extra instructions from measured evidence only: judge critiques, unsupported claims, failed expectations, people's ratings.`,
       "Do not restate the built-in role; write only the extra instructions that fix what the evidence shows. Keep what works. Be specific: name the failure mode and the rule that prevents it (for example: 'Before citing a figure, find it in the briefing; if absent, write \"not in briefing\"'). Under 250 words. If the evidence does not justify a change, return an empty prompt and say why in the analysis.",
       ...(tuner.prompt ? [`\nAdditional instructions from the workspace:\n${tuner.prompt}`] : []),
       'Reply with a JSON object: {"analysis": string, "prompt": string, "change": string}.',

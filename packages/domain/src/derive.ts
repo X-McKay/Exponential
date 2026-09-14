@@ -65,14 +65,10 @@ export const impactOf = (m: Milestone, d: Dim): number => {
   }
 };
 
-/** Value realized = shipped milestones' gated impact, summed. */
 /** Value eligible after a shipped milestone clears its configured gate.
  * This is delivery eligibility, not an observed business outcome. */
 export const eligible = (p: Pick<Project, "milestones">, d: Dim): number =>
   p.milestones.reduce((a, m) => a + (m.status === "shipped" ? impactOf(m, d) : 0), 0);
-
-/** @deprecated Use eligible; no observed-benefit fact is stored yet. */
-export const realized = eligible;
 
 /** Fraction of a milestone's stretch gates attained, averaged (0 when it has no metrics). */
 export const attainment = (m: Pick<Milestone, "metrics">): number =>
@@ -136,7 +132,7 @@ export const evalCriterion = (c: Criterion, p: Pick<Project, "milestones" | "gov
   }
 };
 
-export type ReleaseLabel = "Shipped" | "Ready" | "Blocked" | "At risk" | "Not configured";
+export type ReleaseLabel = "Ready" | "Blocked" | "At risk" | "Not configured";
 export type ReleaseTone = "good" | "warn" | "bad";
 
 export interface ReleaseState {

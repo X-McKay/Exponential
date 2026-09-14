@@ -1,3 +1,4 @@
+import { actorContext } from "./identity.ts";
 // ================= data access =================
 //
 // Reads assemble facts into domain objects. Writes persist facts. No derived
@@ -771,9 +772,11 @@ export const replaceDevFacts = (db: Database, pid: string, facts: Omit<DevFacts,
 
 export const loadWorkspace = (db: Database): Workspace => {
   const w = db.query<WorkspaceRow, []>("SELECT user_name, user_ini FROM workspace WHERE id = 1").get();
-  const ini = w?.user_ini ?? "ME";
+  const selected = actorContext.getStore();
+  const actor = selected ? db.query<{ name: string; ini: string }, [string]>("SELECT name,ini FROM workspace_members WHERE id=?").get(selected.id) : null;
+  const ini = actor?.ini ?? w?.user_ini ?? "ME";
   const seen = db.query<{ at: string }, [string]>("SELECT at FROM page_views WHERE user_ini = ? AND page = 'glance'").get(ini);
-  return { user: { name: w?.user_name ?? "You", ini }, lastGlanceAt: seen?.at ?? null };
+  return { user: { name: actor?.name ?? w?.user_name ?? "You", ini }, lastGlanceAt: seen?.at ?? null };
 };
 
 /** The signed-in user opened Glance now. */
@@ -837,6 +840,12 @@ export const setBudgets = (db: Database, budgets: BudgetsInput): void => {
 };
 
 export const setWorkspace = (db: Database, w: WorkspaceInput): void => {
+  const actor = actorContext.getStore();
+  if (actor) {
+    // Initials are a stable legacy key for briefs and proposal attribution.
+    db.query("UPDATE workspace_members SET name=? WHERE id=?").run(w.user.name, actor.id);
+    return;
+  }
   db.query("INSERT OR REPLACE INTO workspace (id, user_name, user_ini) VALUES (1, ?, ?)").run(w.user.name, w.user.ini);
 };
 
@@ -979,7 +988,7 @@ export const upsertMilestone = (db: Database, pid: string, input: MilestoneInput
         const at = now.toISOString();
         const text =
           input.status === "shipped"
-            ? `${input.name} shipped — gated impact now counts toward realized value`
+            ? `${input.name} shipped — gated impact now counts toward eligible value`
             : input.status === "eval"
               ? `${input.name} entered In eval — gate metrics now tracking`
               : `${input.name} moved to ${input.status === "progress" ? "In progress" : "Backlog"}`;

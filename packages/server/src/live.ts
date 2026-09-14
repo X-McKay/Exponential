@@ -10,6 +10,7 @@ import type { AgentRun, RunEvent, RunStep } from "@valueflow/domain";
 import { insertRunEvent } from "./repo.ts";
 
 export type LiveEvent =
+  | { kind: "changed" }
   | { kind: "started"; run: Pick<AgentRun, "id" | "agentId" | "proj" | "startedAt" | "instruction" | "benchmark"> }
   | { kind: "step"; event: RunEvent }
   | { kind: "token"; runId: string; text: string }

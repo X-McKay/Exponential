@@ -18,7 +18,7 @@ import {
   deriveUpcoming,
   metricLevel,
   monthLabel,
-  realized,
+  eligible,
   recentEvents,
   releaseState,
   tierOf,
@@ -43,7 +43,7 @@ export const projectContext = (state: AppState, p: Project, cal: Calendar): stri
   const lines: string[] = [];
   lines.push(`# ${p.name} (${p.key}) — stage ${p.stage}, AI risk tier ${p.tier ?? "untiered"}${p.committee ? `, committee approved ${p.committee.date} (${p.committee.ref})` : ", committee review pending"}`);
   lines.push(`As of ${cal.asOf.slice(0, 10)}. ${p.description}`);
-  lines.push(`Targets: FTE reduction ${pct(p.targets.fte)}, time reduction ${pct(p.targets.time)}. Eligible estimate (not observed benefit): FTE ${pct(realized(p, "fte"))}, time ${pct(realized(p, "time"))}.`);
+  lines.push(`Targets: FTE reduction ${pct(p.targets.fte)}, time reduction ${pct(p.targets.time)}. Eligible estimate (not observed benefit): FTE ${pct(eligible(p, "fte"))}, time ${pct(eligible(p, "time"))}.`);
   lines.push(`Team: ${p.team.map((t) => `${t.name} (${t.ini}, ${t.role})`).join("; ") || "none"}. Repos: ${p.repos.map((r) => r.name).join(", ") || "none"}.`);
 
   lines.push("\n## Milestones (value counts only when shipped AND eval metrics clear a gate)");
@@ -154,7 +154,7 @@ export const buildMessages = (agent: Agent, state: AppState, p: Project, cal: Ca
     {
       role: "system",
       content: [
-        `You are ${agent.name}, a workspace agent in ValueFlow, an AI-project delivery platform. ${role.brief}`,
+        `You are ${agent.name}, a workspace agent in Exponential, an AI-project delivery platform. ${role.brief}`,
         `Capabilities: ${agent.caps.join(", ")}.`,
         "Use only the facts in the briefing; never invent numbers, people, or dates. If something is missing, say so.",
         role.task,

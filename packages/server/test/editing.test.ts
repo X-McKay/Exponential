@@ -265,7 +265,7 @@ describe("events", () => {
     const texts = events.slice(0, 4).map((e) => `${e.type}: ${e.text}`);
     expect(texts).toContain("gov: Product SLA moved to Draft");
     expect(texts).toContain("eval: Eval: Restriction clause extraction · Rule recall at 84% — 4pts below base gate (88%)");
-    expect(texts).toContain("ship: Universe definition parser shipped — gated impact now counts toward realized value");
+    expect(texts).toContain("ship: Universe definition parser shipped — gated impact now counts toward eligible value");
     const glance = (await app.get<{ blocks: { kind: string; items?: { text: string }[] }[] }>(routes.glance())).body;
     const activity = glance.blocks.find((b) => b.kind === "activity");
     expect(activity?.items?.some((item) => item.text.includes("Product SLA moved to Draft"))).toBe(true);
@@ -307,6 +307,6 @@ describe("derived values are still never stored", () => {
       .get()
       ?.sql.toLowerCase();
     expect(sql).toContain("user_name");
-    for (const banned of ["realized", "readiness", "release_state", "gate_tier"]) expect(sql?.includes(banned)).toBe(false);
+    for (const banned of ["eligible", "readiness", "release_state", "gate_tier"]) expect(sql?.includes(banned)).toBe(false);
   });
 });

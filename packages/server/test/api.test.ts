@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { PROJECTS, burnupSeries, calendarOf, realized, seedState, tierOf } from "@valueflow/domain";
+import { PROJECTS, burnupSeries, calendarOf, eligible, seedState, tierOf } from "@valueflow/domain";
 import type { AppState, GovernanceItem, Metric, MetricReading, Milestone } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import { READINGS_PER_METRIC, trajectory } from "../src/seed.ts";
@@ -142,7 +142,7 @@ describe("milestones", () => {
     const afterSeries = burnupSeries(p.milestones, "fte", calendarOf(state), p.historicalMilestones);
     for (let i = 0; i < beforeCalendar.today; i++) expect(afterSeries.real[i]).toBe(beforeSeries.real[i]);
     expect(afterSeries.real[beforeCalendar.today]).toBe(5);
-    expect(realized(p, "fte")).toBe(5);
+    expect(eligible(p, "fte")).toBe(5);
     expect(state.releases.onboarding![0]!.criteria[0]).toEqual({ type: "gate", ms: "MS-12", label: "Mapping base gate (accuracy ≥80, coverage ≥80)" });
     const glance = (await app.get<{ blocks: { kind: string; title: string }[] }>(routes.glance())).body;
     expect(glance.blocks.length).toBeGreaterThan(0);
@@ -180,14 +180,14 @@ describe("targets & governance", () => {
 });
 
 describe("derived values are never stored", () => {
-  test("no table carries realized value, tiers, readiness, or release state", () => {
+  test("no table carries eligible value, tiers, readiness, or release state", () => {
     const app = testApp();
     const cols = app.db
       .query<{ name: string; sql: string }, []>("SELECT name, sql FROM sqlite_master WHERE type = 'table'")
       .all()
       .map((r) => r.sql.toLowerCase());
     for (const sql of cols) {
-      for (const banned of ["realized", "tier_cleared", "readiness", "release_state", "gate_tier", "glance"]) expect(sql.includes(banned)).toBe(false);
+      for (const banned of ["eligible", "tier_cleared", "readiness", "release_state", "gate_tier", "glance"]) expect(sql.includes(banned)).toBe(false);
     }
     const p = seedState().projects[0]!;
     expect(tierOf(p.milestones[0]!)).toBe(1);

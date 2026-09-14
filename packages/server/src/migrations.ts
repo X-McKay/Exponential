@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { USAGE_LEDGER_SQL } from "./usage.ts";
 
-// Facts only. Nothing derived (realized value, tiers, readiness, release
+// Facts only. Nothing derived (eligible value, tiers, readiness, release
 // state, Glance) is ever written here.
 export const MIGRATIONS: readonly string[] = [
   `
@@ -488,6 +488,22 @@ export const MIGRATIONS: readonly string[] = [
     UNIQUE (assignment_id, version)
   );
   CREATE INDEX comms_artifacts_by_project ON comms_artifacts(project_id, created_at DESC);
+  `,
+  `
+  CREATE TABLE workspace_members (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, ini TEXT NOT NULL UNIQUE,
+    role TEXT NOT NULL CHECK (role IN ('admin','editor','viewer'))
+  );
+  CREATE TABLE mutation_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, member_id TEXT,
+    member_name TEXT NOT NULL, role TEXT NOT NULL, method TEXT NOT NULL, path TEXT NOT NULL, status INTEGER NOT NULL
+  );
+  `,
+  `
+  CREATE TABLE workspace_revision (
+    id INTEGER PRIMARY KEY CHECK (id = 1), revision INTEGER NOT NULL CHECK (revision >= 0)
+  );
+  INSERT INTO workspace_revision (id, revision) VALUES (1, 0);
   `,
 ];
 

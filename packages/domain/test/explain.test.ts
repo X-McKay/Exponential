@@ -2,7 +2,7 @@
 // explanation agrees with the derivation it traces.
 
 import { describe, expect, test } from "bun:test";
-import { SEED_ASOF, calendarFor, explainGatesCleared, explainReadiness, explainRealized, explainRelease, explainRuns, explainTier, readiness, realized, releaseState, seedState, tierOf, touches } from "../src/index.ts";
+import { SEED_ASOF, calendarFor, explainGatesCleared, explainReadiness, explainEligible, explainRelease, explainRuns, explainTier, readiness, eligible, releaseState, seedState, tierOf, touches } from "../src/index.ts";
 import type { Explanation, Proposal } from "../src/index.ts";
 
 const cal = calendarFor(SEED_ASOF, ["2026-01", "2027-03"]);
@@ -31,9 +31,9 @@ describe("explanations trace the derivation", () => {
     expect(e.inputs[2]?.value).toMatch(/^86% · below base \(base ≥ 88%/);
   });
 
-  test("realized value sums the shipped milestones' gated impact and ends in facts", () => {
-    const e = explainRealized(onboarding, "fte");
-    expect(e.value).toBe(`${realized(onboarding, "fte")}%`);
+  test("eligible value sums the shipped milestones' gated impact and ends in facts", () => {
+    const e = explainEligible(onboarding, "fte");
+    expect(e.value).toBe(`${eligible(onboarding, "fte")}%`);
     expect(e.inputs[0]?.fact).toEqual({ kind: "targets", proj: "onboarding" });
     const contributing = e.inputs.slice(1).filter((i) => i.value !== "0%");
     expect(contributing.length).toBeGreaterThan(0);

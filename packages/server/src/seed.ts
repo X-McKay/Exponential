@@ -36,7 +36,7 @@ export const trajectory = (metric: Pick<Metric, "current">, seed: number, n = RE
   });
 };
 
-export const isSeeded = (db: Database): boolean =>
+const hasProjects = (db: Database): boolean =>
   (db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM projects").get()?.n ?? 0) > 0;
 
 export const fixtureState = (asOf = SEED_ASOF): AppState => ({ asOf, syncSource: null, workspace: WORKSPACE, projects: PROJECTS, releases: RELEASES, dev: DEV(asOf), agents: AGENTS, runs: RUNS(asOf), llm: null, proposals: [], scores: [], rules: RULES(asOf), promptVersions: [], brief: null, projectBriefs: {}, budgets: [], events: seedEvents(asOf), calendar: CALENDAR(asOf) });
@@ -141,9 +141,21 @@ export const ensureAgents = (db: Database): string[] => {
   return added;
 };
 
-/** Seed only when empty; returns whether seeding happened. */
-export const ensureSeeded = (db: Database, now = new Date()): boolean => {
-  if (isSeeded(db)) return false;
-  seed(db, fixtureState(now.toISOString()), now);
-  return true;
+/** Release initialization never creates sample projects or evidence. Safe after deleting the last project. */
+export const initializeWorkspace = (db: Database): void => {
+  db.transaction(() => {
+    const members = db.query<{ n: number }, []>("SELECT COUNT(*) n FROM workspace_members").get()?.n ?? 0;
+    if (!members) {
+      const populated = hasProjects(db);
+      const old = db.query<{ user_name: string; user_ini: string }, []>("SELECT user_name,user_ini FROM workspace WHERE id=1").get();
+      const preserveProfile = old && (populated || old.user_name !== "Al McKay" || old.user_ini !== "AM");
+      const name = preserveProfile ? old.user_name : "Workspace owner";
+      const ini = preserveProfile ? old.user_ini : "ME";
+      db.query("INSERT INTO workspace_members (id,name,ini,role) VALUES ('owner',?,?,'admin')").run(name, ini);
+      db.query("UPDATE workspace SET user_name=?,user_ini=? WHERE id=1").run(name, ini);
+    }
+    const added = ensureAgents(db);
+    const owner = db.query<{ ini: string }, []>("SELECT ini FROM workspace_members ORDER BY rowid LIMIT 1").get();
+    for (const id of added) db.query("UPDATE agents SET owner=? WHERE id=?").run(owner?.ini ?? "ME", id);
+  })();
 };

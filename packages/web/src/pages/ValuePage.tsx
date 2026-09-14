@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { STATUS_LABEL, attainment, explainGatesCleared, explainRealized, explainTier, impactOf, isMeasurable, monthLabel, realized, tierOf } from "@valueflow/domain";
+import { STATUS_LABEL, attainment, explainGatesCleared, explainEligible, explainTier, impactOf, isMeasurable, monthLabel, eligible, tierOf } from "@valueflow/domain";
 import type { Calendar, Dim, ImpactPair, Milestone, Project } from "@valueflow/domain";
 import { Burnup } from "../charts/Burnup.tsx";
 import { EvalScatter } from "../charts/EvalScatter.tsx";
@@ -233,8 +233,8 @@ export function ValuePage({
   );
   const scenarioActive = hasScenarioValues(scenarioValues);
   const displayProject = scenarioActive ? { ...p, milestones: scenarioMilestones } : p;
-  const fte = realized(displayProject, "fte");
-  const time = realized(displayProject, "time");
+  const fte = eligible(displayProject, "fte");
+  const time = eligible(displayProject, "time");
   const gates = displayProject.milestones.filter((m) => tierOf(m) > 0).length;
   const measurable = displayProject.milestones.filter(isMeasurable).length;
   const dims: [Dim, string][] = [
@@ -251,8 +251,8 @@ export function ValuePage({
         </div>
       )}
       <section style={{ display: "flex", gap: 12, padding: "16px 20px 4px", flexWrap: "wrap" }}>
-        <Kpi label={scenarioActive ? "FTE reduction scenario" : "FTE reduction eligible"} value={<Why e={() => explainRealized(displayProject, "fte")}>{`${fte}%`}</Why>} sub={`of ${p.targets.fte}% target`} color={C.indigoHi} ring={p.targets.fte ? fte / p.targets.fte : 0} />
-        <Kpi label={scenarioActive ? "Time reduction scenario" : "Time reduction eligible"} value={<Why e={() => explainRealized(displayProject, "time")}>{`${time}%`}</Why>} sub={`of ${p.targets.time}% target`} color={C.indigoHi} ring={p.targets.time ? time / p.targets.time : 0} />
+        <Kpi label={scenarioActive ? "FTE reduction scenario" : "FTE reduction eligible"} value={<Why e={() => explainEligible(displayProject, "fte")}>{`${fte}%`}</Why>} sub={`of ${p.targets.fte}% target`} color={C.indigoHi} ring={p.targets.fte ? fte / p.targets.fte : 0} />
+        <Kpi label={scenarioActive ? "Time reduction scenario" : "Time reduction eligible"} value={<Why e={() => explainEligible(displayProject, "time")}>{`${time}%`}</Why>} sub={`of ${p.targets.time}% target`} color={C.indigoHi} ring={p.targets.time ? time / p.targets.time : 0} />
         <Kpi label={scenarioActive ? "Scenario gates cleared" : "Gates cleared"} value={<Why e={() => explainGatesCleared(displayProject)}>{`${gates}/${measurable}`}</Why>} sub="measurable milestones" color={C.green} />
       </section>
       <section style={{ padding: "14px 20px 6px" }}>

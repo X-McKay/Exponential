@@ -211,7 +211,7 @@ export const createLlm = (options: LlmOptions): Llm => {
       selection(resolved);
       return resolved;
     }
-    const res = await doFetch(`${base}/models`, { headers: headers(base), redirect: "error" });
+    const res = await doFetch(`${base}/models`, { headers: headers(base), redirect: "error", signal: AbortSignal.timeout(15_000) });
     rejectRedirect(res);
     if (!res.ok) throw new LlmError(res.status, `LLM ${res.status} listing models`);
     const body = (await res.json()) as ModelsResponse;
@@ -244,7 +244,7 @@ export const createLlm = (options: LlmOptions): Llm => {
       redirect: "error",
     });
     rejectRedirect(res);
-    if (!res.ok) throw new LlmError(res.status, `LLM ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    if (!res.ok) throw new LlmError(res.status, `LLM ${res.status}: provider rejected the request`);
     const body = o.onToken ? await readStream(res, o.onToken) : ((await res.json()) as ChatResponse);
     const content = body.choices[0]?.message.content ?? "";
     return {

@@ -1,6 +1,6 @@
 // ================= core domain types =================
 //
-// These are the *facts* the system stores. Everything about value — realized
+// These are the *facts* the system stores. Everything about value — eligible
 // impact, gate tiers, readiness, release states, the Glance briefing — is
 // derived from these at read time and never persisted (see derive.ts).
 
@@ -491,6 +491,9 @@ export interface CalendarEvent {
 }
 
 // ---- workspace ----------------------------------------------------------
+
+export type WorkspaceRole = "admin" | "editor" | "viewer";
+export interface WorkspaceMember { id: string; name: string; ini: string; role: WorkspaceRole }
 
 export interface WorkspaceUser {
   name: string;

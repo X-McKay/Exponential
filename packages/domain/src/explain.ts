@@ -158,9 +158,6 @@ export const explainEligible = (p: Pick<Project, "id" | "milestones" | "targets"
   };
 };
 
-/** @deprecated Use explainEligible; the current fact is eligibility, not an observed outcome. */
-export const explainRealized = explainEligible;
-
 export const explainShipped = (p: Pick<Project, "id" | "milestones">, cal?: Pick<Calendar, "todayYm">): Explanation => ({
   label: "Milestones shipped",
   value: `${shippedCount(p)} of ${p.milestones.length}`,

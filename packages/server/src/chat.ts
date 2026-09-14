@@ -20,7 +20,7 @@ import {
   monthLabel,
   pendingProposals,
   readiness,
-  realized,
+  eligible,
   recentEvents,
   releaseState,
   tierOf,
@@ -45,7 +45,7 @@ export const workspaceBriefing = (state: AppState, cal: Calendar): string => {
       return `${r.id} ${r.name} (${monthLabel(r.month, cal.todayYm)}, ${st.label}, ${st.met}/${st.total})`;
     });
     lines.push(
-      `\n## ${p.name} (id: ${p.id}, ${p.key}) — ${p.stage}, tier ${p.tier ?? "untiered"}. Targets FTE ${p.targets.fte}% / time ${p.targets.time}%; realized FTE ${realized(p, "fte")}% / time ${realized(p, "time")}%. Governance ${Math.round(readiness(p) * 100)}% ready, ${blockers(p)} missing.`,
+      `\n## ${p.name} (id: ${p.id}, ${p.key}) — ${p.stage}, tier ${p.tier ?? "untiered"}. Targets FTE ${p.targets.fte}% / time ${p.targets.time}%; eligible FTE ${eligible(p, "fte")}% / time ${eligible(p, "time")}%. Governance ${Math.round(readiness(p) * 100)}% ready, ${blockers(p)} missing.`,
     );
     for (const m of p.milestones) {
       const t = tierOf(m);
@@ -111,7 +111,7 @@ export const buildChatMessages = (state: AppState, cal: Calendar, input: ChatInp
     {
       role: "system",
       content: [
-        "You are Ask, the ValueFlow workspace assistant. ValueFlow tracks AI projects whose value counts only when milestones ship AND their eval metrics clear a gate; releases go live only when every criterion is met.",
+        "You are Ask, the Exponential workspace assistant. Exponential tracks AI projects whose value counts only when milestones ship AND their eval metrics clear a gate; releases go live only when every criterion is met.",
         "Answer only from the briefing. Quote numbers exactly. If the briefing does not contain the answer, say so and point at where it would be. Be brief: a few sentences or a short list.",
         "Add links to the pages that show the evidence (tabs: overview, value, roadmap, development, governance).",
         "When the user asks for a change, or a change plainly follows from the facts, add a proposal using exactly one of these shapes with a proj field:",

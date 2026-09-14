@@ -1,5 +1,5 @@
 {
-  description = "ValueFlow — AI-project delivery platform: value tied to performance-gated milestones, release go-live criteria, and governance";
+  description = "Exponential — evidence-led AI project delivery for shared workspaces";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -40,7 +40,7 @@
         };
 
         nodeModules = pkgs.stdenvNoCC.mkDerivation {
-          pname = "valueflow-node-modules";
+          pname = "exponential-node-modules";
           inherit version;
           src = manifests;
           nativeBuildInputs = [ bun ];
@@ -73,9 +73,9 @@
           chmod -R u+w node_modules packages
         '';
 
-        # Production bundle + server, runnable as `valueflow`.
-        valueflow = pkgs.stdenvNoCC.mkDerivation {
-          pname = "valueflow";
+        # Production bundle + server, runnable as `exponential`.
+        exponential = pkgs.stdenvNoCC.mkDerivation {
+          pname = "exponential";
           inherit version src;
           nativeBuildInputs = [ bun pkgs.makeWrapper ];
           dontConfigure = true;
@@ -84,13 +84,13 @@
             bun run build
           '';
           installPhase = ''
-            app=$out/share/valueflow
+            app=$out/share/exponential
             mkdir -p $app $out/bin
             cp -R package.json bun.lock tsconfig.json packages node_modules $app/
-            makeWrapper ${bun}/bin/bun $out/bin/valueflow \
+            makeWrapper ${bun}/bin/bun $out/bin/exponential \
               --add-flags "$app/packages/server/src/index.ts" \
               --set NODE_ENV production \
-              --set-default VALUEFLOW_DB "$HOME/.local/share/valueflow/valueflow.sqlite" \
+              --set-default VALUEFLOW_DB "$HOME/.local/share/exponential/exponential.sqlite" \
               --set-default PORT 3000
           '';
           dontFixup = true;
@@ -98,15 +98,13 @@
 
         # typecheck + lint + tests, so `nix flake check` gates CI.
         check = pkgs.stdenvNoCC.mkDerivation {
-          pname = "valueflow-check";
+          pname = "exponential-check";
           inherit version src;
           nativeBuildInputs = [ bun ];
           dontConfigure = true;
           buildPhase = ''
             ${withDeps}
-            bun run typecheck
-            bun run lint
-            bun test
+            bun run check
           '';
           installPhase = "touch $out";
           dontFixup = true;
@@ -114,13 +112,13 @@
       in
       {
         packages = {
-          default = valueflow;
-          inherit valueflow nodeModules;
+          default = exponential;
+          inherit exponential nodeModules;
         };
 
         apps.default = {
           type = "app";
-          program = "${valueflow}/bin/valueflow";
+          program = "${exponential}/bin/exponential";
         };
 
         checks = {
@@ -141,7 +139,7 @@
               echo "→ bun install (first run)"
               bun install --frozen-lockfile
             fi
-            echo "ValueFlow dev shell — bun $(bun --version)"
+            echo "Exponential dev shell — bun $(bun --version)"
             echo "  just            list tasks (just dev, just check, just build, ...)"
           '';
         };

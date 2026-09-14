@@ -7,7 +7,7 @@ on:
 
 jobs:
   bun:
-    name: typecheck · lint · test · build
+    name: check · acceptance · image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,10 +15,14 @@ jobs:
         with:
           bun-version: 1.3.11
       - run: bun install --frozen-lockfile
-      - run: bun run typecheck
-      - run: bun run lint
-      - run: bun test
-      - run: bun run build
+      - run: bun run check
+      - run: bun run test:e2e
+      - run: docker build -t exponential:ci .
+      - name: Verify image healthcheck metadata
+        run: test "$(docker image inspect exponential:ci --format '{{json .Config.Healthcheck}}')" != "null"
+      - run: E2E_IMAGE=exponential:ci CONTAINER_ENGINE=docker bun packages/server/e2e/release.ts
+      - name: Enforce image size ceiling
+        run: test "$(docker image inspect exponential:ci --format '{{.Size}}')" -le 135000000
 
   nix:
     name: nix flake check

@@ -1,3 +1,4 @@
+import { sessionHeaders } from "./session.ts";
 // ================= typed API client =================
 
 import type { Agent, AgentRun, Budget, CalendarEvent, DevFacts, DailyBrief, GovernanceItem, RunEvent, ImpactPair, Metric, MetricReading, Milestone, Project, ProjectTab, Proposal, Release, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
@@ -32,13 +33,20 @@ export class ApiRequestError extends Error {
   }
 }
 
-const request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+let workspaceRevision: string | null = null;
+
+export const request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
   const form = body instanceof FormData;
   const res = await fetch(path, {
     method,
-    headers: body === undefined || form ? undefined : { "content-type": "application/json" },
+    headers: {
+      ...sessionHeaders(),
+      ...(method !== "GET" && workspaceRevision !== null ? { "x-valueflow-revision": workspaceRevision } : {}),
+      ...(body === undefined || form ? {} : { "content-type": "application/json" }),
+    },
     body: body === undefined ? undefined : form ? body : JSON.stringify(body),
   });
+  workspaceRevision = res.headers.get("x-valueflow-revision") ?? workspaceRevision;
   if (!res.ok) {
     let err: ApiError = { error: `${res.status} ${res.statusText}` };
     try {

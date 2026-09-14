@@ -11,3 +11,6 @@ result-*
 data/
 .valueflow.pid
 .env
+
+*.settings.json
+*.settings.json.*.tmp

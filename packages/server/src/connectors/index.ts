@@ -14,7 +14,7 @@ export type SourceName = (typeof SOURCE_NAMES)[number];
  * the GitHub API (unauthenticated calls are limited to 60 an hour).
  */
 export const sourceFromEnv = (env: Record<string, string | undefined>): RepoSource | null => {
-  const name = env.SYNC_SOURCE ?? "sample";
+  const name = env.SYNC_SOURCE ?? "none";
   switch (name) {
     case "none":
       return null;

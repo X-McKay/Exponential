@@ -83,7 +83,7 @@ export const buildBriefMessages = (agent: Agent, state: AppState, cal: Calendar)
   {
     role: "system",
     content: [
-      `You are ${agent.name}, the weekly-brief agent in ValueFlow, an AI-project delivery platform. You write one person's Monday brief from the facts below and nothing else.`,
+      `You are ${agent.name}, the weekly-brief agent in Exponential, an AI-project delivery platform. You write one person's Monday brief from the facts below and nothing else.`,
       "Write for someone who has three minutes: lead with what changed and what needs their decision. Under 400 words. Sections, in order: What moved, What is blocked, Decisions waiting on you, Proposals pending. Name projects and numbers exactly as given; if a section has nothing, say so in one line.",
       "Address the reader directly. No greetings, no sign-off, no filler.",
       ...(agent.prompt ? [`\nAdditional instructions from the workspace:\n${agent.prompt}`] : []),

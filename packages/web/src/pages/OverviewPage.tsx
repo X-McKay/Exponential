@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { budgetLine, defaultBrief, eligible, explainEligible, explainReadiness, explainRuns, explainShipped, fmtTokens, fmtUsd, monthLabel, projectView, reReviewCadence, relTime, releaseState, resolveWidget, runsInScope, spendOf } from "@valueflow/domain";
+import { budgetLine, defaultBrief, eligible, explainEligible, explainReadiness, explainRuns, explainShipped, fmtTokens, fmtUsd, monthLabel, projectView, reReviewCadence, relTime, resolveWidget, runsInScope, spendOf } from "@valueflow/domain";
 import type { AgentRun, AppState, Calendar, Project, ProjectTab } from "@valueflow/domain";
-import { focusRelease, releaseBlockers } from "../releaseFocus.ts";
 import { BriefBody } from "../ui/Brief.tsx";
 import { Why } from "../ui/Explain.tsx";
 import { Avatar, Chip, SectionCard, TierBadge, Tip, ghostBtn } from "../ui/primitives.tsx";
@@ -63,9 +62,6 @@ export function OverviewPage({
     () => releases.filter((r) => r.month >= cal.todayYm).sort((a, b) => a.month.localeCompare(b.month))[0],
     [releases, cal.todayYm],
   );
-  const release = useMemo(() => focusRelease(releases, p, cal), [releases, p, cal]);
-  const releaseStatus = release ? releaseState(release, p, cal) : undefined;
-  const openBlockers = useMemo(() => (release ? releaseBlockers(release, p, cal) : []), [release, p, cal]);
 
   // budgetLine selects state.usageRuns when the usage ledger is available.
   const spend = useMemo(() => budgetLine(state, prices, "project", p.id), [state, prices, p.id]);
@@ -94,9 +90,6 @@ export function OverviewPage({
     ],
   ];
 
-  const blockerTone = releaseStatus?.label === "Blocked" ? "bad" : releaseStatus?.label === "Ready" ? "good" : "warn";
-  const openBlocker = () => onOpen(p.id, "roadmap", release?.id);
-
   return (
     <div style={{ padding: "16px 20px 30px" }}>
       <section aria-label="Project status" style={{ display: "grid", gridTemplateColumns: narrow ? "repeat(2, minmax(0, 1fr))" : "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 14 }}>
@@ -105,52 +98,6 @@ export function OverviewPage({
         <CompactKpi label="FTE reduction eligible" value={<Why e={() => explainEligible(p, "fte")}>{`${eligible(p, "fte")}%`}</Why>} sub={`of ${p.targets.fte}% target`} color={C.indigoHi} />
         <CompactKpi label="Time reduction eligible" value={<Why e={() => explainEligible(p, "time")}>{`${eligible(p, "time")}%`}</Why>} sub={`of ${p.targets.time}% target`} color={C.indigoHi} />
       </section>
-
-      <SectionCard
-        title={release ? `${release.id} · ${release.name}` : "Release blockers"}
-        right={
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-            {releaseStatus && <Chip tone={blockerTone}>{releaseStatus.label}</Chip>}
-            <button type="button" className="vf-ghost" onClick={openBlocker} style={{ ...ghostBtn, minHeight: 36, color: C.indigoHi }}>
-              {openBlockers.length ? "Review blockers" : "Open roadmap"}
-            </button>
-          </span>
-        }
-        pad="10px 14px"
-      >
-        {release ? (
-          <>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: openBlockers.length ? 8 : 0 }}>
-              <span style={{ fontSize: 12, color: C.dim }}>Target month</span>
-              <span style={{ fontSize: 13, color: C.text }}>{monthLabel(release.month, cal.todayYm)}</span>
-              <span style={{ fontSize: 12, color: C.dim }}>·</span>
-              <span style={{ fontSize: 12, color: C.mut }}>{releaseStatus?.met ?? 0}/{releaseStatus?.total ?? release.criteria.length} criteria met</span>
-            </div>
-            {openBlockers.length > 0 ? (
-              <div style={{ borderTop: `1px solid ${C.line}` }}>
-                {openBlockers.map((b) => (
-                  <div key={`${b.tab}:${b.focusId}:${b.index}`} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "9px 0", borderBottom: `1px solid ${C.line}` }}>
-                    <span style={{ color: b.evaluation.pending ? C.amber : C.red, fontSize: 13, width: 14, flexShrink: 0 }}>{b.evaluation.pending ? "◐" : "!"}</span>
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ display: "block", fontSize: 13, color: C.text }}>{b.criterion.label}</span>
-                      <span style={{ display: "block", fontSize: 11, color: C.dim, marginTop: 2 }}>{b.evaluation.sub}{b.owner ? ` · owner ${b.owner}` : ""}</span>
-                    </span>
-                    <button type="button" className="vf-ghost" onClick={() => onOpen(p.id, b.tab, b.focusId)} style={{ ...ghostBtn, minHeight: 36, flexShrink: 0 }}>
-                      {b.label}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div style={{ fontSize: 12, color: C.mut }}>No open criteria on this release. Check the roadmap for the complete delivery picture.</div>
-            )}
-          </>
-        ) : (
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 12, color: C.mut }}>
-            No release is planned yet. Add one to connect delivery criteria to the project status.
-          </div>
-        )}
-      </SectionCard>
 
       <SectionCard
         title="Project brief"

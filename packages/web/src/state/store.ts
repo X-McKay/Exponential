@@ -1,8 +1,7 @@
 // ================= client state =================
 //
-// Facts come from GET /api/state. Every editor applies its change locally
-// first (optimistic) and then writes through the API; on failure the store
-// reloads from the server and surfaces the error.
+// Facts come from GET /api/state. Mutations reconcile only after the server
+// confirms success; failed writes retain editor drafts and never fabricate local facts.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { describeAction } from "@valueflow/domain";
@@ -105,8 +104,8 @@ export const useStore = (): Store => {
   const [live, setLive] = useState<Record<string, LiveRun>>({});
   const noticeSeq = useRef(0);
   const polling = useRef(false);
-  /** Projects whose brief this session already asked for, so an overview visit asks once. */
-  const askedBrief = useRef(new Set<string>());
+  const reloadSequence = useRef(0);
+  const mutationEpoch = useRef(0);
 
   const dismissNotice = useCallback((id: number) => setNotices((n) => n.filter((x) => x.id !== id)), []);
   const notify = useCallback(
@@ -120,7 +119,10 @@ export const useStore = (): Store => {
 
   const reload = useCallback(async () => {
     try {
-      setState(await api.state());
+      const sequence = ++reloadSequence.current;
+      const epoch = mutationEpoch.current;
+      const fresh = await api.state();
+      if (sequence === reloadSequence.current && epoch === mutationEpoch.current) setState(fresh);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -168,7 +170,7 @@ export const useStore = (): Store => {
           return { ...s, runs: [stub, ...s.runs.filter((r) => r !== placeholder)] };
         });
       }
-      if (m.kind === "finished") {
+      if (m.kind === "finished" || m.kind === "changed") {
         if (reloadTimer) clearTimeout(reloadTimer);
         reloadTimer = setTimeout(() => {
           void reload().then(() => setLive((cur) => Object.fromEntries(Object.entries(cur).filter(([, r]) => r.state === "working" || r.state === "queued"))));
@@ -200,13 +202,14 @@ export const useStore = (): Store => {
     [reload],
   );
 
-  /** Apply an optimistic update, then run the write; reject on failure so callers retain drafts. */
+  /** Confirm writes before updating facts; reject on failure so callers retain drafts. */
   const commit = useCallback(
     async <T,>(apply: (s: AppState) => AppState, write: () => Promise<T>, reconcile?: (s: AppState, result: T) => AppState): Promise<T> => {
-      setState((s) => (s ? apply(s) : s));
+      mutationEpoch.current++;
       try {
         const result = await write();
-        if (reconcile) setState((s) => (s ? reconcile(s, result) : s));
+        mutationEpoch.current++;
+        setState((s) => (s ? reconcile ? reconcile(s, result) : apply(s) : s));
         return result;
       } catch (e) {
         fail(e);
@@ -497,8 +500,7 @@ export const useStore = (): Store => {
   }, [fail, notify, reload]);
   const curateProject = useCallback(
     async (pid: string, force: boolean) => {
-      if (!force && askedBrief.current.has(pid)) return;
-      askedBrief.current.add(pid);
+      if (!force) return; // Opening a page never spends provider tokens.
       try {
         const { run } = await api.projectBrief(pid, force);
         if (!run) return;

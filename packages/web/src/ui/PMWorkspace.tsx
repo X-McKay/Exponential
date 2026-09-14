@@ -17,6 +17,7 @@ export interface PMWorkspaceProps {
 }
 const active = (r: { state: string }) => r.state === "working" || r.state === "queued";
 const message = (e: unknown) => e instanceof Error ? e.message : "Request failed. Please try again.";
+type PMPatch = Omit<PMAssignmentUpdate, "expectedUpdatedAt">;
 
 export function PMWorkspace({ projects, agents, llm, userIni, onInspectRun, onRefresh }: PMWorkspaceProps) {
   const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
@@ -79,7 +80,7 @@ export function PMWorkspace({ projects, agents, llm, userIni, onInspectRun, onRe
     catch (e) { setError(message(e)); }
     finally { setBusy(false); requestLock.current = false; }
   };
-  const update = (patch: PMAssignmentUpdate) => {
+  const update = (patch: PMPatch) => {
     if (!assignment) return;
     void mutate(async () => { await pmApi.updateAssignment(assignment.id, { ...patch, expectedUpdatedAt: assignment.updatedAt }); });
   };

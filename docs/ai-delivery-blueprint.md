@@ -1,6 +1,6 @@
-# ValueFlow AI delivery blueprint
+# Exponential AI delivery blueprint
 
-**Status: proposed design; illustrative data only.** This blueprint describes a next version of ValueFlow. It does not describe implemented behavior or authorize production schema, prompt, or workflow changes.
+**Status: proposed design; illustrative data only.** This blueprint describes a possible future version of Exponential. It does not describe implemented behavior or authorize production schema, prompt, or workflow changes.
 
 ## Current scope — two-role first release
 
@@ -8,7 +8,7 @@ Project Manager and Communications Director are the only proposed user-facing AI
 
 ## Product direction
 
-ValueFlow should become a role based AI project manager for evidence led delivery. A person starts an initiative from a template, gives each delivery role a bounded job, and sees requirements, evidence requests, work items, decisions, and communication artifacts in one traceable flow. AI prepares and coordinates; people retain authority over targets, measurements, approvals, exceptions, releases, budgets, and policy.
+Exponential should become a role based AI project manager for evidence led delivery. A person starts an initiative from a template, gives each delivery role a bounded job, and sees requirements, evidence requests, work items, decisions, and communication artifacts in one traceable flow. AI prepares and coordinates; people retain authority over targets, measurements, approvals, exceptions, releases, budgets, and policy.
 
 The existing domain remains the system of record for projects and targets, milestones and readings, releases and criteria, governance, synced development facts, agent runs, proposals, prompt versions, and spend. The new layer adds workflow structure and links around those facts. “Eligible value” remains a derived estimate after shipped milestones clear gates, not an observed benefit. “Ready” remains a criteria result, not proof of deployment.
 

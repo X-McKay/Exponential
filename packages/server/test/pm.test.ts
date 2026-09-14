@@ -25,7 +25,7 @@ describe("PM assignments", () => {
     expect(created?.status).toBe(201);
     const assignment = await created!.json() as PMAssignment;
     const before = assignment.commitments[0]!.createdAt;
-    const updated = await call(a, "PUT", routes.pmAssignment(assignment.id), { owner: "PM" });
+    const updated = await call(a, "PUT", routes.pmAssignment(assignment.id), { owner: "PM", expectedUpdatedAt: assignment.updatedAt });
     expect(updated?.status).toBe(200);
     const after = await updated!.json() as PMAssignment;
     expect(after.objective).toBe("Review health and blockers");
@@ -83,7 +83,7 @@ describe("PM assignments", () => {
     const a = app(); const x = await createAssignment(a.db, { projectId: "ima", objective: "Commitments", owner: "AM", cadence: "manual", enabled: true, onChange: false, commitments: [{ id: "c1", title: "Decision", owner: "AM", due: null, status: "open" }] }, NOW);
     const created = x.commitments[0]!.createdAt;
     const next = new Date(NOW.getTime() + 86_400_000);
-    const updated = await import("../src/pm.ts").then(({ updateAssignment }) => updateAssignment(a.db, x.id, { commitments: [{ id: "c1", title: "Decision", owner: "AM", due: null, status: "done" }] }, next));
+    const updated = await import("../src/pm.ts").then(({ updateAssignment }) => updateAssignment(a.db, x.id, { expectedUpdatedAt: x.updatedAt, commitments: [{ id: "c1", title: "Decision", owner: "AM", due: null, status: "done" }] }, next));
     expect(updated.commitments[0]!.status).toBe("done"); expect(updated.commitments[0]!.createdAt).toBe(created);
   });
 
