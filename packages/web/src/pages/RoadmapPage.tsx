@@ -67,7 +67,7 @@ export function RoadmapPage({
   return (
     <div style={{ padding: "16px 20px 30px" }}>
       <SectionCard title="Roadmap" pad="10px 8px 4px">
-        <div style={{ fontSize: 11, color: C.dim, margin: "0 8px 8px" }}>Explicit schedules and dependencies. Milestones without planned dates remain target markers. Select any lane for details or a release to open its criteria below.</div>
+        <div style={{ fontSize: 11, color: C.dim, margin: "0 8px 8px" }}>Planned work, dependencies, and release targets. Add dates to turn a target marker into a duration bar.</div>
         <RoadmapTimeline p={p} releases={releases} states={states} onPick={selectRelease} picked={picked} cal={cal} />
         <div style={{ display: "flex", gap: 16, padding: "6px 8px 8px", fontSize: 11, color: C.dim, flexWrap: "wrap" }}>
           <span>
