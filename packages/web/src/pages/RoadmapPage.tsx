@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { explainRelease, monthLabel, releaseState } from "@valueflow/domain";
 import type { Calendar, Project, ProjectTab, Release } from "@valueflow/domain";
 import { RoadmapTimeline } from "../charts/RoadmapTimeline.tsx";
@@ -29,11 +29,20 @@ export function RoadmapPage({
   const states = releases.map((r) => releaseState(r, p, cal));
   const [picked, setPicked] = useState<string | null>(() => focusRelease(releases, p, cal)?.id ?? releases[0]?.id ?? null);
 
+  // Selecting from the chart also updates the route's focusId. Only a focus
+  // that arrives from elsewhere (a deep link, the Glance page) should scroll
+  // to the card: moving the chart under the pointer would break its
+  // double-click fold.
+  const pickedFromChart = useRef(false);
   useEffect(() => {
     if (!focusId) return;
     const target = releases.find((r) => r.id === focusId);
     if (!target) return;
     setPicked(target.id);
+    if (pickedFromChart.current) {
+      pickedFromChart.current = false;
+      return;
+    }
     const frame = requestAnimationFrame(() => {
       const row = document.getElementById(`roadmap-release-${target.id}`);
       row?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -48,6 +57,12 @@ export function RoadmapPage({
       row?.scrollIntoView({ behavior: "smooth", block: "start" });
       (row as HTMLDivElement | null)?.focus({ preventScroll: true });
     });
+  };
+  /** Selection from the chart: expand the card below without scrolling to it. */
+  const selectFromChart = (id: string) => {
+    pickedFromChart.current = focusId !== id;
+    setPicked(id);
+    onOpen?.(p.id, "roadmap", id);
   };
   const selectRelease = (id: string) => {
     setPicked(id);
@@ -67,8 +82,8 @@ export function RoadmapPage({
   return (
     <div style={{ padding: "16px 20px 30px" }}>
       <SectionCard title="Roadmap" pad="10px 8px 4px">
-        <div style={{ fontSize: 11, color: C.dim, margin: "0 8px 8px" }}>The axis covers only the months with planned work. Each release spans from its first milestone's start to the month it ships. Click a release to open its details below; double-click it to fold its milestones into the bar.</div>
-        <RoadmapTimeline p={p} releases={releases} states={states} onPick={selectRelease} picked={picked} cal={cal} />
+        <div style={{ fontSize: 11, color: C.dim, margin: "0 8px 8px" }}>The axis covers only the months with planned work. Each release spans from its first milestone's start to the month it ships. Click a release to open its details below; double-click it, or click its caret, to fold its milestones into the bar.</div>
+        <RoadmapTimeline p={p} releases={releases} states={states} onPick={selectFromChart} picked={picked} cal={cal} />
         <div style={{ display: "flex", gap: 16, padding: "6px 8px 8px", fontSize: 11, color: C.dim, flexWrap: "wrap" }}>
           <span>
             release tail: <span style={{ color: C.green }}>◆</span> ready <span style={{ color: C.amber }}>◆</span> at risk <span style={{ color: C.red }}>◆</span> blocked
