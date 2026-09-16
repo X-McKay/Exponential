@@ -36,7 +36,9 @@ export function GovEditor({
   const set = (patch: Partial<GovernanceItem>) => setD((x) => ({ ...x, ...patch }));
   const cats = [...new Set(project.governance.map((g) => g.cat))];
   const dateOk = d.date === null || d.date === "" || /^\d{4}-\d{2}-\d{2}$/.test(d.date);
-  const valid = dateOk && d.owner.trim().length > 0 && d.name.trim().length > 0 && d.cat.trim().length > 0;
+  const ownerOk = /^[\p{L}\p{N}]{1,3}$/u.test(d.owner.trim());
+  const linkOk = !d.link || /^(https?:\/\/)?[^\s]+$/.test(d.link) && !/^[a-z][a-z\d+.-]*:/i.test(d.link.replace(/^https?:/i, ""));
+  const valid = dateOk && ownerOk && linkOk && d.name.trim().length > 0 && d.cat.trim().length > 0;
   const submit = async () => {
     if (!valid || saving) return;
     const id = isNew ? slugId(d.name, project.governance.map((g) => g.id), "item") : d.id;
@@ -73,7 +75,7 @@ export function GovEditor({
       }
     >
       {saveError && <div role="alert" style={{ color: C.redHi, fontSize: 12, margin: "8px 0" }}>Could not save: {saveError}</div>}
-      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 10 }}>
+      <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 10 }}>
         <div>
           <Lbl>Name</Lbl>
           <input style={inpStyle} value={d.name} autoFocus={isNew} placeholder="e.g. Vendor risk assessment" onChange={(e) => set({ name: e.target.value })} />
@@ -88,8 +90,8 @@ export function GovEditor({
           </datalist>
         </div>
       </div>
-      <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1.2 }}>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ flex: "1.2 1 140px", minWidth: 0 }}>
           <Lbl>Status</Lbl>
           <select
             style={inpStyle}
@@ -105,11 +107,11 @@ export function GovEditor({
             ))}
           </select>
         </div>
-        <div style={{ flex: 0.6 }}>
+        <div style={{ flex: "0.6 1 80px", minWidth: 0 }}>
           <Lbl>Owner</Lbl>
-          <input style={inpStyle} value={d.owner} maxLength={3} onChange={(e) => set({ owner: e.target.value.toUpperCase() })} />
+          <input style={{ ...inpStyle, borderColor: d.owner === "" || ownerOk ? C.line2 : C.badLine2 }} value={d.owner} maxLength={3} placeholder="initials" onChange={(e) => set({ owner: e.target.value.toUpperCase() })} />
         </div>
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: "1 1 120px", minWidth: 0 }}>
           <Lbl>Date</Lbl>
           <input style={{ ...inpStyle, borderColor: dateOk ? C.line2 : C.badLine2 }} value={d.date ?? ""} placeholder="YYYY-MM-DD" onChange={(e) => set({ date: e.target.value })} />
         </div>

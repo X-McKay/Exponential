@@ -6,8 +6,8 @@ import { actorContext } from "./identity.ts";
 
 import type { Database } from "bun:sqlite";
 import { EVENT_WINDOW_DAYS, GSTATUS_LABEL, RUN_WINDOW_DAYS, deriveDevEvents } from "@valueflow/domain";
-import type { Agent, AgentRun, AppState, Budget, Build, CalendarEvent, Criterion, DevFacts, Event, DailyBrief, GovernanceItem, RunEvent, Metric, MetricReading, Milestone, MilestoneSnapshot, MilestoneStatus, ModelPrice, Project, PromptVersion, Proposal, ProposalAction, PullRequest, Release, RiskTier, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
-import type { AgentsInput, BudgetsInput, CalendarEventInput, GovernanceInput, GovernanceItemInput, MilestoneInput, ProjectInput, ReleaseInput, RuleInput, TargetsInput, WorkspaceInput } from "@valueflow/shared";
+import type { Agent, AgentRun, AppState, Budget, Build, CalendarEvent, Criterion, DevFacts, Event, DailyBrief, GovernanceItem, RunEvent, Metric, MetricReading, Milestone, MilestoneSnapshot, MilestoneStatus, ModelPrice, Project, ProjectTemplate, PromptVersion, Proposal, ProposalAction, PullRequest, Release, RiskTier, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
+import type { AgentsInput, BudgetsInput, CalendarEventInput, GovernanceInput, GovernanceItemInput, MilestoneInput, ProjectInput, ReleaseInput, RuleInput, TargetsInput, TemplatesInput, WorkspaceInput } from "@valueflow/shared";
 import { loadUsageRuns } from "./usage.ts";
 
 export class NotFound extends Error {
@@ -340,6 +340,7 @@ export const loadState = (db: Database, now: Date = new Date(), prices: Record<s
     budgets: loadBudgets(db),
     events: loadEvents(db, now),
     calendar: loadCalendar(db),
+    templates: loadTemplates(db),
   };
   for (const p of projects) {
     const toMilestone = (m: MilestoneRow, includeRetiredMetrics: boolean): Milestone => ({
@@ -1170,6 +1171,18 @@ export const deleteRelease = (db: Database, pid: string, rid: string): void => {
 };
 
 // ---- JSON documents ------------------------------------------------------
+
+export const loadTemplates = (db: Database): ProjectTemplate[] =>
+  db.query<{ doc: string }, []>("SELECT doc FROM project_templates ORDER BY sort").all().map((r) => JSON.parse(r.doc) as ProjectTemplate);
+
+/** Replace the template list; projects already created from a template are untouched. */
+export const setTemplates = (db: Database, templates: TemplatesInput): void => {
+  db.transaction(() => {
+    db.query("DELETE FROM project_templates").run();
+    const q = db.query("INSERT INTO project_templates (id, sort, doc) VALUES (?,?,?)");
+    templates.forEach((t, i) => q.run(t.id, i, JSON.stringify(t)));
+  })();
+};
 
 /** Replace the agent definitions; agents that disappear take their runs with them, the rest keep theirs. */
 export const setAgents = (db: Database, agents: AgentsInput): void => {

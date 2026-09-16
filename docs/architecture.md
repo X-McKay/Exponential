@@ -40,6 +40,12 @@ Browser writes carry the workspace revision from their latest response. The serv
 
 Trusted integrations may omit the revision header for backward compatibility and must coordinate their own writes.
 
+## Project templates and updates from documents
+
+A project template is a stored JSON document (documents, dependencies, a first plan) that a person edits on the Data page. Creating a project from one instantiates it in the domain package and writes the result through the same repository functions the editors use; nothing about the template is stored on the project afterwards, so editing a template never rewrites history. Dependencies become governance items under the `Dependencies` category so release criteria can reference them. Document-based setup folds a template's required items into the draft as Missing, low-confidence rows the reviewer keeps or drops.
+
+"Update project from documents" never writes to the project. The setup agent compares new documents with the current record and stages each difference as a proposal (details, people, repositories, governance, milestones, releases, calendar), attributed to a run and guarded by a snapshot of the fields it would overwrite. Accepting a proposal applies it through the repository; a proposal whose target moved since it was staged is refused rather than overwriting the newer fact.
+
 ## Model execution
 
 Every model call resolves through a configured provider whose credentials are bound to its API base. Provider redirects are refused. Runtime settings can replace the default provider while retaining advanced environment configuration.

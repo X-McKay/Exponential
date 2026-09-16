@@ -24,7 +24,7 @@ function setup(llm: Llm | null = fake) {
   };
   return { db, call };
 }
-const createInput = { projectId: "ima", objective: "Draft the steering committee update", audience: "Steering committee", format: "executive_update", owner: "AM" };
+const createInput = { projectId: "clauses", objective: "Draft the steering committee update", audience: "Steering committee", format: "executive_update", owner: "JA" };
 
 describe("Communications Director API", () => {
   test("defaults to on demand, validates input, and protects stale edits", async () => {
@@ -49,7 +49,7 @@ describe("Communications Director API", () => {
     let detail = await (await call("GET", routes.commsAssignment(a.id))).json() as CommsWorkspaceDetail;
     expect(detail.messages.map(m => m.role)).toEqual(["user", "assistant"]);
     const v1 = detail.artifacts[0]!;
-    expect(v1).toMatchObject({ version: 1, body, status: "draft", projectId: "ima" });
+    expect(v1).toMatchObject({ version: 1, body, status: "draft", projectId: "clauses" });
     expect((await call("PUT", routes.commsArtifact(v1.id), { status: "approved" })).status).toBe(200);
     await call("POST", routes.commsRun(a.id), { instruction: "Add a clearer next step." });
     detail = await (await call("GET", routes.commsAssignment(a.id))).json() as CommsWorkspaceDetail;
@@ -65,7 +65,7 @@ describe("Communications Director API", () => {
       expect(await downloaded.text()).toBe(body);
     }
     expect((await call("GET", routes.commsDownload(v1.id).replace("format=md", "format=html"))).status).toBe(400);
-    expect((await call("GET", routes.commsArtifacts("ima"))).status).toBe(200);
+    expect((await call("GET", routes.commsArtifacts("clauses"))).status).toBe(200);
     expect(await (await call("GET", routes.commsArtifacts("onb"))).json() as CommsArtifact[]).toEqual([]);
     expect((await call("GET", routes.commsDownload("missing"))).status).toBe(404);
     const run = await (await call("GET", routes.run(v1.agentRunId))).json() as { output: string };
@@ -77,7 +77,7 @@ describe("Communications Director API", () => {
     const { db, call } = setup(null);
     const a = await (await call("POST", routes.commsAssignments(), createInput)).json() as CommsAssignment;
     expect((await call("POST", routes.commsRun(a.id), {})).status).toBe(409);
-    db.query("INSERT INTO comms_runs (id,assignment_id,project_id,trigger,input_fingerprint,state,summary,output,started_at) VALUES ('interrupted',?,'ima','manual','test','working','Running','',?)").run(a.id, NOW.toISOString());
+    db.query("INSERT INTO comms_runs (id,assignment_id,project_id,trigger,input_fingerprint,state,summary,output,started_at) VALUES ('interrupted',?,'clauses','manual','test','working','Running','',?)").run(a.id, NOW.toISOString());
     recoverInterruptedRuns(db, NOW);
     const detail = await (await call("GET", routes.commsAssignment(a.id))).json() as CommsWorkspaceDetail;
     expect(detail.runs[0]).toMatchObject({ state: "failed", summary: "Interrupted by server restart" });
@@ -112,14 +112,14 @@ test("weekly and change drafting respect timing, PM handoff, and calendar change
   const updated = updateAssignment(db, a.id, { expectedUpdatedAt: a.updatedAt, cadence: "manual", onChange: true }, NOW);
   expect(await runDueComms(db, fake, new Date(NOW.getTime() + 8 * 86_400_000))).toEqual([]);
   const { createAssignment: createPm, runAssignment: runPm } = await import("../src/pm.ts");
-  const pm = createPm(db, { projectId: "ima", objective: "Review health", owner: "AM", enabled: true, onChange: false, cadence: "manual", commitments: [] }, NOW);
+  const pm = createPm(db, { projectId: "clauses", objective: "Review health", owner: "JA", enabled: true, onChange: false, cadence: "manual", commitments: [] }, NOW);
   await runPm(db, { ...fake, chat: async () => ({ content: JSON.stringify({ summary: "PM handoff", body: "PM EVIDENCE: release owner requires confirmation.", attention: true }), model: "fake", usage: null, truncated: false }) }, pm.id, NOW, "manual");
   let context = "";
   const capture: Llm = { ...fake, chat: async messages => { context = messages.map(m => m.content).join("\n"); return fake.chat(messages); } };
   expect(await runDueComms(db, capture, new Date(NOW.getTime() + 8 * 86_400_000))).toHaveLength(1);
   expect(context).toContain("PM EVIDENCE: release owner requires confirmation.");
   expect(context).toContain("Latest communications draft:");
-  await call("POST", routes.calendar(), { id: "comms-review", proj: "ima", date: "2026-10-01", tab: "overview", text: "Steering decision", sub: null });
+  await call("POST", routes.calendar(), { id: "comms-review", proj: "clauses", date: "2026-10-01", tab: "overview", text: "Steering decision", sub: null });
   expect(await runDueComms(db, fake, new Date(NOW.getTime() + 9 * 86_400_000))).toHaveLength(1);
   updateAssignment(db, a.id, { expectedUpdatedAt: updated.updatedAt, enabled: false }, NOW);
   expect(await runDueComms(db, fake, new Date(NOW.getTime() + 30 * 86_400_000))).toEqual([]);

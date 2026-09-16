@@ -53,10 +53,12 @@ export function Chip({ children, tone = "default", dot }: { children: ReactNode;
         display: "inline-flex",
         alignItems: "center",
         gap: 5,
+        maxWidth: "100%",
+        boxSizing: "border-box",
       }}
     >
       {dot && <span style={{ width: 6, height: 6, borderRadius: "50%", background: typeof dot === "string" ? dot : t.dot, flexShrink: 0 }} />}
-      {children}
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{children}</span>
     </span>
   );
 }
@@ -92,13 +94,13 @@ export function Avatar({ ini, size = 24 }: { ini: string; size?: number }) {
 
 export function Kpi({ label, value, sub, color = C.text, ring }: { label: string; value: ReactNode; sub: ReactNode; color?: string; ring?: number }) {
   return (
-    <div className="vf-kpi" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "14px 16px" }}>
+    <div className="vf-kpi" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "14px 16px", minWidth: 0 }}>
       <div style={{ fontSize: 12, color: C.mut, marginBottom: 8 }}>{label}</div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
         {ring !== undefined && <Ring pct={ring} size={30} stroke={3} color={color} />}
-        <span style={{ fontSize: 24, fontWeight: 550, color, letterSpacing: "-0.02em", lineHeight: 1.1 }}>{value}</span>
+        <span style={{ fontSize: 24, fontWeight: 550, color, letterSpacing: "-0.02em", lineHeight: 1.1, minWidth: 0, overflowWrap: "anywhere" }}>{value}</span>
       </div>
-      <div style={{ fontSize: 12, color: C.dim, marginTop: 6 }}>{sub}</div>
+      <div style={{ fontSize: 12, color: C.dim, marginTop: 6, overflowWrap: "anywhere" }}>{sub}</div>
     </div>
   );
 }
@@ -108,7 +110,7 @@ export function SectionCard({ title, right, children, pad = "14px" }: { title?: 
     <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, marginBottom: 14 }}>
       {(title || right) && (
         <div className="vf-section-head" style={{ padding: "12px 14px", borderBottom: `1px solid ${C.line}` }}>
-          <span style={{ fontSize: 13, fontWeight: 550, letterSpacing: "-0.01em" }}>{title}</span>
+          <span style={{ fontSize: 13, fontWeight: 550, letterSpacing: "-0.01em", minWidth: 0, overflowWrap: "anywhere" }}>{title}</span>
           {right}
         </div>
       )}
@@ -228,6 +230,7 @@ export function Btn({ children, onClick, tone = "default", disabled }: { childre
   return (
     <button
       type="button"
+      className="vf-btn"
       onClick={disabled ? undefined : onClick}
       aria-disabled={disabled}
       disabled={disabled}
@@ -350,6 +353,7 @@ export function Modal({
           maxWidth: width,
           maxHeight: "86vh",
           overflowY: "auto",
+          overscrollBehavior: "contain",
           background: C.raised,
           border: `1px solid ${C.line2}`,
           borderRadius: 12,
@@ -374,6 +378,7 @@ export function Modal({
               gap: 8,
               alignItems: "center",
               justifyContent: "flex-end",
+              flexWrap: "wrap",
               padding: "12px 20px",
               borderTop: `1px solid ${C.line}`,
               position: "sticky",
@@ -444,8 +449,8 @@ export function ListRow({
     <>
       {lead !== undefined && <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", minWidth: 14, paddingTop: 2 }}>{lead}</span>}
       <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ fontSize: 13, color: C.text, lineHeight: 1.5, display: "block" }}>{title}</span>
-        {sub !== undefined && <span style={{ fontSize: 11.5, color: C.dim, display: "block", marginTop: 2, lineHeight: 1.5 }}>{sub}</span>}
+        <span style={{ fontSize: 13, color: C.text, lineHeight: 1.5, display: "block", overflowWrap: "anywhere" }}>{title}</span>
+        {sub !== undefined && <span style={{ fontSize: 11.5, color: C.dim, display: "block", marginTop: 2, lineHeight: 1.5, overflowWrap: "anywhere" }}>{sub}</span>}
         {below}
       </span>
     </>

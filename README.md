@@ -25,8 +25,11 @@ Run `bun run doctor` to diagnose a local environment. See [development setup](do
 
 1. Open **Workspace settings** and rename the owner or add colleagues.
 2. Choose the acting user and role in the bottom-left sidebar.
-3. Create a project manually from **Portfolio → New project**, or configure a model and choose **Set up from documents**.
+3. Create a project from **Portfolio → New project**, starting from a **project template** (the governance documents, dependencies, and first plan a project of that kind needs), or configure a model and choose **Set up from documents**, which drafts the record from a charter or deck and folds in the template's base set.
 4. Add milestones, evaluation gates, governance controls, releases, and measurements as work progresses.
+5. When documents change, open the project and choose **Update from documents**: every difference is staged as a proposal in the **Inbox**, where you apply or dismiss each one (or all at once). Nothing is applied until you decide.
+
+Templates are configurable under **Data → Project templates**. The built-in ones are a human-in-the-loop assistant, straight-through automation, an analysis and drafting copilot, and a minimal set. Template dependencies (data access, model quota, a golden set, staffing, a fallback) are tracked as governance items under a **Dependencies** category so release criteria can reference them.
 
 The fictional [sample charters](docs/samples/) exercise document-based setup without adding seed data automatically:
 
@@ -34,7 +37,7 @@ The fictional [sample charters](docs/samples/) exercise document-based setup wit
 - [Invoice Review Assistant](docs/samples/invoice-review-charter.md)
 - [Internal Knowledge Search](docs/samples/knowledge-search-charter.md)
 
-`bun run demo:reset` is a **destructive** demo command that replaces the configured database with fixtures. Use it only with disposable local data.
+`bun run demo:reset` is a **destructive** demo command that replaces the configured database with fictional fixtures: five projects across every stage and risk tier, with invented people and numbers. `bun run demo:reset -- --synthetic` generates a workspace instead (`SEED_SYNTHETIC=<seed> SEED_PROJECTS=<n>` shape it) and stages example proposals in the inbox. Use either only with disposable local data.
 
 ## Model connection
 
@@ -55,10 +58,12 @@ See [configuration](docs/configuration.md) for every environment variable and th
 | `bun run start` | Serve the production build |
 | `bun run check` | Typecheck, lint, test, verify documentation links, and compare Claude/Codex skills |
 | `bun run test:e2e` | Run the production HTTP acceptance suite with an isolated local provider |
+| `bun run test:ui` | Run the Playwright browser suite against the production build on a synthetic workspace |
+| `bun run container:ui` | Run the browser suite against the built container image |
 | `bun run release:check` | Run all non-container release checks |
 | `bun run container:build` | Build the image with Podman or Docker |
 | `bun run container:test` | Run the acceptance suite against the built image |
-| `bun run demo:reset` | Destructively replace the configured database with demo fixtures |
+| `bun run demo:reset` | Destructively replace the configured database with demo fixtures (`-- --synthetic` generates a workspace instead) |
 
 `just` mirrors the main workflows for developers who prefer a task runner. Run `just` to list recipes.
 

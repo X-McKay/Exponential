@@ -93,7 +93,7 @@ export function BudgetEditor({ budgets, agents, projects, prices, onSave, onClos
     <div key={scope} style={{ marginTop: 14 }}>
       <div style={{ fontSize: 11, color: C.dim, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 4 }}>{title}</div>
       {group(scope).map(([r, i]) => (
-        <div key={`${r.scope}:${r.ref}`} style={{ display: "grid", gridTemplateColumns: "1fr 120px 120px", gap: 8, alignItems: "center", padding: "5px 0", borderTop: `1px solid ${C.line}` }}>
+        <div key={`${r.scope}:${r.ref}`} className="vf-cols" style={{ display: "grid", gridTemplateColumns: "1fr 120px 120px", gap: 8, alignItems: "center", padding: "5px 0", borderTop: `1px solid ${C.line}` }}>
           <span style={{ fontSize: 13, color: C.text2 }}>{r.name}</span>
           <input style={{ ...inpStyle, height: 28 }} value={r.usd} placeholder={priced ? "$ / month" : "$ (needs prices)"} onChange={(e) => set(i, { usd: e.target.value })} aria-label={`${r.name} monthly dollars`} />
           <input style={{ ...inpStyle, height: 28 }} value={r.tokens} placeholder="tokens, e.g. 2M" onChange={(e) => set(i, { tokens: e.target.value })} aria-label={`${r.name} monthly tokens`} />
@@ -120,7 +120,7 @@ export function BudgetEditor({ budgets, agents, projects, prices, onSave, onClos
         Soft spending limits apply per calendar month, in dollars or tokens or both; the tighter one counts. Calls reserve estimated input/output capacity before running, then provider usage is reconciled afterward. Unknown usage or pricing holds further budgeted calls, and a zero limit pauses that scope. Spend is derived from every run's token counts
         {priced ? ` and the prices for ${Object.keys(prices).join(", ")}.` : "; set LLM_PRICES (model=in/out USD per million tokens) to see dollars."}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 120px", gap: 8, marginTop: 14, fontSize: 10.5, color: C.dim, letterSpacing: "0.05em", textTransform: "uppercase" }}>
+      <div className="vf-cols vf-cols-head" style={{ display: "grid", gridTemplateColumns: "1fr 120px 120px", gap: 8, marginTop: 14, fontSize: 10.5, color: C.dim, letterSpacing: "0.05em", textTransform: "uppercase" }}>
         <span />
         <span>USD / month</span>
         <span>Tokens / month</span>

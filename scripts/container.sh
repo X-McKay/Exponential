@@ -31,8 +31,12 @@ case "$action" in
     if ! "$engine" image inspect "$image" >/dev/null 2>&1; then build; fi
     E2E_IMAGE="$image" CONTAINER_ENGINE="$engine" bun packages/server/e2e/release.ts
     ;;
+  ui)
+    if ! "$engine" image inspect "$image" >/dev/null 2>&1; then build; fi
+    E2E_IMAGE="$image" CONTAINER_ENGINE="$engine" bash scripts/ui-test.sh
+    ;;
   *)
-    echo "Usage: scripts/container.sh build|test" >&2
+    echo "Usage: scripts/container.sh build|test|ui" >&2
     exit 2
     ;;
 esac

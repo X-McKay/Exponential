@@ -69,11 +69,26 @@ bun run skills:check
 
 Run `just` to see equivalent task-runner recipes. `nix develop` opens the pinned toolchain; `nix flake check` runs the Nix quality gate.
 
+## Browser tests and synthetic data
+
+The Playwright suite in `tests/ui` drives the built application in Chromium: portfolio and navigation, editors and their validation, project templates, update-from-documents and the inbox, the data page, and phone-width layouts (no page may scroll sideways). It lives in its own package so the application workspace, the release image, and the Nix dependency hash never include a browser test runner.
+
+```sh
+bun run test:ui                       # production server on a temp database, seeded through the API
+bun run test:ui -- --grep inbox       # any Playwright arguments pass through
+E2E_IMAGE=localhost/exponential:release bun run container:ui   # the same suite against the container image
+E2E_BASE_URL=http://localhost:3100 bun run test:ui             # an empty application you started yourself
+```
+
+Every run seeds a **synthetic workspace**: `syntheticState({ seed, projects })` in `packages/domain` generates projects across every stage and tier, milestones with readings on both sides of their gates, governance registers in every state, releases with mixed criteria, development facts, and a charter document per project. The same seed always yields the same workspace, so browser tests, the property-style tests in `packages/server/test/synthetic.test.ts`, and `bun run demo:reset -- --synthetic` all draw from one source. The suite also starts the local fixture model provider from `packages/server/e2e/provider.ts`, so document-based setup and updates run without a real model.
+
+The first run needs a Chromium build. Set `PW_CHROMIUM=/path/to/chrome` to use one already installed, or let the script run `playwright install chromium`. Failures leave a trace and screenshot under `tests/ui/results`; `npx playwright show-trace <trace.zip>` from `tests/ui` replays one.
+
 ## Local data
 
 The default database is `data/valueflow.sqlite`; runtime model settings default to `data/valueflow.sqlite.settings.json`. Both are ignored by Git. SQLite WAL and SHM files belong to the same database and must stay together during backups.
 
-Normal startup creates an empty workspace with an owner and built-in agent definitions. It is safe to stop and restart without creating sample projects. `bun run demo:reset` deletes the configured database and writes demo fixtures, so use it only for a disposable local environment.
+Normal startup creates an empty workspace with an owner, built-in agent definitions, and the built-in project templates. It is safe to stop and restart without creating sample projects. `bun run demo:reset` deletes the configured database and writes the fictional demo fixtures; `bun run demo:reset -- --synthetic` writes a generated workspace and stages example proposals. Use either only for a disposable local environment.
 
 To use a separate database while testing manually:
 

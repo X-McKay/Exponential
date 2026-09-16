@@ -5,8 +5,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { describeAction } from "@valueflow/domain";
-import type { Agent, AgentRun, AppState, Budget, CalendarEvent, GovernanceItem, ImpactPair, MetricReading, Milestone, Project, Proposal, Release, Rule, Workspace } from "@valueflow/domain";
-import type { ProjectInput, RuleInput, RunAgentInput } from "@valueflow/shared";
+import type { Agent, AgentRun, AppState, Budget, CalendarEvent, GovernanceItem, ImpactPair, MetricReading, Milestone, Project, ProjectTemplate, Proposal, Release, Rule, Workspace } from "@valueflow/domain";
+import type { ProjectInput, RuleInput, RunAgentInput, TemplateCreateInput } from "@valueflow/shared";
 import { api } from "../api/client.ts";
 import type { JobStatus } from "../api/client.ts";
 import { applyLive, subscribeLive } from "./live.ts";
@@ -32,6 +32,9 @@ export interface Store {
   deleteMilestone: (pid: string, mid: string) => Promise<unknown>;
   saveTargets: (pid: string, targets: ImpactPair) => Promise<ImpactPair>;
   saveProject: (input: ProjectInput, isNew: boolean) => Promise<unknown>;
+  /** Create a project and everything its template adds in one request. */
+  createFromTemplate: (tid: string, input: TemplateCreateInput) => Promise<Project>;
+  saveTemplates: (templates: ProjectTemplate[]) => Promise<unknown>;
   deleteProject: (pid: string) => Promise<unknown>;
   saveGovernance: (pid: string, item: GovernanceItem, isNew: boolean) => Promise<unknown>;
   deleteGovernance: (pid: string, gid: string) => Promise<unknown>;
@@ -269,6 +272,25 @@ export const useStore = (): Store => {
             : updateProject(s, input.id, (p) => ({ ...p, ...input })),
         () => (isNew ? api.createProject(input) : api.updateProject(input)),
         (s, result) => ({ ...s, projects: isNew ? [...s.projects.filter((p) => p.id !== result.id), result] : s.projects.map((p) => (p.id === result.id ? result : p)) }),
+      ),
+    [commit],
+  );
+
+  const createFromTemplate = useCallback(
+    (tid: string, input: TemplateCreateInput) =>
+      commit(
+        (s) => s,
+        () => api.createFromTemplate(tid, input),
+        (s, result) => ({ ...s, projects: [...s.projects.filter((p) => p.id !== result.id), result], releases: { ...s.releases, [result.id]: s.releases[result.id] ?? [] } }),
+      ),
+    [commit],
+  );
+  const saveTemplates = useCallback(
+    (templates: ProjectTemplate[]) =>
+      commit(
+        (s) => ({ ...s, templates }),
+        () => api.setTemplates(templates),
+        (s, result) => ({ ...s, templates: result }),
       ),
     [commit],
   );
@@ -578,6 +600,8 @@ export const useStore = (): Store => {
       deleteMilestone,
       saveTargets,
       saveProject,
+      createFromTemplate,
+      saveTemplates,
       deleteProject,
       saveGovernance,
       deleteGovernance,
@@ -618,6 +642,8 @@ export const useStore = (): Store => {
       deleteMilestone,
       saveTargets,
       saveProject,
+      createFromTemplate,
+      saveTemplates,
       deleteProject,
       saveGovernance,
       deleteGovernance,

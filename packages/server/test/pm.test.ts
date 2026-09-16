@@ -21,7 +21,7 @@ const call = async (a: ReturnType<typeof app>, method: string, path: string, bod
 describe("PM assignments", () => {
   test("creates, lists, and partially updates while preserving commitments", async () => {
     const a = app();
-    const created = await call(a, "POST", routes.pmAssignments(), { projectId: "ima", objective: "Review health and blockers", owner: "AM", cadence: "manual", commitments: [{ title: "Confirm owner", owner: "AM", due: "2026-09-20" }] });
+    const created = await call(a, "POST", routes.pmAssignments(), { projectId: "clauses", objective: "Review health and blockers", owner: "JA", cadence: "manual", commitments: [{ title: "Confirm owner", owner: "JA", due: "2026-09-20" }] });
     expect(created?.status).toBe(201);
     const assignment = await created!.json() as PMAssignment;
     const before = assignment.commitments[0]!.createdAt;
@@ -35,7 +35,7 @@ describe("PM assignments", () => {
 
   test("manual run persists PM output and links its underlying agent run", async () => {
     const a = app();
-    const assignment = await (await call(a, "POST", routes.pmAssignments(), { projectId: "ima", objective: "Review blockers", owner: "AM", commitments: [{ title: "Decision", owner: "AM", due: null }] }))!.json() as PMAssignment;
+    const assignment = await (await call(a, "POST", routes.pmAssignments(), { projectId: "clauses", objective: "Review blockers", owner: "JA", commitments: [{ title: "Decision", owner: "JA", due: null }] }))!.json() as PMAssignment;
     const run = await call(a, "POST", routes.pmRun(assignment.id), { instruction: "Include communications brief" });
     expect(run?.status).toBe(201);
     const body = await run!.json() as PMRun;
@@ -47,20 +47,20 @@ describe("PM assignments", () => {
   });
 
   test("onChange manual assignments run once and dedupe unchanged inputs", async () => {
-    const a = app(); const x = await createAssignment(a.db, { projectId: "ima", objective: "Watch changes", owner: "AM", cadence: "manual", onChange: true, enabled: true, commitments: [] }, NOW);
+    const a = app(); const x = await createAssignment(a.db, { projectId: "clauses", objective: "Watch changes", owner: "JA", cadence: "manual", onChange: true, enabled: true, commitments: [] }, NOW);
     await runAssignment(a.db, fake, x.id, NOW, "manual");
     expect(await runDuePm(a.db, fake, new Date(NOW.getTime() + 8 * 86_400_000))).toEqual([]);
   });
 
   test("weekly assignments wait seven days before repeating unchanged work", async () => {
-    const a = app(); const x = await createAssignment(a.db, { projectId: "ima", objective: "Weekly health", owner: "AM", cadence: "weekly", enabled: true, onChange: false, commitments: [] }, NOW);
+    const a = app(); const x = await createAssignment(a.db, { projectId: "clauses", objective: "Weekly health", owner: "JA", cadence: "weekly", enabled: true, onChange: false, commitments: [] }, NOW);
     await runAssignment(a.db, fake, x.id, NOW, "manual");
     expect(await runDuePm(a.db, fake, new Date(NOW.getTime() + 6 * 86_400_000))).toEqual([]);
     expect((await runDuePm(a.db, fake, new Date(NOW.getTime() + 7 * 86_400_000))).length).toBe(1);
   });
 
   test("failed runs leave fingerprint unset and use a retry cooldown", async () => {
-    const a = app(); const x = await createAssignment(a.db, { projectId: "ima", objective: "Failure test", owner: "AM", cadence: "weekly", enabled: true, onChange: false, commitments: [] }, NOW);
+    const a = app(); const x = await createAssignment(a.db, { projectId: "clauses", objective: "Failure test", owner: "JA", cadence: "weekly", enabled: true, onChange: false, commitments: [] }, NOW);
     const down: Llm = { ...fake, chat: async () => { throw new Error("offline"); } };
     const failed = await runAssignment(a.db, down, x.id, NOW, "manual");
     expect(failed.state).toBe("failed"); expect(getAssignment(a.db, x.id).lastInputFingerprint).toBeNull();
@@ -69,7 +69,7 @@ describe("PM assignments", () => {
   });
 
   test("concurrent PM calls are rejected while the agent run is working", async () => {
-    const a = app(); const x = await createAssignment(a.db, { projectId: "ima", objective: "Concurrency", owner: "AM", cadence: "manual", enabled: true, onChange: true, commitments: [] }, NOW);
+    const a = app(); const x = await createAssignment(a.db, { projectId: "clauses", objective: "Concurrency", owner: "JA", cadence: "manual", enabled: true, onChange: true, commitments: [] }, NOW);
     let release!: () => void; const pending = new Promise<void>((resolve) => { release = resolve; });
     const slow: Llm = { ...fake, chat: async () => { await pending; return { content: reply, model: "fake", usage: null, truncated: false }; } };
     const first = runAssignment(a.db, slow, x.id, NOW, "manual");
@@ -80,37 +80,37 @@ describe("PM assignments", () => {
   });
 
   test("commitment status updates preserve its creation time", async () => {
-    const a = app(); const x = await createAssignment(a.db, { projectId: "ima", objective: "Commitments", owner: "AM", cadence: "manual", enabled: true, onChange: false, commitments: [{ id: "c1", title: "Decision", owner: "AM", due: null, status: "open" }] }, NOW);
+    const a = app(); const x = await createAssignment(a.db, { projectId: "clauses", objective: "Commitments", owner: "JA", cadence: "manual", enabled: true, onChange: false, commitments: [{ id: "c1", title: "Decision", owner: "JA", due: null, status: "open" }] }, NOW);
     const created = x.commitments[0]!.createdAt;
     const next = new Date(NOW.getTime() + 86_400_000);
-    const updated = await import("../src/pm.ts").then(({ updateAssignment }) => updateAssignment(a.db, x.id, { expectedUpdatedAt: x.updatedAt, commitments: [{ id: "c1", title: "Decision", owner: "AM", due: null, status: "done" }] }, next));
+    const updated = await import("../src/pm.ts").then(({ updateAssignment }) => updateAssignment(a.db, x.id, { expectedUpdatedAt: x.updatedAt, commitments: [{ id: "c1", title: "Decision", owner: "JA", due: null, status: "done" }] }, next));
     expect(updated.commitments[0]!.status).toBe("done"); expect(updated.commitments[0]!.createdAt).toBe(created);
   });
 
   test("disabled assignments never run in the background", async () => {
-    const a = app(); await createAssignment(a.db, { projectId: "ima", objective: "Disabled", owner: "AM", cadence: "weekly", enabled: false, onChange: true, commitments: [] }, NOW);
+    const a = app(); await createAssignment(a.db, { projectId: "clauses", objective: "Disabled", owner: "JA", cadence: "weekly", enabled: false, onChange: true, commitments: [] }, NOW);
     expect(await runDuePm(a.db, fake, new Date(NOW.getTime() + 30 * 86_400_000))).toEqual([]);
   });
 });
 
 test("changed development facts trigger a review, sync metadata alone does not", async () => {
   const a = app();
-  const x = createAssignment(a.db, { projectId: "ima", objective: "Watch CI", owner: "AM", cadence: "manual", onChange: true, enabled: true, commitments: [] }, NOW);
+  const x = createAssignment(a.db, { projectId: "clauses", objective: "Watch CI", owner: "JA", cadence: "manual", onChange: true, enabled: true, commitments: [] }, NOW);
   const { loadState, replaceDevFacts } = await import("../src/repo.ts");
-  const facts = loadState(a.db, NOW).dev.ima!;
+  const facts = loadState(a.db, NOW).dev.clauses!;
   await runAssignment(a.db, fake, x.id, NOW, "manual");
   const later = new Date(NOW.getTime() + 1000);
   const sync = { source: "test", startedAt: later.toISOString(), finishedAt: later.toISOString(), ok: true, message: "refreshed" };
-  replaceDevFacts(a.db, "ima", facts, sync);
+  replaceDevFacts(a.db, "clauses", facts, sync);
   expect(await runDuePm(a.db, fake, later)).toEqual([]);
   facts.repos[0]!.coverage = 42;
-  replaceDevFacts(a.db, "ima", facts, sync);
+  replaceDevFacts(a.db, "clauses", facts, sync);
   expect(await runDuePm(a.db, fake, later)).toHaveLength(1);
 });
 
 test("stale assignment edits are rejected and impossible due dates are invalid", async () => {
   const a = app();
-  const x = createAssignment(a.db, { projectId: "ima", objective: "Track decisions", owner: "AM", cadence: "manual", onChange: false, enabled: true, commitments: [] }, NOW);
+  const x = createAssignment(a.db, { projectId: "clauses", objective: "Track decisions", owner: "JA", cadence: "manual", onChange: false, enabled: true, commitments: [] }, NOW);
   expect((await call(a, "PUT", routes.pmAssignment(x.id), { expectedUpdatedAt: x.updatedAt, owner: "AL" }))?.status).toBe(200);
   expect((await call(a, "PUT", routes.pmAssignment(x.id), { expectedUpdatedAt: x.updatedAt, commitments: [] }))?.status).toBe(409);
   expect(getAssignment(a.db, x.id).owner).toBe("AL");
@@ -119,9 +119,9 @@ test("stale assignment edits are rejected and impossible due dates are invalid",
 
 test("restart recovery preserves completed PM runs and releases interrupted assignments", async () => {
   const a = app();
-  const x = createAssignment(a.db, { projectId: "ima", objective: "Recover", owner: "AM", cadence: "manual", onChange: false, enabled: true, commitments: [] }, NOW);
+  const x = createAssignment(a.db, { projectId: "clauses", objective: "Recover", owner: "JA", cadence: "manual", onChange: false, enabled: true, commitments: [] }, NOW);
   const first = await runAssignment(a.db, fake, x.id, NOW, "manual");
-  a.db.query("INSERT INTO pm_runs (id,assignment_id,project_id,trigger,input_fingerprint,state,summary,output,started_at) VALUES ('interrupted',?,'ima','manual','test','working','Running','',?)").run(x.id,NOW.toISOString());
+  a.db.query("INSERT INTO pm_runs (id,assignment_id,project_id,trigger,input_fingerprint,state,summary,output,started_at) VALUES ('interrupted',?,'clauses','manual','test','working','Running','',?)").run(x.id,NOW.toISOString());
   const { recoverInterruptedRuns } = await import("../src/recovery.ts");
   const { listRuns } = await import("../src/pm.ts");
   recoverInterruptedRuns(a.db,NOW);

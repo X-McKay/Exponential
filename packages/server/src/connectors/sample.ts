@@ -25,7 +25,7 @@ export const sampleSource = (): RepoSource => ({
       stat: { repo: repo.name, branch: "main", lang: null, coverage: null, quality: null, measuredAt: asOf },
       prs: [],
       builds: [],
-      commits: sampleCommitDays(ctx.projectId in DEV_SAMPLE ? ctx.projectId : "onboarding", { repo: repo.name, branch: "main", lang: null, coverage: null, quality: null, level }, asOf, ctx.sinceDays),
+      commits: sampleCommitDays(ctx.projectId in DEV_SAMPLE ? ctx.projectId : "invoice", { repo: repo.name, branch: "main", lang: null, coverage: null, quality: null, level }, asOf, ctx.sinceDays),
     });
   },
 });

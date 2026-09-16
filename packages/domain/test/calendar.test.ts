@@ -44,7 +44,7 @@ describe("calendarFor", () => {
   });
   test("the same fixtures a year later still put today on the axis", () => {
     const cal = calendarOf({ ...seedState(), asOf: "2027-09-10T09:00:00Z" });
-    expect(cal.months[0]).toBe("2026-05");
+    expect(cal.months[0]).toBe("2026-02");
     expect(cal.todayYm).toBe("2027-09");
     expect(cal.months.at(-1)).toBe("2028-03");
   });

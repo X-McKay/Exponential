@@ -5,6 +5,7 @@ import { Btn, Lbl, Modal, Tip, ghostBtn, inpStyle, reset } from "../ui/primitive
 import { C } from "../theme.ts";
 
 const num = (v: string): number => (Number.isFinite(Number(v)) ? Number(v) : 0);
+const pctOk = (n: number): boolean => Number.isFinite(n) && n >= 0 && n <= 100;
 
 const isStatus = (s: string): s is MilestoneStatus => (MILESTONE_STATUSES as readonly string[]).includes(s);
 
@@ -44,7 +45,14 @@ export function MilestoneEditor({
   const setMetric = (i: number, patch: Partial<Metric>) => setD((x) => ({ ...x, metrics: x.metrics.map((m, mi) => (mi === i ? { ...m, ...patch } : m)) }));
   const addMetric = () => setD((x) => ({ ...x, metrics: [...x.metrics, { id: `m${Date.now() % 100000}`, label: "", base: 80, stretch: 95, current: 0 }] }));
   const rmMetric = (i: number) => setD((x) => ({ ...x, metrics: x.metrics.filter((_, mi) => mi !== i) }));
-  const valid = d.name.trim().length > 0 && d.metrics.every((m) => m.label.trim().length > 0);
+  const impactOk = pctOk(d.impact.base.fte) && pctOk(d.impact.base.time) && pctOk(d.impact.stretch.fte) && pctOk(d.impact.stretch.time) && d.impact.stretch.fte >= d.impact.base.fte && d.impact.stretch.time >= d.impact.base.time;
+  const metricsOk = d.metrics.every((m) => m.label.trim().length > 0 && pctOk(m.base) && pctOk(m.stretch) && m.stretch >= m.base);
+  const problems: string[] = [
+    ...(d.name.trim() ? [] : ["a name"]),
+    ...(impactOk ? [] : ["impact percentages between 0 and 100 with stretch at or above base"]),
+    ...(metricsOk ? [] : ["a label and gates between 0 and 100 with stretch at or above base for every metric"]),
+  ];
+  const valid = problems.length === 0;
   const submit = async () => {
     if (!valid || saving) return;
     setSaving(true);
@@ -84,9 +92,11 @@ export function MilestoneEditor({
             </span>
           )}
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn tone="primary" disabled={!valid || saving} onClick={() => void submit()}>
-            {saving ? "Saving…" : isNew ? "Create milestone" : "Save changes"}
-          </Btn>
+          <Tip label={valid ? (isNew ? "Create the milestone" : "Save changes") : `Needs ${problems.join("; ")}`}>
+            <Btn tone="primary" disabled={!valid || saving} onClick={() => void submit()}>
+              {saving ? "Saving…" : isNew ? "Create milestone" : "Save changes"}
+            </Btn>
+          </Tip>
         </>
       }
     >
@@ -130,12 +140,13 @@ export function MilestoneEditor({
         <span style={{ fontSize: 11, color: C.dim }}>FTE %</span>
         <span style={{ fontSize: 11, color: C.dim }}>Time %</span>
         <span style={{ fontSize: 12, color: C.indigoSoft }}>Base</span>
-        <input type="number" style={inpStyle} value={d.impact.base.fte} onChange={(e) => setImpact("base", "fte", num(e.target.value))} />
-        <input type="number" style={inpStyle} value={d.impact.base.time} onChange={(e) => setImpact("base", "time", num(e.target.value))} />
+        <input type="number" min={0} max={100} style={inpStyle} value={d.impact.base.fte} onChange={(e) => setImpact("base", "fte", num(e.target.value))} />
+        <input type="number" min={0} max={100} style={inpStyle} value={d.impact.base.time} onChange={(e) => setImpact("base", "time", num(e.target.value))} />
         <span style={{ fontSize: 12, color: C.greenHi }}>Stretch</span>
-        <input type="number" style={inpStyle} value={d.impact.stretch.fte} onChange={(e) => setImpact("stretch", "fte", num(e.target.value))} />
-        <input type="number" style={inpStyle} value={d.impact.stretch.time} onChange={(e) => setImpact("stretch", "time", num(e.target.value))} />
+        <input type="number" min={0} max={100} style={{ ...inpStyle, borderColor: d.impact.stretch.fte >= d.impact.base.fte ? C.line2 : C.badLine2 }} value={d.impact.stretch.fte} onChange={(e) => setImpact("stretch", "fte", num(e.target.value))} />
+        <input type="number" min={0} max={100} style={{ ...inpStyle, borderColor: d.impact.stretch.time >= d.impact.base.time ? C.line2 : C.badLine2 }} value={d.impact.stretch.time} onChange={(e) => setImpact("stretch", "time", num(e.target.value))} />
       </div>
+      {!impactOk && <div style={{ fontSize: 11.5, color: C.redHi, marginTop: 6 }}>Impact is a percentage between 0 and 100; stretch cannot sit below base.</div>}
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "14px 0 4px" }}>
         <span style={{ fontSize: 12, color: C.mut }}>Success criteria — all must clear base for base impact, all must clear stretch for stretch impact</span>
@@ -146,18 +157,18 @@ export function MilestoneEditor({
         </div>
       )}
       {d.metrics.map((mx, i) => (
-        <div key={mx.id} style={{ display: "grid", gridTemplateColumns: "1fr 62px 62px 26px", gap: 6, alignItems: "end", marginBottom: 6 }}>
+        <div key={mx.id} className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 62px 62px 26px", gap: 6, alignItems: "end", marginBottom: 6 }}>
           <div>
             {i === 0 && <div style={{ fontSize: 11, color: C.dim, marginBottom: 3 }}>Metric</div>}
             <input style={inpStyle} value={mx.label} placeholder="e.g. Mapping accuracy" onChange={(e) => setMetric(i, { label: e.target.value })} />
           </div>
           <div>
             {i === 0 && <div style={{ fontSize: 11, color: C.indigoSoft, marginBottom: 3 }}>Base ≥</div>}
-            <input type="number" style={inpStyle} value={mx.base} onChange={(e) => setMetric(i, { base: num(e.target.value) })} />
+            <input type="number" min={0} max={100} style={inpStyle} value={mx.base} aria-label="Base gate" onChange={(e) => setMetric(i, { base: num(e.target.value) })} />
           </div>
           <div>
             {i === 0 && <div style={{ fontSize: 11, color: C.greenHi, marginBottom: 3 }}>Stretch ≥</div>}
-            <input type="number" style={inpStyle} value={mx.stretch} onChange={(e) => setMetric(i, { stretch: num(e.target.value) })} />
+            <input type="number" min={0} max={100} style={{ ...inpStyle, borderColor: mx.stretch >= mx.base ? C.line2 : C.badLine2 }} value={mx.stretch} aria-label="Stretch gate" onChange={(e) => setMetric(i, { stretch: num(e.target.value) })} />
           </div>
           <Tip label="Remove criterion">
             <button type="button" onClick={() => rmMetric(i)} aria-label="Remove criterion" className="vf-ghost" style={{ ...ghostBtn, width: 26, height: 32, padding: 0, justifyContent: "center", border: "1px solid transparent" }}>

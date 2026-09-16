@@ -66,6 +66,11 @@ export const ROLE: Record<AgentKind, { brief: string; task: string; tab: Project
     task: "At most six short sections, most urgent first, each with at most one widget that points at facts by id, under a one-sentence headline.",
     tab: "overview",
   },
+  setup: {
+    brief: "You read project documents and stage precise changes to the project record for a person to approve; you never apply anything yourself.",
+    task: "Compare the documents with the project's current record and propose only the changes the documents support, each citing the document it came from.",
+    tab: "overview",
+  },
 };
 
 /** FNV-1a over the text that shapes a prompt; changes whenever the prompt does. */

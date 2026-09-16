@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { GOV_STATUSES, GSTATUS_LABEL, MILESTONE_STATUSES, STATUS_LABEL, initialsOf, monthLabel, nextProjectKey, planningMonths, slugId } from "@valueflow/domain";
-import type { Calendar, Confidence, DraftGovernance, DraftMilestone, DraftRelease, GovStatus, MilestoneStatus, Project, ProjectDraft, Repo, RiskTier, SetupDraft, TeamMember } from "@valueflow/domain";
+import { GOV_STATUSES, GSTATUS_LABEL, MILESTONE_STATUSES, STATUS_LABEL, initialsOf, monthLabel, nextProjectKey, planningMonths, slugId, templateSummary } from "@valueflow/domain";
+import type { Calendar, Confidence, DraftGovernance, DraftMilestone, DraftRelease, GovStatus, MilestoneStatus, Project, ProjectDraft, ProjectTemplate, Repo, RiskTier, SetupDraft, TeamMember } from "@valueflow/domain";
 import type { ReleaseInput, SetupCreateInput } from "@valueflow/shared";
 import { api } from "../api/client.ts";
 import { Btn, Chip, Kbd, Lbl, Modal, Tip, ghostBtn, inpStyle, reset } from "../ui/primitives.tsx";
 import { C } from "../theme.ts";
+import { DocumentPicker } from "./DocumentPicker.tsx";
 
 // ---- working copy of a draft --------------------------------------------------
 
@@ -152,9 +153,11 @@ export const compose = (name: string, key: string, w: Working, excluded: Set<str
 
 // ---- the wizard ------------------------------------------------------------------
 
-export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }: { projects: Project[]; cal: Calendar; defaultOwner: string; onCreated: (pid: string) => void; onClose: () => void }) {
+export function SetupWizard({ projects, templates = [], cal, defaultOwner, onCreated, onClose }: { projects: Project[]; templates?: ProjectTemplate[]; cal: Calendar; defaultOwner: string; onCreated: (pid: string) => void; onClose: () => void }) {
   const [name, setName] = useState("");
   const [key, setKey] = useState(nextProjectKey(projects));
+  const [templateId, setTemplateId] = useState<string>(templates[0]?.id ?? "");
+  const template = templates.find((t) => t.id === templateId) ?? null;
   const [brief, setBrief] = useState("");
   const [snippets, setSnippets] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
@@ -188,6 +191,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
       form.set("name", name.trim());
       form.set("key", key.trim());
       form.set("brief", brief);
+      if (template) form.set("template", template.id);
       for (const s of snippets) if (s.trim()) form.append("snippet", s);
       for (const f of files) form.append("file", f, f.name);
       const d = await api.setupAnalyze(form);
@@ -250,7 +254,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
     }
   };
 
-  const canAnalyze = name.trim() !== "" && !busy;
+  const canAnalyze = name.trim() !== "" && key.trim() !== "" && key.trim().length <= 16 && !busy;
   const included = (list: keyof Working, n: number) => Array.from({ length: n }, (_, i) => `${list}.${i}`).filter((p) => !excluded.has(p)).length;
 
   // ---- step 1: sources ----------------------------------------------------------
@@ -274,16 +278,32 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
           Give the setup agent a name and anything you have: a charter, a deck, meeting notes, a pasted email. It drafts every field of the project record with a
           rationale and a confidence, and you decide what to keep. Nothing is created until you confirm.
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: 10 }}>
+        <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: 10 }}>
           <div>
             <Lbl>Project name</Lbl>
-            <input style={inpStyle} value={name} autoFocus placeholder="e.g. KYC refresh automation" onChange={(e) => setName(e.target.value)} />
+            <input style={inpStyle} value={name} autoFocus maxLength={160} placeholder="e.g. KYC refresh automation" onChange={(e) => setName(e.target.value)} />
           </div>
           <div>
             <Lbl>Key</Lbl>
-            <input style={inpStyle} value={key} onChange={(e) => setKey(e.target.value)} />
+            <input style={inpStyle} value={key} maxLength={16} onChange={(e) => setKey(e.target.value)} />
           </div>
         </div>
+        {templates.length > 0 && (
+          <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, alignItems: "end" }}>
+            <div>
+              <Lbl htmlFor="vf-setup-template">Template</Lbl>
+              <select id="vf-setup-template" style={inpStyle} value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+                <option value="">None — only what the documents say</option>
+                {templates.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ fontSize: 11.5, color: C.dim, lineHeight: 1.5, paddingBottom: 6 }}>
+              {template ? `The draft will carry the template's base set (${templateSummary(template)}); anything the documents do not mention is added as Missing for you to keep or drop.` : "The draft carries only what the documents support."}
+            </div>
+          </div>
+        )}
         <Lbl>Brief (optional)</Lbl>
         <textarea
           style={{ ...inpStyle, height: "auto", minHeight: 64, padding: "8px 10px", resize: "vertical", lineHeight: 1.5 }}
@@ -292,66 +312,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
           onChange={(e) => setBrief(e.target.value)}
         />
         <Lbl>Documents</Lbl>
-        <label
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 4,
-            padding: "18px 12px",
-            border: `1px dashed ${C.line2}`,
-            borderRadius: 8,
-            cursor: "pointer",
-            color: C.mut,
-            fontSize: 12.5,
-          }}
-        >
-          <input
-            type="file"
-            multiple
-            accept=".docx,.pptx,.txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,text/*"
-            style={{ display: "none" }}
-            onChange={(e) => {
-              const picked = Array.from(e.target.files ?? []);
-              setFiles((f) => [...f, ...picked.filter((p) => !f.some((x) => x.name === p.name && x.size === p.size))]);
-              e.target.value = "";
-            }}
-          />
-          <span>Click to add Word, PowerPoint, or text files</span>
-          <span style={{ fontSize: 11, color: C.dim }}>.docx · .pptx · .txt · .md · .csv — export PDFs to text first</span>
-        </label>
-        {files.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-            {files.map((f) => (
-              <span key={`${f.name}-${f.size}`} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: C.text, background: C.inset, border: `1px solid ${C.line2}`, borderRadius: 6, padding: "3px 8px" }}>
-                {f.name}
-                <span style={{ color: C.dim }}>{f.size > 1_000_000 ? `${(f.size / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(f.size / 1000))} kB`}</span>
-                <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((x) => x.filter((y) => y !== f))} style={{ ...reset, color: C.dim, fontSize: 12 }}>
-                  ✕
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "14px 0 4px" }}>
-          <span style={{ fontSize: 12, color: C.mut }}>Text snippets</span>
-          <button type="button" onClick={() => setSnippets((s) => [...s, ""])} style={{ ...ghostBtn, border: "none", color: C.indigoHi }}>
-            + Add snippet
-          </button>
-        </div>
-        {snippets.map((s, i) => (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 26px", gap: 6, marginBottom: 6 }}>
-            <textarea
-              style={{ ...inpStyle, height: "auto", minHeight: 56, padding: "8px 10px", resize: "vertical", lineHeight: 1.5 }}
-              value={s}
-              placeholder="Paste an email, a chat thread, meeting notes…"
-              onChange={(e) => setSnippets((arr) => arr.map((x, xi) => (xi === i ? e.target.value : x)))}
-            />
-            <button type="button" aria-label="Remove snippet" onClick={() => setSnippets((arr) => arr.filter((_, xi) => xi !== i))} style={{ ...ghostBtn, width: 26, height: 32, padding: 0, justifyContent: "center", border: "1px solid transparent" }}>
-              ✕
-            </button>
-          </div>
-        ))}
+        <DocumentPicker files={files} snippets={snippets} onFiles={setFiles} onSnippets={setSnippets} />
         {busy && (
           <div style={{ fontSize: 12.5, color: C.indigoHi, marginTop: 12 }} className="vf-pulse">
             {busy}
@@ -416,7 +377,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
         <Row path="description" label="Description" excluded={excluded} onToggle={toggle} why={d.description}>
           <textarea style={{ ...inpStyle, height: "auto", minHeight: 56, padding: "6px 10px", resize: "vertical", lineHeight: 1.5, fontSize: 12.5 }} value={w.description} onChange={(e) => patch("description", (x) => ({ ...x, description: e.target.value }))} />
         </Row>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           <Row path="stage" label="Stage" excluded={excluded} onToggle={toggle} why={d.stage}>
             <select style={small} value={w.stage} onChange={(e) => patch("stage", (x) => ({ ...x, stage: e.target.value }))}>
               {[...new Set([...STAGES, w.stage])].map((s) => (
@@ -433,7 +394,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
             </select>
           </Row>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           <Row path="targets" label="Targets (% reduction)" excluded={excluded} onToggle={toggle} why={d.targets}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: C.dim }}>
               FTE <input type="number" style={{ ...small, width: 70 }} value={w.targets.fte} onChange={(e) => patch("targets", (x) => ({ ...x, targets: { ...x.targets, fte: num(e.target.value) } }))} />
@@ -453,7 +414,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
         {w.team.length === 0 && <div style={{ fontSize: 12, color: C.dim, padding: "8px 0" }}>Nobody named in the documents. You can add people on the Overview tab later.</div>}
         {w.team.map((t, i) => (
           <Row key={i} path={`team.${i}`} excluded={excluded} onToggle={toggle} why={d.team[i] ?? { rationale: "", source: null, confidence: "low" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 60px", gap: 6 }}>
+            <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 60px", gap: 6 }}>
               <input style={small} value={t.name} onChange={(e) => patch(`team.${i}`, (x) => ({ ...x, team: x.team.map((y, yi) => (yi === i ? { ...y, name: e.target.value, ini: initialsOf(e.target.value) } : y)) }))} />
               <input style={small} value={t.role} onChange={(e) => patch(`team.${i}`, (x) => ({ ...x, team: x.team.map((y, yi) => (yi === i ? { ...y, role: e.target.value } : y)) }))} />
               <input style={small} value={t.ini} maxLength={3} onChange={(e) => patch(`team.${i}`, (x) => ({ ...x, team: x.team.map((y, yi) => (yi === i ? { ...y, ini: e.target.value.toUpperCase() } : y)) }))} />
@@ -466,7 +427,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
         {w.repos.length === 0 && <div style={{ fontSize: 12, color: C.dim, padding: "8px 0" }}>No repositories named in the documents.</div>}
         {w.repos.map((r, i) => (
           <Row key={i} path={`repos.${i}`} excluded={excluded} onToggle={toggle} why={d.repos[i] ?? { rationale: "", source: null, confidence: "low" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 6 }}>
+            <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 6 }}>
               <input style={small} value={r.name} onChange={(e) => patch(`repos.${i}`, (x) => ({ ...x, repos: x.repos.map((y, yi) => (yi === i ? { ...y, name: e.target.value } : y)) }))} />
               <input style={small} value={r.url} onChange={(e) => patch(`repos.${i}`, (x) => ({ ...x, repos: x.repos.map((y, yi) => (yi === i ? { ...y, url: e.target.value } : y)) }))} />
             </div>
@@ -479,7 +440,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
           const set = (fn: (m: DraftMilestone) => DraftMilestone) => patch(`milestones.${i}`, (x) => ({ ...x, milestones: x.milestones.map((y, yi) => (yi === i ? fn(y) : y)) }));
           return (
             <Row key={i} path={`milestones.${i}`} excluded={excluded} onToggle={toggle} why={d.milestones[i] ?? { rationale: "", source: null, confidence: "low" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "2fr 120px 110px", gap: 6, marginBottom: 6 }}>
+              <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "2fr 120px 110px", gap: 6, marginBottom: 6 }}>
                 <input style={small} value={m.name} onChange={(e) => set((y) => ({ ...y, name: e.target.value }))} />
                 <select style={small} value={m.status} onChange={(e) => set((y) => ({ ...y, status: e.target.value as MilestoneStatus }))}>
                   {MILESTONE_STATUSES.map((s) => (
@@ -510,7 +471,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
               </div>
               <div style={{ marginTop: 6 }}>
                 {m.metrics.map((x, xi) => (
-                  <div key={xi} style={{ display: "grid", gridTemplateColumns: "1fr 70px 70px 26px", gap: 6, marginBottom: 4, alignItems: "center", fontSize: 11 }}>
+                  <div key={xi} className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 70px 70px 26px", gap: 6, marginBottom: 4, alignItems: "center", fontSize: 11 }}>
                     <input style={small} value={x.label} placeholder="metric" onChange={(e) => set((y) => ({ ...y, metrics: y.metrics.map((z, zi) => (zi === xi ? { ...z, label: e.target.value } : z)) }))} />
                     <input type="number" style={small} value={x.base} title="base gate %" onChange={(e) => set((y) => ({ ...y, metrics: y.metrics.map((z, zi) => (zi === xi ? { ...z, base: num(e.target.value) } : z)) }))} />
                     <input type="number" style={small} value={x.stretch} title="stretch gate %" onChange={(e) => set((y) => ({ ...y, metrics: y.metrics.map((z, zi) => (zi === xi ? { ...z, stretch: num(e.target.value) } : z)) }))} />
@@ -533,7 +494,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
           const set = (fn: (g: DraftGovernance) => DraftGovernance) => patch(`governance.${i}`, (x) => ({ ...x, governance: x.governance.map((y, yi) => (yi === i ? fn(y) : y)) }));
           return (
             <Row key={i} path={`governance.${i}`} excluded={excluded} onToggle={toggle} why={d.governance[i] ?? { rationale: "", source: null, confidence: "low" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 110px 120px", gap: 6 }}>
+              <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 110px 120px", gap: 6 }}>
                 <input style={small} value={g.name} onChange={(e) => set((y) => ({ ...y, name: e.target.value }))} />
                 <input style={small} value={g.cat} list="vf-setup-cats" onChange={(e) => set((y) => ({ ...y, cat: e.target.value }))} />
                 <select style={small} value={g.status} onChange={(e) => set((y) => ({ ...y, status: e.target.value as GovStatus }))}>
@@ -550,7 +511,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
           );
         })}
         <datalist id="vf-setup-cats">
-          {["Design & architecture", "AI governance", "Operations", "Release & adoption"].map((c) => (
+          {["Design & architecture", "AI governance", "Operations", "Release & adoption", "Dependencies"].map((c) => (
             <option key={c} value={c} />
           ))}
         </datalist>
@@ -561,7 +522,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
           const set = (fn: (r: DraftRelease) => DraftRelease) => patch(`releases.${i}`, (x) => ({ ...x, releases: x.releases.map((y, yi) => (yi === i ? fn(y) : y)) }));
           return (
             <Row key={i} path={`releases.${i}`} excluded={excluded} onToggle={toggle} why={d.releases[i] ?? { rationale: "", source: null, confidence: "low" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 6, marginBottom: 6 }}>
+              <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 6, marginBottom: 6 }}>
                 <input style={small} value={r.name} onChange={(e) => set((y) => ({ ...y, name: e.target.value }))} />
                 <select style={small} value={r.month} onChange={(e) => set((y) => ({ ...y, month: e.target.value }))}>
                   {!months.includes(r.month) && <option value={r.month}>{r.month}</option>}
@@ -583,7 +544,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
                 })}
               </div>
               {r.criteria.map((c, ci) => (
-                <div key={ci} style={{ display: "grid", gridTemplateColumns: "90px 1fr 1.2fr 26px", gap: 6, marginBottom: 4 }}>
+                <div key={ci} className="vf-fields" style={{ display: "grid", gridTemplateColumns: "90px 1fr 1.2fr 26px", gap: 6, marginBottom: 4 }}>
                   <select style={small} value={c.type} onChange={(e) => set((y) => ({ ...y, criteria: y.criteria.map((z, zi) => (zi === ci ? { ...z, type: e.target.value as "gate" | "gov" | "manual", ref: "" } : z)) }))}>
                     <option value="gate">Gate</option>
                     <option value="gov">Governance</option>
@@ -616,7 +577,7 @@ export function SetupWizard({ projects, cal, defaultOwner, onCreated, onClose }:
       </Section>
 
       <Section title="Ask the agent to change something">
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 8, alignItems: "start", paddingTop: 6 }}>
+        <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 8, alignItems: "start", paddingTop: 6 }}>
           <textarea
             style={{ ...inpStyle, height: "auto", minHeight: 56, padding: "8px 10px", resize: "vertical", lineHeight: 1.5, fontSize: 12.5 }}
             value={feedback}

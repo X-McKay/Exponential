@@ -22,6 +22,7 @@ export function OverviewPage({
   state,
   cal,
   onEdit,
+  onUpdate,
   onOpen,
   onOpenInbox,
   onOpenAgents,
@@ -33,6 +34,8 @@ export function OverviewPage({
   state: AppState;
   cal: Calendar;
   onEdit: () => void;
+  /** Open the update-from-documents dialog; absent when no model is configured. */
+  onUpdate?: () => void;
   onOpen: (id: string, tab: ProjectTab, focusId?: string) => void;
   onOpenInbox: () => void;
   onOpenAgents: () => void;
@@ -91,7 +94,7 @@ export function OverviewPage({
   ];
 
   return (
-    <div style={{ padding: "16px 20px 30px" }}>
+    <div className="vf-container" style={{ padding: "16px 20px 30px" }}>
       <section aria-label="Project status" style={{ display: "grid", gridTemplateColumns: narrow ? "repeat(2, minmax(0, 1fr))" : "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 14 }}>
         <CompactKpi label="Project status" value={p.stage} sub={p.tier ? `Tier ${p.tier}` : "Risk tier not set"} color={C.text} />
         <CompactKpi label="Next planned release" value={nextPlanned?.id ?? "—"} sub={nextPlanned ? `${nextPlanned.name} · ${monthLabel(nextPlanned.month, cal.todayYm)}` : "No release scheduled"} color={C.indigoHi} />
@@ -148,8 +151,20 @@ export function OverviewPage({
         </details>
       </SectionCard>
 
-      <SectionCard title="About" right={edit}>
-        <div style={{ fontSize: 14, lineHeight: 1.65, color: C.text2 }}>{p.description}</div>
+      <SectionCard
+        title="About"
+        right={
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <Tip label={onUpdate ? "Stage changes from a revised charter, deck, or notes for approval in the inbox" : "Connect a model in Workspace settings to update from documents"}>
+              <button type="button" className="vf-ghost" disabled={!onUpdate} onClick={onUpdate} style={{ ...ghostBtn, color: C.indigoHi, opacity: onUpdate ? 1 : 0.5 }}>
+                Update from documents…
+              </button>
+            </Tip>
+            {edit}
+          </span>
+        }
+      >
+        <div style={{ fontSize: 14, lineHeight: 1.65, color: C.text2, overflowWrap: "anywhere" }}>{p.description || <span style={{ color: C.dim }}>No description yet.</span>}</div>
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
           <Chip>{p.stage}</Chip>
           <TierBadge tier={p.tier} />

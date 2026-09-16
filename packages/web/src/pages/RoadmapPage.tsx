@@ -117,7 +117,7 @@ export function RoadmapPage({
               <span style={{ width: 10, height: 10, background: color, transform: "rotate(45deg)", borderRadius: 2, flexShrink: 0 }} />
               <span style={{ fontSize: 12, color: C.dim, width: 22 }}>{r.id}</span>
               <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 14, color: C.text, display: "block" }}>{r.name}</span>
+                <span style={{ fontSize: 14, color: C.text, display: "block", overflowWrap: "anywhere" }}>{r.name}</span>
                 <span style={{ fontSize: 11, color: C.dim }}>
                   {monthLabel(r.month, cal.todayYm)} · {r.milestoneIds.join(", ")}
                 </span>

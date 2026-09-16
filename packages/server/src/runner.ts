@@ -13,7 +13,7 @@ import { runBrief } from "./brief.ts";
 import type { BriefDelivery } from "./brief.ts";
 import { curateGlance } from "./curator.ts";
 import type { Llm } from "./llm.ts";
-import { NotFound, loadState } from "./repo.ts";
+import { Conflict, NotFound, loadState } from "./repo.ts";
 import { scoutModels } from "./scout.ts";
 import { TUNER_MIN_RUNS, tunable, tuneAgent } from "./tuner.ts";
 
@@ -46,6 +46,8 @@ export const runAny = async (db: Database, llm: Llm, input: RunAgentInput, now: 
       return [await scoutModels(db, llm, agent, now, { agentId: input.target })];
     case "curator":
       return [await curateGlance(db, llm, agent, now)];
+    case "setup":
+      throw new Conflict(`${agent.name} runs from a project's "Update from documents" action, not on demand`);
   }
 };
 
@@ -75,6 +77,7 @@ export const runDue = async (db: Database, llm: Llm, now: Date, options: RunnerO
     if (!isDue(agent, state.runs, now.toISOString())) continue;
     switch (agent.kind) {
       case "chat":
+      case "setup":
         continue;
       case "deck":
       case "comms":

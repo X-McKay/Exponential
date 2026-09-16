@@ -7,8 +7,8 @@ import { GitHubError, githubSource, parseGitHubRepo } from "../src/connectors/in
 
 const NOW = new Date("2026-09-10T09:00:00Z");
 const TEAM = [
-  { ini: "AM", name: "Al McKay", role: "Lead" },
-  { ini: "DK", name: "Dan K.", role: "ML Engineer" },
+  { ini: "JA", name: "Jordan Avery", role: "Lead" },
+  { ini: "SL", name: "Sam Lee", role: "ML Engineer" },
 ];
 
 const canned: Record<string, unknown> = {
@@ -17,14 +17,14 @@ const canned: Record<string, unknown> = {
     {
       number: 12,
       title: "Add widget",
-      user: { login: "almckay", name: "Al McKay" },
+      user: { login: "jordanavery", name: "Jordan Avery" },
       state: "open",
       merged_at: null,
       created_at: "2026-09-09T08:00:00Z",
       updated_at: "2026-09-10T08:00:00Z",
       html_url: "https://github.com/org/widget/pull/12",
       head: { sha: "abc" },
-      requested_reviewers: [{ login: "dank" }],
+      requested_reviewers: [{ login: "samlee" }],
     },
     {
       number: 11,
@@ -42,7 +42,7 @@ const canned: Record<string, unknown> = {
   "/repos/org/widget/pulls/11": { additions: 10, deletions: 2 },
   "/repos/org/widget/commits/abc/check-runs": { check_runs: [{ status: "completed", conclusion: "failure" }, { status: "in_progress", conclusion: null }] },
   "/repos/org/widget/commits/def/check-runs": { check_runs: [{ status: "completed", conclusion: "success" }] },
-  "/repos/org/widget/pulls/12/reviews": [{ user: { login: "dank", name: "Dan K." }, state: "CHANGES_REQUESTED" }],
+  "/repos/org/widget/pulls/12/reviews": [{ user: { login: "samlee", name: "Sam Lee" }, state: "CHANGES_REQUESTED" }],
   "/repos/org/widget/pulls/11/reviews": [],
   "/repos/org/widget/actions/runs?per_page=30": {
     workflow_runs: [
@@ -58,8 +58,8 @@ const fakeFetch = (input: string): Promise<Response> => {
   const path = url.pathname + url.search;
   if (path.startsWith("/repos/org/widget/commits?")) {
     const body = [
-      { sha: "1", commit: { author: { name: "Al McKay", date: "2026-09-10T06:00:00Z" } }, author: { login: "almckay" } },
-      { sha: "2", commit: { author: { name: "Al McKay", date: "2026-09-10T05:00:00Z" } }, author: { login: "almckay" } },
+      { sha: "1", commit: { author: { name: "Jordan Avery", date: "2026-09-10T06:00:00Z" } }, author: { login: "javery" } },
+      { sha: "2", commit: { author: { name: "Jordan Avery", date: "2026-09-10T05:00:00Z" } }, author: { login: "javery" } },
       { sha: "3", commit: { author: { name: "Jane Roe", date: "2026-09-09T05:00:00Z" } }, author: null },
     ];
     return Promise.resolve(Response.json(body));
@@ -81,7 +81,7 @@ describe("GitHub source", () => {
     const snap = await source.fetchRepo({ name: "widget", url: "github.com/org/widget" }, { projectId: "p", now: NOW, sinceDays: 56, team: TEAM });
     expect(snap.stat).toEqual({ repo: "widget", branch: "main", lang: "TypeScript", coverage: null, quality: null, measuredAt: NOW.toISOString() });
     expect(snap.prs).toEqual([
-      { repo: "widget", number: 12, title: "Add widget", author: "AM", status: "open", checks: "fail", add: 120, del: 4, openedAt: "2026-09-09T08:00:00Z", mergedAt: null, updatedAt: "2026-09-10T08:00:00Z", reviewers: ["DK"], url: "https://github.com/org/widget/pull/12" },
+      { repo: "widget", number: 12, title: "Add widget", author: "JA", status: "open", checks: "fail", add: 120, del: 4, openedAt: "2026-09-09T08:00:00Z", mergedAt: null, updatedAt: "2026-09-10T08:00:00Z", reviewers: ["SL"], url: "https://github.com/org/widget/pull/12" },
       { repo: "widget", number: 11, title: "Fix build", author: "SO", status: "merged", checks: "pass", add: 10, del: 2, openedAt: "2026-09-07T12:00:00Z", mergedAt: "2026-09-08T12:00:00Z", updatedAt: "2026-09-08T12:00:00Z", reviewers: [], url: "https://github.com/org/widget/pull/11" },
     ]);
     expect(snap.builds.map((b) => [b.id, b.kind, b.status, b.durationS, b.note])).toEqual([
@@ -89,7 +89,7 @@ describe("GitHub source", () => {
       ["899", "deploy", "pass", 280, "Deploy to staging"],
     ]);
     expect(snap.commits).toEqual([
-      { repo: "widget", day: "2026-09-10", author: "AM", count: 2 },
+      { repo: "widget", day: "2026-09-10", author: "JA", count: 2 },
       { repo: "widget", day: "2026-09-09", author: "JR", count: 1 },
     ]);
   });

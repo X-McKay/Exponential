@@ -2,7 +2,7 @@
   "name": "exponential",
   "version": "0.1.0",
   "private": true,
-  "description": "Exponential — evidence-led AI project delivery for shared workspaces.",
+  "description": "Exponential \u2014 evidence-led AI project delivery for shared workspaces.",
   "workspaces": [
     "packages/*"
   ],
@@ -21,6 +21,8 @@
     "skills:check": "bun scripts/check-agent-skills.ts",
     "check": "bun run typecheck && bun run lint && bun test && bun run docs:check && bun run skills:check",
     "test:e2e": "bun run build && bun packages/server/e2e/release.ts",
+    "test:ui": "bash scripts/ui-test.sh",
+    "container:ui": "bash scripts/container.sh ui",
     "release:check": "bun run check && bun run test:e2e && git diff --check",
     "container:build": "bash scripts/container.sh build",
     "container:test": "bash scripts/container.sh test"

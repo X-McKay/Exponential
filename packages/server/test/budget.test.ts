@@ -44,7 +44,7 @@ describe("budgets", () => {
     const put = await call<Budget[]>("PUT", routes.budgets(), [
       { scope: "workspace", monthlyUsd: 50 },
       { scope: "agent", ref: "audie", monthlyTokens: 2_000_000 },
-      { scope: "project", ref: "ima", monthlyUsd: null, monthlyTokens: null },
+      { scope: "project", ref: "clauses", monthlyUsd: null, monthlyTokens: null },
     ]);
     expect(put.status).toBe(200);
     expect(put.body).toEqual([
@@ -60,20 +60,20 @@ describe("budgets", () => {
     const llm = fakeLlm(reply);
     const { db, call } = appWith(llm);
     // One run at $1000/M in, $2000/M out: 900 in + 300 out = $1.50.
-    const first = await call<AgentRun>("POST", routes.agentRuns("audie"), { proj: "ima" });
+    const first = await call<AgentRun>("POST", routes.agentRuns("audie"), { proj: "clauses" });
     expect(first.status).toBe(201);
     await call("PUT", routes.budgets(), [{ scope: "agent", ref: "audie", monthlyUsd: 1 }]);
-    const refused = await call<{ error: string }>("POST", routes.agentRuns("audie"), { proj: "sector" });
+    const refused = await call<{ error: string }>("POST", routes.agentRuns("audie"), { proj: "search" });
     expect(refused.status).toBe(409);
     expect(refused.body.error).toMatch(/^over budget: Audie has used \$1\.50 of its \$1\.00 monthly budget/);
     // Other agents still run.
-    expect((await call("POST", routes.agentRuns("comma"), { proj: "ima" })).status).toBe(201);
+    expect((await call("POST", routes.agentRuns("comma"), { proj: "clauses" })).status).toBe(201);
     // The scheduler holds Audie back and says why.
     const later = new Date("2026-09-11T12:00:00Z");
     const skipped: Skipped[] = [];
     const runs = await runDue(db, llm, later, {}, skipped);
     expect(runs.some((r) => r.agentId === "audie")).toBe(false);
-    expect(skipped.filter((s) => s.agentId === "audie").map((s) => s.proj)).toEqual(["onboarding", "ima", "sector"]);
+    expect(skipped.filter((s) => s.agentId === "audie").map((s) => s.proj)).toEqual(["invoice", "clauses", "search", "triage", "meetings"]);
     expect(runs.some((r) => r.agentId === "sentry")).toBe(true);
     // Glance: a budget block and a brief item.
     const state = { ...loadState(db, NOW), llm: llm.describe() };
@@ -94,7 +94,7 @@ describe("budgets", () => {
     const { db } = appWith(null);
     const st = loadState(db, NOW);
     const audie = st.agents.find((a) => a.id === "audie")!;
-    const mk = (id: string, model: string, tokens: number): AgentRun => ({ id, agentId: "audie", proj: "ima", tab: "overview", state: "done", startedAt: NOW.toISOString(), finishedAt: NOW.toISOString(), instruction: null, summary: "", output: "", model, error: null, promptVersion: "v", latencyMs: 5000, promptTokens: tokens, completionTokens: tokens, benchmark: "audie-ima-audit", rating: null, ratingNote: null });
+    const mk = (id: string, model: string, tokens: number): AgentRun => ({ id, agentId: "audie", proj: "clauses", tab: "overview", state: "done", startedAt: NOW.toISOString(), finishedAt: NOW.toISOString(), instruction: null, summary: "", output: "", model, error: null, promptVersion: "v", latencyMs: 5000, promptTokens: tokens, completionTokens: tokens, benchmark: "audie-ima-audit", rating: null, ratingNote: null });
     const runs = [mk("run-a", "big", 1000), mk("run-b", "small", 1000)];
     for (const r of runs) db.query("INSERT INTO agent_runs (id, agent_id, project_id, tab, state, started_at, finished_at, summary, output, model, prompt_version, latency_ms, prompt_tokens, completion_tokens, benchmark) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(r.id, r.agentId, r.proj, r.tab, r.state, r.startedAt, r.finishedAt, r.summary, r.output, r.model, r.promptVersion, r.latencyMs, r.promptTokens, r.completionTokens, r.benchmark);
     for (const r of runs) updateRun(db, r);

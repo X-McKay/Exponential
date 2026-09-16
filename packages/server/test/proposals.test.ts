@@ -21,7 +21,7 @@ const reply = JSON.stringify({
   proposals: [
     { type: "governance_status", gid: "sla", status: "draft", rationale: "SLA work has started per the runbook draft." },
     { type: "calendar_event", date: "2026-09-18", text: "SLA workshop with compliance ops", sub: null, tab: "governance", rationale: "Needed before pilot exit." },
-    { type: "governance_item", cat: "Operations", name: "Immutable audit log for rule activations", status: "missing", owner: "RS", detail: "Tier 1 exposure.", rationale: "No audit log exists." },
+    { type: "governance_item", cat: "Operations", name: "Immutable audit log for rule activations", status: "missing", owner: "TO", detail: "Tier 1 exposure.", rationale: "No audit log exists." },
     { type: "milestone_status", mid: "MS-99", status: "shipped", rationale: "does not exist" },
     { type: "governance_status", gid: "sla", status: "sideways", rationale: "bad status" },
     { type: "targets", fte: 35, time: 55, rationale: "Committee pre-read used these." },
@@ -49,18 +49,18 @@ const appWith = (): TestApp => {
 describe("proposals", () => {
   test("a run stores the valid proposals it made and drops the rest", async () => {
     const app = appWith();
-    const run = await runAgent(app.db, fake, { agentId: "audie", proj: "ima" }, NOW);
+    const run = await runAgent(app.db, fake, { agentId: "audie", proj: "clauses" }, NOW);
     const state = (await app.get<AppState>(routes.state())).body;
     const mine = state.proposals.filter((p) => p.runId === run.id);
     expect(mine.map((p) => p.action.type)).toEqual(["governance_status", "calendar_event", "governance_item", "targets"]);
-    expect(mine.every((p) => p.state === "pending" && p.agentId === "audie" && p.proj === "ima")).toBe(true);
+    expect(mine.every((p) => p.state === "pending" && p.agentId === "audie" && p.proj === "clauses")).toBe(true);
     expect(mine[0]?.rationale).toBe("SLA work has started per the runbook draft.");
     expect(mine.map((p) => p.id)).toEqual(["prop-1", "prop-2", "prop-3", "prop-4"]);
   });
 
   test("accepting applies each kind of change and appends events; dismissing does not; deciding twice is refused", async () => {
     const app = appWith();
-    await runAgent(app.db, fake, { agentId: "audie", proj: "ima" }, NOW);
+    await runAgent(app.db, fake, { agentId: "audie", proj: "clauses" }, NOW);
     const before = (await app.get<AppState>(routes.state())).body;
     const ids = before.proposals.map((p) => p.id);
 
@@ -74,12 +74,12 @@ describe("proposals", () => {
     expect(d4.body.state).toBe("dismissed");
 
     const after = (await app.get<AppState>(routes.state())).body;
-    const ima = after.projects.find((p) => p.id === "ima")!;
+    const ima = after.projects.find((p) => p.id === "clauses")!;
     expect(ima.governance.find((g) => g.id === "sla")?.status).toBe("draft");
-    expect(ima.governance.some((g) => g.id === "immutable-audit-log-for-rule-activations" && g.status === "missing" && g.owner === "RS")).toBe(true);
-    expect(after.calendar.some((c) => c.id === "sla-workshop-with-compliance-ops" && c.date === "2026-09-18" && c.proj === "ima")).toBe(true);
+    expect(ima.governance.some((g) => g.id === "immutable-audit-log-for-rule-activations" && g.status === "missing" && g.owner === "TO")).toBe(true);
+    expect(after.calendar.some((c) => c.id === "sla-workshop-with-compliance-ops" && c.date === "2026-09-18" && c.proj === "clauses")).toBe(true);
     expect(ima.targets).toEqual({ fte: 30, time: 50 });
-    expect(after.events[0]?.text).toBe("Product SLA moved to Draft");
+    expect(after.events[0]?.text).toBe("Service level agreement moved to Draft");
     expect(after.proposals.map((p) => p.state)).toEqual(["accepted", "accepted", "accepted", "dismissed"]);
 
     expect((await app.send("POST", routes.proposalAccept(ids[0]!))).status).toBe(409);
@@ -89,8 +89,8 @@ describe("proposals", () => {
 
   test("a proposal whose target was deleted is refused, not applied", async () => {
     const app = appWith();
-    await runAgent(app.db, fake, { agentId: "audie", proj: "ima" }, NOW);
-    await app.send("DELETE", routes.governance("ima", "sla"));
+    await runAgent(app.db, fake, { agentId: "audie", proj: "clauses" }, NOW);
+    await app.send("DELETE", routes.governance("clauses", "sla"));
     const res = await app.send<{ error: string }>("POST", routes.proposalAccept("prop-1"));
     expect(res.status).toBe(409);
     expect(res.body.error).toContain("no longer exists");

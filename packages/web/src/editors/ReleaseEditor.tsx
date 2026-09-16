@@ -117,7 +117,7 @@ export function ReleaseEditor({
       }
     >
       {saveError && <div role="alert" style={{ color: C.redHi, fontSize: 12, margin: "8px 0" }}>Could not save: {saveError}</div>}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 140px", gap: 10 }}>
+      <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 140px", gap: 10 }}>
         <div>
           <Lbl>Name</Lbl>
           <input style={inpStyle} value={d.name} autoFocus={isNew} placeholder="e.g. Assisted review pilot" onChange={(e) => set({ name: e.target.value })} />
@@ -172,7 +172,7 @@ export function ReleaseEditor({
         </div>
       )}
       {d.criteria.map((c, i) => (
-        <div key={i} style={{ display: "grid", gridTemplateColumns: "96px 1fr 26px", gap: 6, alignItems: "start", marginBottom: 8 }}>
+        <div key={i} className="vf-fields" style={{ display: "grid", gridTemplateColumns: "96px 1fr 26px", gap: 6, alignItems: "start", marginBottom: 8 }}>
           <select style={inpStyle} value={c.type} onChange={(e) => setCrit(i, retype(c, e.target.value as CritType, project))}>
             <option value="gate">Gate</option>
             <option value="gov">Governance</option>

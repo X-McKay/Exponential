@@ -9,24 +9,26 @@ const find = <K extends Block["kind"]>(blocks: Block[], kind: K): Extract<Block,
 describe("detectSignals", () => {
   test("seed state produces the mockup's signals", () => {
     const s = detectSignals(seedState());
-    expect(s.blocked.map((x) => `${x.p.id}/${x.r.id}`)).toEqual(["ima/R1"]);
-    expect(s.atRisk.map((x) => `${x.p.id}/${x.r.id}`)).toEqual(["onboarding/R2", "sector/R1"]);
-    expect(s.readyRel.map((x) => `${x.p.id}/${x.r.id}`)).toEqual(["onboarding/R1"]);
+    expect(s.blocked.map((x) => `${x.p.id}/${x.r.id}`)).toEqual(["clauses/R1"]);
+    expect(s.atRisk.map((x) => `${x.p.id}/${x.r.id}`)).toEqual(["invoice/R2", "search/R1"]);
+    expect(s.readyRel.map((x) => `${x.p.id}/${x.r.id}`)).toEqual(["invoice/R1", "triage/R1", "meetings/R1"]);
     expect(s.shortfalls.map((x) => `${x.m.id}:${x.gap}`)).toEqual(["MS-31:6", "MS-13:4", "MS-21:2"]);
-    expect(s.nearStretch).toEqual([]);
+    // Ticket classification (93 vs stretch 95) and transcript summarization (88 vs 90) are the only milestones within 5pts of stretch on every metric.
+    expect(s.nearStretch.map((x) => x.m.id)).toEqual(["MS-41", "MS-51"]);
     expect(s.failPRs.map((x) => x.pr.number)).toEqual([409]);
     expect(s.failBuilds.map((x) => x.b.id)).toEqual(["#1148", "#400", "#96", "#93"]);
-    expect(s.t1gaps.map((p) => p.id)).toEqual(["ima"]);
-    expect(s.bestValue?.id).toBe("onboarding");
+    expect(s.t1gaps.map((p) => p.id)).toEqual(["clauses"]);
+    // The sustain-stage project has nearly all of its (small) target eligible.
+    expect(s.bestValue?.id).toBe("meetings");
   });
   test("near-stretch fires only when every below-stretch metric is within 5pts", () => {
     const st = seedState();
     const m12 = st.projects[0]!.milestones.find((m) => m.id === "MS-12")!;
     m12.metrics[0]!.current = 92; // 3 under stretch
     m12.metrics[1]!.current = 91; // 4 under stretch
-    expect(detectSignals(st).nearStretch.map((x) => x.m.id)).toEqual(["MS-12"]);
+    expect(detectSignals(st).nearStretch.map((x) => x.m.id)).toEqual(["MS-12", "MS-41", "MS-51"]);
     m12.metrics[1]!.current = 85; // 10 under → not "all close"
-    expect(detectSignals(st).nearStretch).toEqual([]);
+    expect(detectSignals(st).nearStretch.map((x) => x.m.id)).toEqual(["MS-41", "MS-51"]);
   });
   test("milestones with zero metrics never produce a shortfall", () => {
     const st = seedState();
@@ -45,6 +47,7 @@ describe("rankBlocks / composeGlance", () => {
       "ci_failing",
       "tier1_gaps",
       "agent_flag",
+      "near_stretch",
       "value_trajectory",
       "ready_release",
       "upcoming",
@@ -62,8 +65,8 @@ describe("rankBlocks / composeGlance", () => {
   test("below-gate cards are the two largest shortfalls, closest fix first", () => {
     const blocks = composeGlance(seedState()).filter((b) => b.kind === "below_gate");
     expect(blocks.map((b) => b.title)).toEqual([
-      "Document ingestion pipeline needs 4pts to clear base",
-      "Draft generation pipeline needs 6pts to clear base",
+      "Purchase-order matching needs 4pts to clear base",
+      "Grounded answer pipeline needs 6pts to clear base",
     ]);
   });
   test("ci_failing card links the PR to its failing build", () => {
@@ -74,12 +77,12 @@ describe("rankBlocks / composeGlance", () => {
   test("tier1_gaps card lists up to three missing items", () => {
     const b = find(composeGlance(seedState()), "tier1_gaps")!;
     expect(b.title).toBe("3 governance items missing on a Tier 1 project");
-    expect(b.missing).toEqual(["Product SLA", "UAT process", "User & ops documentation"]);
+    expect(b.missing).toEqual(["Service level agreement", "User acceptance testing", "User and operator documentation"]);
     expect(b.counts.na).toBe(0);
   });
   test("the signature interaction: dragging a metric across a gate retires and creates cards", () => {
     const st = seedState();
-    const ima = st.projects.find((p) => p.id === "ima")!;
+    const ima = st.projects.find((p) => p.id === "clauses")!;
     const rec = ima.milestones.find((m) => m.id === "MS-21")!.metrics.find((x) => x.id === "rec")!;
     rec.current = 90;
     let blocks = composeGlance(st);
@@ -91,7 +94,7 @@ describe("rankBlocks / composeGlance", () => {
     });
     blocks = composeGlance(st);
     expect(find(blocks, "blocked_release")).toBeUndefined();
-    expect(detectSignals(st).readyRel.some(({ p, r }) => p.id === "ima" && r.id === "R1")).toBe(true);
+    expect(detectSignals(st).readyRel.some(({ p, r }) => p.id === "clauses" && r.id === "R1")).toBe(true);
   });
   test("empty state still composes without throwing", () => {
     const empty: AppState = { asOf: "2026-09-10T09:00:00.000Z", syncSource: null, workspace: { user: { name: "You", ini: "ME" }, lastGlanceAt: null }, projects: [], releases: {}, dev: {}, agents: [], runs: [], llm: null, proposals: [], scores: [], rules: [], promptVersions: [], brief: null, projectBriefs: {}, budgets: [], events: [], calendar: [] };
@@ -104,16 +107,17 @@ describe("writeNarrative", () => {
   test("seed narrative matches the mockup wording", () => {
     const page = composeGlancePage(seedState());
     expect(page.narrative).toEqual([
-      "One release is blocked — R1 Shadow mode on IMA compliance rule extra… (3 criteria unmet).",
-      "The closest fix: analyst quality rating on Draft generation pipeline sits 6pts under its base gate.",
-      "4 builds are red, most recently on doc-ingest-pipeline.",
-      "Next on the calendar: Sep 14 — pen test window opens (IMA compliance rule extra…).",
+      "One release is blocked — R1 Shadow mode on Contract Clause Review (3 criteria unmet).",
+      "The closest fix: reviewer quality rating on Grounded answer pipeline sits 6pts under its base gate.",
+      "Upside: Ticket classification is within 2pts of its stretch gate.",
+      "4 builds are red, most recently on invoice-po-matcher.",
+      "Next on the calendar: Sep 14 — pen test window opens (Contract Clause Review).",
     ]);
   });
   test("at-risk wording when nothing is blocked", () => {
     const st = seedState();
-    st.projects.find((p) => p.id === "ima")!.governance.forEach((g) => (g.status = "approved"));
-    st.projects.find((p) => p.id === "ima")!.milestones[0]!.metrics.forEach((x) => (x.current = 99));
+    st.projects.find((p) => p.id === "clauses")!.governance.forEach((g) => (g.status = "approved"));
+    st.projects.find((p) => p.id === "clauses")!.milestones[0]!.metrics.forEach((x) => (x.current = 99));
     const s = detectSignals(st);
     expect(writeNarrative(s)[0]).toBe("2 near-term releases are at risk.");
     expect(rankBlocks(s, st).some((b) => b.kind === "ready_release")).toBe(true);

@@ -39,7 +39,7 @@ export function WorkspaceEditor({ workspace, onSave, onClose }: { workspace: Wor
       }
     >
       {saveError && <div role="alert" style={{ color: C.redHi, fontSize: 12, margin: "8px 0" }}>Could not save: {saveError}</div>}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 90px", gap: 10 }}>
+      <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 90px", gap: 10 }}>
         <div>
           <Lbl>Your name</Lbl>
           <input

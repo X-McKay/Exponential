@@ -214,7 +214,7 @@ function Body({ b, cal, pending, state, onDecide }: { b: Block; cal: Calendar; p
             <div key={i} style={{ display: "flex", gap: 8, padding: "4px 0", alignItems: "baseline" }}>
               <span style={{ fontSize: 11, color: row.eval.ok ? C.green : row.eval.pending ? C.amber : C.red, width: 12, flexShrink: 0 }}>{row.eval.ok ? "✓" : row.eval.pending ? "◐" : "✗"}</span>
               <span style={{ fontSize: 12, color: row.eval.ok ? C.dim : C.text2, flex: 1 }}>{row.label}</span>
-              <span style={{ fontSize: 11, color: C.dim, flexShrink: 0 }}>{row.eval.sub}</span>
+              <span style={{ fontSize: 11, color: C.dim, flex: "0 1 auto", minWidth: 0, textAlign: "right", overflowWrap: "anywhere" }}>{row.eval.sub}</span>
             </div>
           ))}
         </div>
