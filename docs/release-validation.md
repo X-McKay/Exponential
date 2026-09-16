@@ -10,6 +10,10 @@ Validated on 2026-09-13/14 for a trusted, shared-workspace pilot with authentica
 | `bun run test:e2e` | Passed: production build and 30 acceptance checks, five calls to the local fixture provider |
 | `git diff --check` | Passed |
 
+### Follow-up: templates, updates from documents, synthetic data, browser suite
+
+After the project-template, update-from-documents, generic-fixture, and validation work: `bun run check` passed with 244 tests (6,058 assertions), `bun run test:e2e` passed its 30 checks, and the new Playwright suite (`bun run test:ui`) passed all 26 browser checks against the production server on a synthetic workspace, including phone-width layouts. The container path for the browser suite (`bun run container:ui`, also wired into CI) was not exercised in that environment because no container engine was available; the HTTP acceptance suite against the image was last run as recorded above.
+
 ### Podman follow-up
 
 The optimized release image was built and tested with Podman 6.1.0 on ARM64. The container build ran the static checks and 218 tests using the pinned Bun 1.3.11 toolchain. Its 31-check acceptance suite covered production assets, the image health endpoint, provider calls, conflict protection, and persistence through two container replacements using the same named volume. Test containers and their volume were removed afterward.

@@ -1,0 +1,13 @@
+{
+  "name": "exponential-ui-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Playwright browser suite for Exponential. Installed separately from the application workspace so the release image and the Nix dependency hash never include a browser test runner.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}
