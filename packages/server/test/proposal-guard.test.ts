@@ -17,7 +17,7 @@ const llm: Llm = {
 const setup = async () => {
   const db = openDb(":memory:");
   seed(db);
-  const run = await runAgent(db, llm, { agentId: "audie", proj: "ima" }, SEED_NOW);
+  const run = await runAgent(db, llm, { agentId: "audie", proj: "clauses" }, SEED_NOW);
   const proposal = loadState(db, SEED_NOW).proposals.find((p) => p.runId === run.id)!;
   return { db, proposal };
 };
@@ -25,19 +25,19 @@ const setup = async () => {
 describe("proposal evidence guards", () => {
   test("rejects an intervening edit and keeps the newer fact", async () => {
     const { db, proposal } = await setup();
-    const item = loadState(db, SEED_NOW).projects.find((p) => p.id === "ima")!.governance.find((g) => g.id === "sla")!;
-    updateGovernance(db, "ima", "sla", { ...item, status: "approved" }, SEED_NOW);
+    const item = loadState(db, SEED_NOW).projects.find((p) => p.id === "clauses")!.governance.find((g) => g.id === "sla")!;
+    updateGovernance(db, "clauses", "sla", { ...item, status: "approved" }, SEED_NOW);
     expect(() => acceptProposal(db, proposal, SEED_NOW)).toThrow("stale");
-    expect(loadState(db, SEED_NOW).projects.find((p) => p.id === "ima")!.governance.find((g) => g.id === "sla")!.status).toBe("approved");
+    expect(loadState(db, SEED_NOW).projects.find((p) => p.id === "clauses")!.governance.find((g) => g.id === "sla")!.status).toBe("approved");
     expect(loadState(db, SEED_NOW).proposals.find((p) => p.id === proposal.id)?.state).toBe("pending");
     db.close();
   });
   test("rolls back the fact if recording the decision fails", async () => {
     const { db, proposal } = await setup();
-    const before = loadState(db, SEED_NOW).projects.find((p) => p.id === "ima")!.governance.find((g) => g.id === "sla")!.status;
+    const before = loadState(db, SEED_NOW).projects.find((p) => p.id === "clauses")!.governance.find((g) => g.id === "sla")!.status;
     db.exec("CREATE TRIGGER refuse_decision BEFORE UPDATE ON proposal_guards BEGIN SELECT RAISE(ABORT, 'fixture rejection'); END");
     expect(() => acceptProposal(db, proposal, SEED_NOW)).toThrow("fixture rejection");
-    expect(loadState(db, SEED_NOW).projects.find((p) => p.id === "ima")!.governance.find((g) => g.id === "sla")!.status).toBe(before);
+    expect(loadState(db, SEED_NOW).projects.find((p) => p.id === "clauses")!.governance.find((g) => g.id === "sla")!.status).toBe(before);
     expect(loadState(db, SEED_NOW).proposals.find((p) => p.id === proposal.id)?.state).toBe("pending");
     db.close();
   });
@@ -49,7 +49,7 @@ describe("proposal evidence guards", () => {
     dismissProposal(db, proposal, SEED_NOW);
     expect(() => acceptProposal(db, proposal, SEED_NOW)).toThrow("already dismissed");
     const guard = db.query("SELECT decided_by, decision_mode FROM proposal_guards WHERE proposal_id = ?").get(proposal.id);
-    expect(guard).toEqual({ decided_by: "AM", decision_mode: "human" });
+    expect(guard).toEqual({ decided_by: "JA", decision_mode: "human" });
     db.close();
   });
   test("automatic accepts cannot establish earned autonomy", () => {
@@ -63,7 +63,7 @@ describe("proposal evidence guards", () => {
     let approval = false;
     const rulesLlm: Llm = { ...llm, chat: async () => ({ content: JSON.stringify({ summary: "Rule fired", attention: false, body: "Reminder needed", proposals: [approval ? { type: "governance_status", gid: "sla", status: "approved", rule: "rule-1" } : { type: "calendar_event", date: "2026-10-01", text: `Reminder ${++sequence}`, tab: "overview", sub: null, rule: "rule-1" }] }), model: "fixture", usage: null, truncated: false }) };
     for (let i = 0; i < 5; i++) {
-      const run = await runAgent(db, rulesLlm, { agentId: "sentry", proj: "ima" }, SEED_NOW);
+      const run = await runAgent(db, rulesLlm, { agentId: "sentry", proj: "clauses" }, SEED_NOW);
       acceptProposal(db, loadState(db, SEED_NOW).proposals.find((p) => p.runId === run.id)!, SEED_NOW);
     }
     let rule = loadState(db, SEED_NOW).rules.find((r) => r.id === "rule-1")!;
@@ -77,15 +77,15 @@ describe("proposal evidence guards", () => {
     rule = loadState(db, SEED_NOW).rules.find((r) => r.id === "rule-1")!;
     const enable = await app.handleApi(new Request("http://fixture/api/rules/rule-1", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...rule, auto: true }) }));
     expect(enable?.status).toBe(200);
-    const automatic = await runAgent(db, rulesLlm, { agentId: "sentry", proj: "ima" }, SEED_NOW);
+    const automatic = await runAgent(db, rulesLlm, { agentId: "sentry", proj: "clauses" }, SEED_NOW);
     const accepted = loadState(db, SEED_NOW).proposals.find((p) => p.runId === automatic.id)!;
     expect(accepted.state).toBe("accepted");
     expect(accepted.decisionMode).toBe("automatic");
     expect(ruleStats(rule, loadState(db, SEED_NOW).proposals).accepted).toBe(5);
     approval = true;
-    const approvalRun = await runAgent(db, rulesLlm, { agentId: "sentry", proj: "ima" }, SEED_NOW);
+    const approvalRun = await runAgent(db, rulesLlm, { agentId: "sentry", proj: "clauses" }, SEED_NOW);
     expect(loadState(db, SEED_NOW).proposals.find((p) => p.runId === approvalRun.id)?.state).toBe("pending");
-    expect(loadState(db, SEED_NOW).projects.find((p) => p.id === "ima")!.governance.find((g) => g.id === "sla")!.status).not.toBe("approved");
+    expect(loadState(db, SEED_NOW).projects.find((p) => p.id === "clauses")!.governance.find((g) => g.id === "sla")!.status).not.toBe("approved");
     db.close();
   });
 });

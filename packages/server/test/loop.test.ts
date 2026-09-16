@@ -71,10 +71,10 @@ describe("standing rules", () => {
       seen.push(user(m));
       return RULES_REPLY(m);
     });
-    const run = await runAgent(db, llm, { agentId: "sentry", proj: "ima" }, NOW);
+    const run = await runAgent(db, llm, { agentId: "sentry", proj: "clauses" }, NOW);
     expect(run.state).toBe("done");
     expect(seen[0]).toContain("Standing rules to check");
-    expect(seen[0]).toContain("- rule-1 (owner AM)");
+    expect(seen[0]).toContain("- rule-1 (owner JA)");
     const props = loadState(db, NOW).proposals.filter((p) => p.runId === run.id);
     expect(props.map((p) => [p.action.type, p.ruleId])).toEqual([["governance_status", "rule-2"]]);
     expect(props[0]?.state).toBe("pending");
@@ -84,41 +84,41 @@ describe("standing rules", () => {
   test("an unearned rule cannot enable autonomy; a project with no applicable rules is refused", async () => {
     const llm = fakeLlm(RULES_REPLY);
     const { db, call } = appWith(llm);
-    const put = await call<Rule>("PUT", routes.rule("rule-2"), { text: "If a runbook is complete, approve the SLA.", proj: "ima", enabled: true, auto: true, owner: "RS" });
+    const put = await call<Rule>("PUT", routes.rule("rule-2"), { text: "If a runbook is complete, approve the SLA.", proj: "clauses", enabled: true, auto: true, owner: "TO" });
     expect(put.status).toBe(409);
-    const run = await runAgent(db, llm, { agentId: "sentry", proj: "ima" }, NOW);
+    const run = await runAgent(db, llm, { agentId: "sentry", proj: "clauses" }, NOW);
     const state = loadState(db, NOW);
     const p = state.proposals.find((x) => x.runId === run.id);
     expect(p?.state).toBe("pending");
-    expect(state.projects.find((x) => x.id === "ima")?.governance.find((g) => g.id === "sla")?.status).not.toBe("approved");
+    expect(state.projects.find((x) => x.id === "clauses")?.governance.find((g) => g.id === "sla")?.status).not.toBe("approved");
     // Disable every rule for sector and the agent has nothing to check there.
     for (const r of state.rules) await call("PUT", routes.rule(r.id), { text: r.text, proj: r.proj, enabled: false, auto: false, owner: r.owner });
-    const refused = await call<{ error: string }>("POST", routes.agentRuns("sentry"), { proj: "sector" });
+    const refused = await call<{ error: string }>("POST", routes.agentRuns("sentry"), { proj: "search" });
     expect(refused.status).toBe(409);
     expect(refused.body.error).toContain("no enabled standing rules");
   });
 
   test("rules are created, listed, edited, and deleted through the API", async () => {
     const { call } = appWith(null);
-    const created = await call<Rule>("POST", routes.rules(), { text: "When coverage on any repo drops below 60%, add a calendar event for a coverage review.", proj: null, owner: "AM" });
+    const created = await call<Rule>("POST", routes.rules(), { text: "When coverage on any repo drops below 60%, add a calendar event for a coverage review.", proj: null, owner: "JA" });
     expect(created.status).toBe(201);
-    expect(created.body).toMatchObject({ id: "rule-4", enabled: true, auto: false, proj: null });
-    expect((await call<Rule[]>("GET", routes.rules())).body.map((r) => r.id)).toEqual(["rule-1", "rule-2", "rule-3", "rule-4"]);
-    expect((await call("POST", routes.rules(), { text: "short", owner: "AM" })).status).toBe(400);
-    expect((await call("POST", routes.rules(), { text: "A perfectly fine rule for a project that does not exist.", proj: "nope", owner: "AM" })).status).toBe(400);
-    expect((await call("DELETE", routes.rule("rule-4"))).status).toBe(200);
-    expect((await call("DELETE", routes.rule("rule-4"))).status).toBe(404);
-    expect((await call<AppState>("GET", routes.state())).body.rules.length).toBe(3);
+    expect(created.body).toMatchObject({ id: "rule-5", enabled: true, auto: false, proj: null });
+    expect((await call<Rule[]>("GET", routes.rules())).body.map((r) => r.id)).toEqual(["rule-1", "rule-2", "rule-3", "rule-4", "rule-5"]);
+    expect((await call("POST", routes.rules(), { text: "short", owner: "JA" })).status).toBe(400);
+    expect((await call("POST", routes.rules(), { text: "A perfectly fine rule for a project that does not exist.", proj: "nope", owner: "JA" })).status).toBe(400);
+    expect((await call("DELETE", routes.rule("rule-5"))).status).toBe(200);
+    expect((await call("DELETE", routes.rule("rule-5"))).status).toBe(404);
+    expect((await call<AppState>("GET", routes.state())).body.rules.length).toBe(4);
   });
 
   test("weekly schedules are due once per week from Monday; the earned-autonomy threshold needs enough decisions", () => {
     expect(weekStart("2026-09-10T12:00:00Z")).toBe("2026-09-07T00:00:00.000Z");
-    const weekly: Agent = { id: "w", name: "W", grad: "", purpose: "", kind: "brief", model: null, owner: "AM", caps: [], schedule: "weekly", prompt: null };
+    const weekly: Agent = { id: "w", name: "W", grad: "", purpose: "", kind: "brief", model: null, owner: "JA", caps: [], schedule: "weekly", prompt: null };
     const run = (startedAt: string): AgentRun => ({ id: "run-1", agentId: "w", proj: null, tab: "overview", state: "done", startedAt, finishedAt: startedAt, instruction: null, summary: "", output: "", model: "m", error: null, promptVersion: null, latencyMs: null, promptTokens: null, completionTokens: null, benchmark: null, rating: null, ratingNote: null });
     expect(isDue(weekly, [], "2026-09-10T12:00:00Z")).toBe(true);
     expect(isDue(weekly, [run("2026-09-06T23:00:00Z")], "2026-09-10T12:00:00Z")).toBe(true);
     expect(isDue(weekly, [run("2026-09-07T01:00:00Z")], "2026-09-10T12:00:00Z")).toBe(false);
-    const props = (n: number, accepted: number): Proposal[] => Array.from({ length: n }, (_, i) => ({ id: `prop-${i}`, runId: "run-1", agentId: "sentry", proj: "ima", ruleId: "rule-1", action: { type: "targets", fte: 1, time: 1 }, rationale: "", state: i < accepted ? "accepted" : "dismissed", createdAt: "2026-09-01T00:00:00Z", decidedAt: "2026-09-01T00:00:00Z" }));
+    const props = (n: number, accepted: number): Proposal[] => Array.from({ length: n }, (_, i) => ({ id: `prop-${i}`, runId: "run-1", agentId: "sentry", proj: "clauses", ruleId: "rule-1", action: { type: "targets", fte: 1, time: 1 }, rationale: "", state: i < accepted ? "accepted" : "dismissed", createdAt: "2026-09-01T00:00:00Z", decidedAt: "2026-09-01T00:00:00Z" }));
     expect(ruleStats({ id: "rule-1" }, props(4, 4)).earnedAutonomy).toBe(false);
     expect(ruleStats({ id: "rule-1" }, props(5, 4)).earnedAutonomy).toBe(true);
     expect(ruleStats({ id: "rule-1" }, props(5, 3)).earnedAutonomy).toBe(false);
@@ -140,7 +140,7 @@ describe("prompt tuning", () => {
     expect(loadState(db, NOW).proposals.filter((p) => p.runId === thin.id)).toEqual([]);
 
     const before = promptVersion("audit", null);
-    const r1 = await runAgent(db, fakeLlm(handler), { agentId: "audie", proj: "ima" }, NOW);
+    const r1 = await runAgent(db, fakeLlm(handler), { agentId: "audie", proj: "clauses" }, NOW);
     expect(r1.promptVersion).toBe(before);
     const tuned = await tuneAgent(db, fakeLlm(handler), coach, "audie", NOW);
     expect(tuned.state).toBe("done");
@@ -165,11 +165,11 @@ describe("prompt tuning", () => {
     expect(after).not.toBe(before);
     expect(state.promptVersions).toEqual([{ agentId: "audie", version: after, prompt: audie.prompt, at: NOW.toISOString(), source: "tuner" }]);
     const bench = state.runs.filter((r) => r.agentId === "audie" && r.benchmark !== null);
-    expect(bench.length).toBe(2);
+    expect(bench.length).toBe(3);
     expect(bench.every((r) => r.promptVersion === after)).toBe(true);
     const history = promptHistory(audie, after, state.runs, state.scores, state.promptVersions);
     expect(history.map((h) => [h.version, h.current, h.source, h.benchmark.n])).toEqual([
-      [after, true, "tuner", 2],
+      [after, true, "tuner", 3],
       [before, false, "builtin", 0],
     ]);
     // The new instructions reach the next run's system prompt.
@@ -180,7 +180,7 @@ describe("prompt tuning", () => {
         seen.push(sys(m));
         return AUDIT;
       }),
-      { agentId: "audie", proj: "ima" },
+      { agentId: "audie", proj: "clauses" },
       NOW,
     );
     expect(seen[0]).toContain("Additional instructions from the workspace");
@@ -225,16 +225,16 @@ describe("model scouting", () => {
     const state = loadState(db, NOW);
     const rows = modelComparison({ id: "audie" }, state.runs, state.scores, promptVersion("audit", null));
     expect(rows.map((r) => [r.model, r.n, r.overall])).toEqual([
-      ["better", 2, 0.9],
-      ["fake", 2, 0.5],
-      ["worse", 2, 0.5],
+      ["better", 3, 0.9],
+      ["fake", 3, 0.5],
+      ["worse", 3, 0.5],
     ]);
     const proposal = state.proposals.find((p) => p.runId === run.id)!;
     expect(proposal.action).toEqual({ type: "agent_model", agentId: "audie", model: "better" });
     expect(proposal.rationale).toContain("90% vs 50%");
     expect((await call("POST", routes.proposalAccept(proposal.id))).status).toBe(200);
     expect(loadState(db, NOW).agents.find((a) => a.id === "audie")?.model).toBe("better");
-    const next = await runAgent(db, llm, { agentId: "audie", proj: "ima" }, NOW);
+    const next = await runAgent(db, llm, { agentId: "audie", proj: "clauses" }, NOW);
     expect(next.model).toBe("better");
     expect(next.output).toContain("GROUNDED");
     // Nothing more to propose: the current model now leads.
@@ -284,7 +284,7 @@ describe("model scouting", () => {
 });
 
 describe("weekly brief", () => {
-  const BRIEF = JSON.stringify({ summary: "R1 still blocked on recall; two decisions wait on you", body: "## What moved\n- Ops documentation moved to In review.\n## What is blocked\n- R1 Shadow mode: recall 86% vs 88%.\n## Decisions waiting on you\n- none\n## Proposals pending\n- none", links: [{ label: "R1 criteria", proj: "ima", tab: "roadmap" }, { label: "bad", proj: "nope", tab: "value" }] });
+  const BRIEF = JSON.stringify({ summary: "R1 still blocked on recall; two decisions wait on you", body: "## What moved\n- Ops documentation moved to In review.\n## What is blocked\n- R1 Shadow mode: recall 86% vs 88%.\n## Decisions waiting on you\n- none\n## Proposals pending\n- none", links: [{ label: "R1 criteria", proj: "clauses", tab: "roadmap" }, { label: "bad", proj: "nope", tab: "value" }] });
   const handler: Handler = (m) => (sys(m).includes("weekly-brief") ? BRIEF : "{}");
 
   test("the brief is a workspace-level run with links, delivered when a channel is configured, and shows on Glance", async () => {
@@ -309,9 +309,9 @@ describe("weekly brief", () => {
     );
     expect(run.state).toBe("done");
     expect(run.proj).toBeNull();
-    expect(seen[0]).toContain("Brief for Al McKay (AM)");
+    expect(seen[0]).toContain("Brief for Jordan Avery (JA)");
     expect(seen[0]).toContain("What moved this week");
-    expect(run.output).toContain("## Where to look\n- R1 criteria — IMA");
+    expect(run.output).toContain("## Where to look\n- R1 criteria — Contract Clause Review");
     expect(run.output).not.toContain("bad");
     expect(run.output).toContain("Delivered to the configured channel");
     expect(delivered.length).toBe(1);

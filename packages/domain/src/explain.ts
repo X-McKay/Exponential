@@ -223,9 +223,9 @@ export interface Touch {
 const targets = (a: Proposal["action"], f: FactRef): boolean => {
   switch (f.kind) {
     case "governance":
-      return (a.type === "governance_status" && a.gid === f.gid) || a.type === "governance_item";
+      return ((a.type === "governance_status" || a.type === "governance_update") && a.gid === f.gid) || a.type === "governance_item";
     case "milestone":
-      return a.type === "milestone_status" && a.mid === f.mid;
+      return (a.type === "milestone_status" || a.type === "milestone_update") && a.mid === f.mid;
     case "targets":
       return a.type === "targets";
     case "metric":

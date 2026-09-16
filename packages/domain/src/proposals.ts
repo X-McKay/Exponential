@@ -1,7 +1,10 @@
 // ================= proposals (derived helpers) =================
 
-import { GSTATUS_LABEL, STATUS_LABEL } from "./labels.ts";
+import { GSTATUS_LABEL, STATUS_LABEL, TIER_LABEL } from "./labels.ts";
 import type { AppState, Proposal, ProposalAction, Rule } from "./types.ts";
+
+/** Kinds staged by "Update project from documents": edits to the project record rather than a status nudge. */
+export const RECORD_ACTIONS: readonly ProposalAction["type"][] = ["project_details", "team_member", "repo", "governance_update", "milestone_create", "milestone_update", "release_create", "release_update"];
 
 export const pendingProposals = (state: Pick<AppState, "proposals">, proj?: string): Proposal[] =>
   state.proposals.filter((p) => p.state === "pending" && (proj === undefined || p.proj === proj));
@@ -25,6 +28,48 @@ export const describeAction = (a: ProposalAction, state: Pick<AppState, "project
       return `Add calendar event on ${a.date}: ${a.text}`;
     case "targets":
       return `Set targets to FTE ${a.fte}% and time ${a.time}%`;
+    case "project_details": {
+      const parts: string[] = [];
+      if (a.description !== undefined) parts.push("description");
+      if (a.stage !== undefined) parts.push(`stage to ${a.stage}`);
+      if (a.tier !== undefined) parts.push(`risk tier to ${a.tier === null ? "untiered" : TIER_LABEL[a.tier]}`);
+      if (a.committee !== undefined) parts.push(a.committee ? `AI committee approval ${a.committee.date} (${a.committee.ref})` : "AI committee approval cleared");
+      return `Update ${parts.join(", ") || "project details"}`;
+    }
+    case "team_member":
+      return `${p?.team.some((t) => t.ini === a.ini) ? "Update" : "Add"} team member ${a.name} (${a.ini}, ${a.role})`;
+    case "repo":
+      return `${p?.repos.some((r) => r.name === a.name) ? "Update" : "Link"} repository ${a.name}`;
+    case "governance_update": {
+      const name = p?.governance.find((g) => g.id === a.gid)?.name ?? a.gid;
+      const parts: string[] = [];
+      if (a.status !== undefined) parts.push(`to ${GSTATUS_LABEL[a.status]}`);
+      if (a.owner !== undefined) parts.push(`owner ${a.owner}`);
+      if (a.date !== undefined) parts.push(a.date ? `dated ${a.date}` : "date cleared");
+      if (a.detail !== undefined) parts.push("detail");
+      return `Update ${name}: ${parts.join(", ") || "no change"}`;
+    }
+    case "milestone_create":
+      return `Add milestone "${a.name}" (${STATUS_LABEL[a.status]}, ${a.month})`;
+    case "milestone_update": {
+      const name = p?.milestones.find((m) => m.id === a.mid)?.name ?? a.mid;
+      const parts: string[] = [];
+      if (a.name !== undefined) parts.push(`rename to "${a.name}"`);
+      if (a.status !== undefined) parts.push(`status ${STATUS_LABEL[a.status]}`);
+      if (a.month !== undefined) parts.push(`month ${a.month}`);
+      if (a.impact !== undefined) parts.push("impact");
+      return `Update ${name}: ${parts.join(", ") || "no change"}`;
+    }
+    case "release_create":
+      return `Add release "${a.name}" (${a.month}, ${a.milestoneIds.length} milestone${a.milestoneIds.length === 1 ? "" : "s"}, ${a.criteria.length} criteria)`;
+    case "release_update": {
+      const parts: string[] = [];
+      if (a.name !== undefined) parts.push(`rename to "${a.name}"`);
+      if (a.month !== undefined) parts.push(`month ${a.month}`);
+      if (a.milestoneIds !== undefined) parts.push(`${a.milestoneIds.length} milestone${a.milestoneIds.length === 1 ? "" : "s"}`);
+      if (a.criteria !== undefined) parts.push(`${a.criteria.length} criteria`);
+      return `Update release ${a.rid}: ${parts.join(", ") || "no change"}`;
+    }
   }
 };
 

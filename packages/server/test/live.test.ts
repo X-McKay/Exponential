@@ -18,7 +18,7 @@ import { BASE } from "./helpers.ts";
 
 const NOW = new Date("2026-09-10T12:00:00Z");
 
-const REPLY = JSON.stringify({ summary: "Recall 86% below the 88% gate", attention: true, body: "## Recall gap\nRule recall is 86% on MS-21.", proposals: [{ type: "governance_status", gid: "sla", status: "draft", rationale: "Described as started." }, { type: "governance_status", gid: "nope", status: "draft", rationale: "bad" }] });
+const REPLY = JSON.stringify({ summary: "Recall 86% below the 88% gate", attention: true, body: "## Recall gap\nClause recall is 86% on MS-21.", proposals: [{ type: "governance_status", gid: "sla", status: "draft", rationale: "Described as started." }, { type: "governance_status", gid: "nope", status: "draft", rationale: "bad" }] });
 const JUDGE = JSON.stringify({ groundedness: 9, completeness: 8, actionability: 7, clarity: 9, unsupported: [], expectations: [], critique: "Fine." });
 
 /** A model that streams its reply in three pieces when asked to. */
@@ -39,10 +39,10 @@ describe("run logs and the live channel", () => {
     const seen: LiveEvent[] = [];
     const off = liveBus.subscribe((e) => seen.push(e));
     const llm = streaming();
-    const run = await runAgent(db, llm, { agentId: "audie", proj: "ima", instruction: "Audit" }, NOW);
+    const run = await runAgent(db, llm, { agentId: "audie", proj: "clauses", instruction: "Audit" }, NOW);
     await judgeRun(db, llm, run.id, NOW);
     off();
-    expect(seen[0]).toMatchObject({ kind: "started", run: { id: run.id, agentId: "audie", proj: "ima" } });
+    expect(seen[0]).toMatchObject({ kind: "started", run: { id: run.id, agentId: "audie", proj: "clauses" } });
     const steps = seen.filter((e): e is Extract<LiveEvent, { kind: "step" }> => e.kind === "step").map((e) => e.event.step);
     expect(steps).toEqual(["briefing", "request", "reply", "parsed", "proposals", "scored", "done", "judge", "judged"]);
     const tokens = seen.filter((e): e is Extract<LiveEvent, { kind: "token" }> => e.kind === "token");

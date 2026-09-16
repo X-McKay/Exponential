@@ -29,9 +29,9 @@ const curatorReply = () =>
   JSON.stringify({
     headline: "R1 is blocked on recall; nothing else needs you today",
     sections: [
-      { group: "top", text: "R1 Shadow mode is blocked: 1 of 4 criteria met, recall 86% against the 88% gate.", tip: "Decide the recall threshold before Sep 30.", action: { label: "View release", proj: "ima", tab: "roadmap" }, widget: { type: "release", proj: "ima", rid: "R1" } },
-      { group: "top", text: "Gates across the portfolio.", tip: null, action: { label: "Nowhere", proj: "nope", tab: "value" }, widget: { type: "table", columns: ["Milestone", "Metric", "Now", "Base"], rows: [["MS-21", "Rule recall", "86%", "88%"], ["MS-13", "Extraction accuracy", "81%", "85%"]] } },
-      { group: "fyi", text: "Something about a milestone that does not exist, worth 99999 points.", tip: null, action: { label: "Review proposals", proj: "inbox", tab: "overview" }, widget: { type: "gates", proj: "ima", mid: "MS-99" } },
+      { group: "top", text: "R1 Shadow mode is blocked: 1 of 4 criteria met, recall 86% against the 88% gate.", tip: "Decide the recall threshold before Sep 30.", action: { label: "View release", proj: "clauses", tab: "roadmap" }, widget: { type: "release", proj: "clauses", rid: "R1" } },
+      { group: "top", text: "Gates across the portfolio.", tip: null, action: { label: "Nowhere", proj: "nope", tab: "value" }, widget: { type: "table", columns: ["Milestone", "Metric", "Now", "Base"], rows: [["MS-21", "Clause recall", "86%", "88%"], ["MS-13", "Extraction accuracy", "81%", "85%"]] } },
+      { group: "fyi", text: "Something about a milestone that does not exist, worth 99999 points.", tip: null, action: { label: "Review proposals", proj: "inbox", tab: "overview" }, widget: { type: "gates", proj: "clauses", mid: "MS-99" } },
       { group: "elsewhere", text: "Nothing to see.", tip: "", action: null, widget: { type: "none" } },
     ],
   });
@@ -52,14 +52,14 @@ describe("widgets and the composer's own brief", () => {
   test("widgets resolve against live facts and parse only when they point at something real", () => {
     const { db } = appWith(null);
     const state = loadState(db, NOW);
-    expect(resolveWidget({ type: "release", proj: "ima", rid: "R1" }, state)?.type).toBe("release");
-    const rel = resolveWidget({ type: "release", proj: "ima", rid: "R1" }, state);
+    expect(resolveWidget({ type: "release", proj: "clauses", rid: "R1" }, state)?.type).toBe("release");
+    const rel = resolveWidget({ type: "release", proj: "clauses", rid: "R1" }, state);
     expect(rel?.type === "release" && rel.rows.length).toBe(4);
-    expect(resolveWidget({ type: "gates", proj: "ima", mid: "MS-99" }, state)).toBeNull();
-    expect(resolveWidget({ type: "metric", proj: "ima", mid: "MS-21", xid: "nope" }, state)).toBeNull();
-    expect(resolveWidget({ type: "ci", proj: "onboarding", repo: "doc-ingest-pipeline", number: 409 }, state)?.type).toBe("ci");
+    expect(resolveWidget({ type: "gates", proj: "clauses", mid: "MS-99" }, state)).toBeNull();
+    expect(resolveWidget({ type: "metric", proj: "clauses", mid: "MS-21", xid: "nope" }, state)).toBeNull();
+    expect(resolveWidget({ type: "ci", proj: "invoice", repo: "invoice-po-matcher", number: 409 }, state)?.type).toBe("ci");
     expect(resolveWidget({ type: "proposals", ids: ["prop-1"] }, state)).toBeNull();
-    expect(parseWidget({ type: "governance", proj: "ima" }, state)).toEqual({ type: "governance", proj: "ima" });
+    expect(parseWidget({ type: "governance", proj: "clauses" }, state)).toEqual({ type: "governance", proj: "clauses" });
     expect(parseWidget({ type: "governance", proj: "nope" }, state)).toBeNull();
     expect(parseWidget({ type: "table", columns: ["a"], rows: [["1"]] }, state)).toBeNull();
     expect(parseWidget({ type: "upcoming", days: 500 }, state)).toEqual({ type: "upcoming", days: 90 });
@@ -72,8 +72,8 @@ describe("widgets and the composer's own brief", () => {
     const own = defaultBrief(state);
     expect(own.headline).toMatch(/^One release is blocked/);
     expect(own.sections.map((s) => `${s.group}:${s.widget?.type ?? "none"}`)).toEqual(["top:release", "top:gates", "top:none", "top:none", "fyi:upcoming", "fyi:activity"]);
-    expect(own.sections[0]?.text).toMatch(/^R1 Shadow mode on IMA compliance rule extraction is blocked/);
-    expect(own.sections[0]?.action).toEqual({ label: "View release", proj: "ima", tab: "roadmap" });
+    expect(own.sections[0]?.text).toMatch(/^R1 Shadow mode on Contract Clause Review is blocked/);
+    expect(own.sections[0]?.action).toEqual({ label: "View release", proj: "clauses", tab: "roadmap" });
     expect(own.sections[0]?.tip).toMatch(/^Unmet: /);
     expect(own.sections.every((s) => !s.widget || resolveWidget(s.widget, state))).toBe(true);
     const blocks = composeGlance(state, calendarOf(state));
@@ -89,8 +89,8 @@ describe("widgets and the composer's own brief", () => {
 
 describe("curator", () => {
   test("title-case headlines become sentence case, keeping ids, acronyms, and project names", () => {
-    expect(sentenceCase("R1 Blocked: IMA CI Fails, 6 Proposals Pending", ["IMA compliance rule extraction"])).toBe("R1 blocked: IMA CI fails, 6 proposals pending");
-    expect(sentenceCase("Sector Report Generation Lacks Three Governance Items", ["Sector report generation"])).toBe("Sector report generation lacks three governance items");
+    expect(sentenceCase("R1 Blocked: clauses CI Fails, 6 Proposals Pending", ["Contract Clause Review"])).toBe("R1 blocked: clauses CI fails, 6 proposals pending");
+    expect(sentenceCase("Internal Knowledge Search Lacks Three Governance Items", ["Internal Knowledge Search"])).toBe("Internal Knowledge Search lacks three governance items");
     expect(sentenceCase("R1 is blocked on recall; nothing else needs you today")).toBe("R1 is blocked on recall; nothing else needs you today");
   });
 
@@ -99,9 +99,9 @@ describe("curator", () => {
     const { db, call } = appWith(llm);
     const curator = loadState(db, NOW).agents.find((a) => a.kind === "curator")!;
     const ctx = curatorContext(loadState(db, NOW), composeGlance(loadState(db, NOW), calendarOf(loadState(db, NOW))));
-    expect(ctx).toContain("Reader: Al McKay (AM)");
-    expect(ctx).toContain("- blocked_release:ima:R1 [blocked_release");
-    expect(ctx).toContain('proj "ima"');
+    expect(ctx).toContain("Reader: Jordan Avery (JA)");
+    expect(ctx).toContain("- blocked_release:clauses:R1 [blocked_release");
+    expect(ctx).toContain('proj "clauses"');
     expect(ctx).toContain("MS-21 (metrics:");
     const run = await curateGlance(db, llm, curator, NOW);
     expect(run.state).toBe("done");
@@ -109,8 +109,8 @@ describe("curator", () => {
     expect(run.summary).toBe("R1 is blocked on recall; nothing else needs you today");
     expect(run.output).toContain("## Top of mind");
     expect(run.output).toContain("→ View release");
-    expect(run.output).toContain("[widget: release ima/R1]");
-    expect(run.output).toContain("| MS-21 | Rule recall | 86% | 88% |");
+    expect(run.output).toContain("[widget: release clauses/R1]");
+    expect(run.output).toContain("| MS-21 | Clause recall | 86% | 88% |");
     const state = (await call<AppState>("GET", routes.state())).body;
     expect(state.brief?.runId).toBe(run.id);
     expect(state.brief?.sections.map((s) => [s.group, s.widget?.type ?? null, s.action?.label ?? null, s.tip])).toEqual([
@@ -172,33 +172,33 @@ describe("project briefs", () => {
     const seen: string[] = [];
     const llm = fakeLlm((m) => {
       seen.push(m[1]?.content ?? "");
-      return JSON.stringify({ headline: "R1 is blocked on recall", sections: [{ group: "top", text: "R1 Shadow mode is blocked: 1 of 4 criteria met.", tip: null, action: { label: "View release", proj: "ima", tab: "roadmap" }, widget: { type: "release", proj: "ima", rid: "R1" } }] });
+      return JSON.stringify({ headline: "R1 is blocked on recall", sections: [{ group: "top", text: "R1 Shadow mode is blocked: 1 of 4 criteria met.", tip: null, action: { label: "View release", proj: "clauses", tab: "roadmap" }, widget: { type: "release", proj: "clauses", rid: "R1" } }] });
     });
     const { db, call } = appWith(llm);
-    const view = projectView(loadState(db, NOW), "ima");
-    expect(view.projects.map((p) => p.id)).toEqual(["ima"]);
-    expect(Object.keys(view.releases)).toEqual(["ima"]);
-    expect(view.runs.every((r) => r.proj === "ima")).toBe(true);
-    expect(view.events.every((e) => e.proj === "ima")).toBe(true);
-    expect(composeGlance(view).every((b) => b.proj === "ima")).toBe(true);
+    const view = projectView(loadState(db, NOW), "clauses");
+    expect(view.projects.map((p) => p.id)).toEqual(["clauses"]);
+    expect(Object.keys(view.releases)).toEqual(["clauses"]);
+    expect(view.runs.every((r) => r.proj === "clauses")).toBe(true);
+    expect(view.events.every((e) => e.proj === "clauses")).toBe(true);
+    expect(composeGlance(view).every((b) => b.proj === "clauses")).toBe(true);
     expect(defaultBrief(view, calendarOf(view), "project").sections[0]?.text).toContain("blocked");
 
-    const first = await call<{ run: AgentRun | null; brief: DailyBrief | null }>("POST", routes.projectBrief("ima"));
+    const first = await call<{ run: AgentRun | null; brief: DailyBrief | null }>("POST", routes.projectBrief("clauses"));
     expect(first.status).toBe(200);
-    expect(first.body.run?.proj).toBe("ima");
-    expect(first.body.run?.instruction).toBe("Daily brief on IMA compliance rule extraction for Al McKay");
+    expect(first.body.run?.proj).toBe("clauses");
+    expect(first.body.run?.instruction).toBe("Daily brief on Contract Clause Review for Jordan Avery");
     expect(first.body.brief?.runId).toBe(first.body.run?.id);
-    expect(seen[0]).toContain("This brief is about one project only: IMA compliance rule extraction");
-    expect(seen[0]).not.toContain("Client onboarding");
+    expect(seen[0]).toContain("This brief is about one project only: Contract Clause Review");
+    expect(seen[0]).not.toContain("Invoice Review Assistant");
     const state = (await call<AppState>("GET", routes.state())).body;
-    expect(state.projectBriefs.ima?.runId).toBe(first.body.run?.id);
+    expect(state.projectBriefs.clauses?.runId).toBe(first.body.run?.id);
     expect(state.brief).toBeNull();
     // Still current: no model call, the stored brief comes back.
-    const again = await call<{ run: AgentRun | null; brief: DailyBrief | null }>("POST", routes.projectBrief("ima"));
+    const again = await call<{ run: AgentRun | null; brief: DailyBrief | null }>("POST", routes.projectBrief("clauses"));
     expect(again.body.run).toBeNull();
     expect(again.body.brief?.runId).toBe(first.body.run?.id);
     expect(seen.length).toBe(1);
-    const forced = await call<{ run: AgentRun | null; brief: DailyBrief | null }>("POST", `${routes.projectBrief("ima")}?force=1`);
+    const forced = await call<{ run: AgentRun | null; brief: DailyBrief | null }>("POST", `${routes.projectBrief("clauses")}?force=1`);
     expect(forced.body.run?.id).not.toBe(first.body.run?.id);
     expect(seen.length).toBe(2);
     expect((await call("POST", routes.projectBrief("nope"))).status).toBe(404);

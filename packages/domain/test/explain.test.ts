@@ -7,8 +7,8 @@ import type { Explanation, Proposal } from "../src/index.ts";
 
 const cal = calendarFor(SEED_ASOF, ["2026-01", "2027-03"]);
 const state = seedState();
-const ima = state.projects.find((p) => p.id === "ima")!;
-const onboarding = state.projects.find((p) => p.id === "onboarding")!;
+const ima = state.projects.find((p) => p.id === "clauses")!;
+const onboarding = state.projects.find((p) => p.id === "invoice")!;
 
 const leaves = (e: Explanation): Explanation[] => (e.fact ? [e] : []).concat(e.inputs.flatMap(leaves));
 
@@ -34,7 +34,7 @@ describe("explanations trace the derivation", () => {
   test("eligible value sums the shipped milestones' gated impact and ends in facts", () => {
     const e = explainEligible(onboarding, "fte");
     expect(e.value).toBe(`${eligible(onboarding, "fte")}%`);
-    expect(e.inputs[0]?.fact).toEqual({ kind: "targets", proj: "onboarding" });
+    expect(e.inputs[0]?.fact).toEqual({ kind: "targets", proj: "invoice" });
     const contributing = e.inputs.slice(1).filter((i) => i.value !== "0%");
     expect(contributing.length).toBeGreaterThan(0);
     expect(contributing.every((i) => /clearing the (base|stretch) gate/.test(i.rule ?? ""))).toBe(true);
@@ -44,7 +44,7 @@ describe("explanations trace the derivation", () => {
   });
 
   test("a release explains each criterion with the gate or governance item behind it", () => {
-    const r = state.releases.ima!.find((x) => x.id === "R1")!;
+    const r = state.releases.clauses!.find((x) => x.id === "R1")!;
     const e = explainRelease(ima, r, cal);
     const st = releaseState(r, ima, cal);
     expect(e.value).toBe(`${st.label} · ${st.met} of ${st.total} criteria met`);
@@ -56,14 +56,14 @@ describe("explanations trace the derivation", () => {
   });
 
   test("touches name the accepted proposal that changed a fact and the reading behind a metric", () => {
-    const accepted: Proposal = { id: "prop-9", runId: "run-1", agentId: "audie", proj: "ima", ruleId: "rule-2", action: { type: "governance_status", gid: "sla", status: "approved" }, rationale: "", state: "accepted", createdAt: SEED_ASOF, decidedAt: SEED_ASOF };
+    const accepted: Proposal = { id: "prop-9", runId: "run-1", agentId: "audie", proj: "clauses", ruleId: "rule-2", action: { type: "governance_status", gid: "sla", status: "approved" }, rationale: "", state: "accepted", createdAt: SEED_ASOF, decidedAt: SEED_ASOF };
     const pending: Proposal = { ...accepted, id: "prop-10", state: "pending", decidedAt: null };
     const s = { ...state, proposals: [accepted, pending] };
-    const t = touches(s, { kind: "governance", proj: "ima", gid: "sla" });
+    const t = touches(s, { kind: "governance", proj: "clauses", gid: "sla" });
     expect(t.map((x) => [x.who, x.what])).toEqual([["Audie", "rule rule-2 via proposal prop-9, accepted"]]);
-    expect(touches(s, { kind: "governance", proj: "ima", gid: "other" })).toEqual([]);
-    const withReading = { ...s, projects: s.projects.map((p) => (p.id !== "ima" ? p : { ...p, milestones: p.milestones.map((m) => (m.id !== "MS-21" ? m : { ...m, metrics: m.metrics.map((x) => (x.id === "rec" ? { ...x, readAt: "2026-09-09T10:00:00Z", readSource: "eval" as const } : x)) })) })) };
-    expect(touches(withReading, { kind: "metric", proj: "ima", mid: "MS-21", xid: "rec" }).map((x) => x.what)).toEqual(["reading 86% recorded"]);
+    expect(touches(s, { kind: "governance", proj: "clauses", gid: "other" })).toEqual([]);
+    const withReading = { ...s, projects: s.projects.map((p) => (p.id !== "clauses" ? p : { ...p, milestones: p.milestones.map((m) => (m.id !== "MS-21" ? m : { ...m, metrics: m.metrics.map((x) => (x.id === "rec" ? { ...x, readAt: "2026-09-09T10:00:00Z", readSource: "eval" as const } : x)) })) })) };
+    expect(touches(withReading, { kind: "metric", proj: "clauses", mid: "MS-21", xid: "rec" }).map((x) => x.what)).toEqual(["reading 86% recorded"]);
   });
 
   test("spend explains per agent, then per run, each run a fact", () => {

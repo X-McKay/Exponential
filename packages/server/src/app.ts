@@ -9,6 +9,7 @@ import type { Settings } from "./settings.ts";
 
 import type { Database } from "bun:sqlite";
 import { blocksHash, composeGlance, composeGlancePage, calendarOf, overBudget, projectView } from "@valueflow/domain";
+import type { Project, ReleaseInput as ReleaseShape } from "./templates.ts";
 import {
   AgentsInputSchema,
   CalendarEventInputSchema,
@@ -31,6 +32,8 @@ import {
   SetupCreateInputSchema,
   SetupRefineInputSchema,
   TargetsInputSchema,
+  TemplateCreateInputSchema,
+  TemplatesInputSchema,
   WorkspaceInputSchema,
   patterns,
 } from "@valueflow/shared";
@@ -49,8 +52,10 @@ import {
   listReadings,
   loadBudgets,
   loadState,
+  loadTemplates,
   loadWorkspace,
   setBudgets,
+  setTemplates,
   recordReading,
   setAgentPrompt,
   setAgents,
@@ -62,6 +67,8 @@ import {
   upsertProject,
   upsertRelease,
 } from "./repo.ts";
+import { createFromTemplate } from "./templates.ts";
+import { proposeProjectUpdates } from "./update.ts";
 import { nextRuleId } from "@valueflow/domain";
 import type { Rule } from "@valueflow/domain";
 import { askWorkspace } from "./chat.ts";
@@ -119,8 +126,50 @@ const parseBody = async <S extends ZodTypeAny>(req: Request, schema: S): Promise
     throw new HttpError(400, "invalid JSON body");
   }
   const parsed = schema.safeParse(raw);
-  if (!parsed.success) throw new HttpError(400, "validation failed", parsed.error.issues);
+  if (!parsed.success) throw new HttpError(400, validationMessage(parsed.error.issues), parsed.error.issues);
   return parsed.data;
+};
+
+/** "validation failed: milestones.2.impact.stretch: stretch must be …" so a form can say what is wrong without decoding issues. */
+const validationMessage = (issues: { path: PropertyKey[]; message: string }[]): string => {
+  const first = issues[0];
+  if (!first) return "validation failed";
+  const path = first.path.map(String).join(".");
+  return `validation failed: ${path ? `${path}: ` : ""}${first.message}${issues.length > 1 ? ` (+${issues.length - 1} more)` : ""}`;
+};
+
+/** A release may only reference milestones and governance items the project has right now. */
+const checkReleaseRefs = (project: Project, body: ReleaseShape): void => {
+  for (const mid of body.milestoneIds) if (!project.milestones.some((m) => m.id === mid)) throw new HttpError(400, `validation failed: milestoneIds: milestone ${mid} does not exist on ${project.name}`);
+  body.criteria.forEach((c, i) => {
+    if (c.type === "gate" && !project.milestones.some((m) => m.id === c.ms)) throw new HttpError(400, `validation failed: criteria.${i}: milestone ${c.ms} does not exist on ${project.name}`);
+    if (c.type === "gov" && !project.governance.some((g) => g.id === c.gid)) throw new HttpError(400, `validation failed: criteria.${i}: governance item ${c.gid} does not exist on ${project.name}`);
+  });
+};
+
+/** Multipart documents shared by project setup and project update: name, brief/note, snippet[] and file[] parts. */
+const readSources = async (req: Request): Promise<{ form: FormData; sources: ExtractedSource[] }> => {
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    throw new HttpError(400, "expected multipart/form-data");
+  }
+  const sources: ExtractedSource[] = [];
+  if (form.getAll("snippet").length + form.getAll("file").length > 20) throw new HttpError(400, "at most 20 sources per request");
+  for (const [i, snippet] of form.getAll("snippet").entries()) {
+    const text = String(snippet).trim();
+    if (text) sources.push({ name: `snippet ${i + 1}`, kind: "text", text: text.slice(0, 40_000), chars: text.length, error: null, truncated: text.length > 40_000 });
+  }
+  for (const f of form.getAll("file")) {
+    if (!(f instanceof File)) continue;
+    if (f.size > 25_000_000) {
+      sources.push({ name: f.name.slice(0, 200), kind: "unsupported", text: "", chars: 0, error: "file is larger than 25 MB", truncated: false });
+      continue;
+    }
+    sources.push(extractSource(f.name.slice(0, 200), f.type, Buffer.from(await f.arrayBuffer())));
+  }
+  return { form, sources };
 };
 
 const match = (route: Route, path: string[]): Params | null => {
@@ -453,12 +502,14 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   const releaseOf = (pid: string, rid: string) => (state().releases[pid] ?? []).find((r) => r.id === rid);
   on("POST", patterns.releases, async (req, params) => {
     const body = await parseBody(req, ReleaseInputSchema);
+    checkReleaseRefs(findProject(state(), p(params, "pid")), body);
     upsertRelease(db, p(params, "pid"), body, "create");
     return json(releaseOf(p(params, "pid"), body.id), 201);
   });
   on("PUT", patterns.release, async (req, params) => {
     const body = await parseBody(req, ReleaseInputSchema);
     if (body.id !== p(params, "rid")) throw new HttpError(400, "release id in body must match the URL");
+    checkReleaseRefs(findProject(state(), p(params, "pid")), body);
     upsertRelease(db, p(params, "pid"), body, "update");
     return json(releaseOf(p(params, "pid"), body.id));
   });
@@ -523,34 +574,44 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
   on("POST", patterns.setup, async (req) => {
     const llm = getLlm();
     if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
-    let form: FormData;
-    try {
-      form = await req.formData();
-    } catch {
-      throw new HttpError(400, "expected multipart/form-data");
-    }
+    const { form, sources } = await readSources(req);
     const name = String(form.get("name") ?? "").trim();
     if (!name) throw new HttpError(400, "name is required");
     const key = form.get("key");
     const brief = String(form.get("brief") ?? "");
-    const sources: ExtractedSource[] = [];
-    if (form.getAll("snippet").length + form.getAll("file").length > 20) throw new HttpError(400, "at most 20 sources per setup");
     if (name.length > 160 || brief.length > 40_000) throw new HttpError(400, "setup name or brief is too long");
-    for (const [i, snippet] of form.getAll("snippet").entries()) {
-      const text = String(snippet).trim();
-      if (text) sources.push({ name: `snippet ${i + 1}`, kind: "text", text: text.slice(0, 40_000), chars: text.length, error: null, truncated: text.length > 40_000 });
-    }
-    for (const f of form.getAll("file")) {
-      if (!(f instanceof File)) continue;
-      if (f.size > 25_000_000) {
-        sources.push({ name: f.name, kind: "unsupported", text: "", chars: 0, error: "file is larger than 25 MB", truncated: false });
-        continue;
-      }
-      sources.push(extractSource(f.name, f.type, Buffer.from(await f.arrayBuffer())));
-    }
-    if (sources.length > 20) throw new HttpError(400, "at most 20 sources per setup");
-    const draft = await analyzeSetup(db, llm, { name, key: typeof key === "string" ? key : undefined, brief, sources }, now());
+    if (typeof key === "string" && key.trim().length > 16) throw new HttpError(400, "project key is too long (16 characters at most)");
+    const templateId = form.get("template");
+    const template = typeof templateId === "string" && templateId.trim() ? loadTemplates(db).find((t) => t.id === templateId.trim()) : undefined;
+    if (typeof templateId === "string" && templateId.trim() && !template) throw new HttpError(400, `template ${templateId} not found`);
+    const draft = await analyzeSetup(db, llm, { name, key: typeof key === "string" ? key : undefined, brief, sources, template: template ?? null }, now());
     return json(draft, 201);
+  });
+  // Update an existing project from newer documents: every change is staged as a proposal for the inbox.
+  on("POST", patterns.projectUpdate, async (req, params) => {
+    const llm = getLlm();
+    if (!llm) throw new HttpError(409, "no LLM configured (set LLM_BASE_URL)");
+    const project = findProject(state(), p(params, "pid"));
+    const { form, sources } = await readSources(req);
+    const note = String(form.get("note") ?? "");
+    if (note.length > 4000) throw new HttpError(400, "note is too long (4000 characters at most)");
+    const setup = state().agents.find((a) => a.kind === "setup");
+    withinBudget(setup?.id ?? "setup", project.id);
+    const result = await proposeProjectUpdates(db, llm, project.id, sources, note, now());
+    if (result.run.state !== "failed") judgeLater(result.run.id);
+    return json({ run: result.run, proposals: result.proposals, dropped: result.dropped, sources: sources.map((s) => ({ name: s.name, kind: s.kind, chars: s.chars, error: s.error })) }, result.run.state === "failed" ? 502 : 201);
+  });
+  on("GET", patterns.templates, () => json(loadTemplates(db)));
+  on("PUT", patterns.templates, async (req) => {
+    setTemplates(db, await parseBody(req, TemplatesInputSchema));
+    return json(loadTemplates(db));
+  });
+  on("POST", patterns.templateCreate, async (req, params) => {
+    const template = loadTemplates(db).find((t) => t.id === p(params, "tid"));
+    if (!template) throw new NotFound(`template ${p(params, "tid")} not found`);
+    const body = await parseBody(req, TemplateCreateInputSchema);
+    const pid = createFromTemplate(db, template, body, now());
+    return json(findProject(state(), pid), 201);
   });
   on("GET", patterns.setupDraft, (_req, params) => json(loadSetupDraft(db, p(params, "id")).draft));
   on("POST", patterns.setupRefine, async (req, params) => {

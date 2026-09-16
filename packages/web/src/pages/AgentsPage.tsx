@@ -249,6 +249,8 @@ export function AgentsPage({
             </button>
           }
         >
+          <div style={{ overflowX: "auto" }}>
+          <div style={{ minWidth: 640 }}>
           <div style={{ display: "flex", gap: 11, padding: "8px 14px", fontSize: 11, color: C.dim, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.line}` }}>
             <span style={{ width: 26 }} />
             <span style={{ width: 110, flexShrink: 0 }}>Agent</span>
@@ -313,6 +315,8 @@ export function AgentsPage({
                         <span style={{ fontSize: 11, color: C.dim, marginLeft: 6 }}>
                           runs from the Ask panel · <Kbd>⌘</Kbd> <Kbd>J</Kbd>
                         </span>
+                      ) : a.kind === "setup" ? (
+                        <span style={{ fontSize: 11, color: C.dim, marginLeft: 6 }}>runs from Portfolio → Set up from documents and a project’s Update from documents</span>
                       ) : (
                         <Tip label={llm ? (a.kind === "brief" || a.kind === "tuner" || a.kind === "scout" ? `Run ${a.name} over the workspace` : `Brief ${a.name} with a project's live state`) : "Set LLM_BASE_URL to enable runs"}>
                           <button type="button" className="vf-ghost" disabled={!llm} onClick={() => setRunning(a)} style={{ ...ghostBtn, color: C.indigoHi, opacity: llm ? 1 : 0.5, marginLeft: 6 }}>
@@ -390,6 +394,8 @@ export function AgentsPage({
               </div>
             );
           })}
+          </div>
+          </div>
         </SectionCard>
         </details>
         </>

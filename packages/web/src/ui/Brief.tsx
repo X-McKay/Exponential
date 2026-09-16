@@ -49,7 +49,7 @@ export function WidgetView({ w, cal, state, onOpen, onDecide }: { w: ResolvedWid
             <Row key={i}>
               <span style={{ fontSize: 11, color: row.eval.ok ? C.green : row.eval.pending ? C.amber : C.red, width: 12, flexShrink: 0 }}>{row.eval.ok ? "✓" : row.eval.pending ? "◐" : "✗"}</span>
               <span style={{ fontSize: 12.5, color: row.eval.ok ? C.dim : C.text2, flex: 1 }}>{row.label}</span>
-              <span style={{ fontSize: 11, color: C.dim, flexShrink: 0 }}>{row.eval.sub}</span>
+              <span style={{ fontSize: 11, color: C.dim, flex: "0 1 auto", minWidth: 0, textAlign: "right", overflowWrap: "anywhere" }}>{row.eval.sub}</span>
             </Row>
           ))}
         </div>

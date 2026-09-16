@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { dateLabel, relTime } from "@valueflow/domain";
-import type { Agent, AppState, CalendarEvent, Workspace } from "@valueflow/domain";
-import { AgentsInputSchema } from "@valueflow/shared";
+import type { Agent, AppState, CalendarEvent, ProjectTemplate, Workspace } from "@valueflow/domain";
+import { AgentsInputSchema, TemplatesInputSchema } from "@valueflow/shared";
 import { CalendarEditor } from "../editors/CalendarEditor.tsx";
 import { JsonDocEditor } from "../editors/JsonDocEditor.tsx";
 import { WorkspaceEditor } from "../editors/WorkspaceEditor.tsx";
 import { Avatar, SectionCard, ghostBtn } from "../ui/primitives.tsx";
 import { C } from "../theme.ts";
 
-type Editing = { kind: "workspace" } | { kind: "agents" } | { kind: "calendar"; event: CalendarEvent | null } | null;
+type Editing = { kind: "workspace" } | { kind: "agents" } | { kind: "templates" } | { kind: "calendar"; event: CalendarEvent | null } | null;
 
 function Row({ title, sub, action, onClick, disabled }: { title: string; sub: string; action: string; onClick: () => void | Promise<void>; disabled?: boolean }) {
   const [busy, setBusy] = useState(false);
@@ -49,6 +49,7 @@ export function DataPage({
   state,
   onWorkspace,
   onAgents,
+  onTemplates,
   onCalendar,
   onDeleteCalendar,
   onSync,
@@ -56,6 +57,7 @@ export function DataPage({
   state: AppState;
   onWorkspace: (w: Workspace) => Promise<unknown>;
   onAgents: (a: Agent[]) => Promise<unknown>;
+  onTemplates: (t: ProjectTemplate[]) => Promise<unknown>;
   onCalendar: (ev: CalendarEvent, isNew: boolean) => Promise<unknown>;
   onDeleteCalendar: (id: string) => Promise<unknown>;
   onSync: (pid: string) => Promise<void>;
@@ -69,7 +71,7 @@ export function DataPage({
   const newest = state.events[0];
 
   return (
-    <div style={{ padding: "16px 20px 30px", maxWidth: 860 }}>
+    <div className="vf-container" style={{ padding: "16px 20px 30px", maxWidth: 860 }}>
       <div style={{ fontSize: 13, color: C.mut, lineHeight: 1.6, marginBottom: 14 }}>
         Projects, milestones, governance items, and releases are edited on their own pages. This page covers the rest: who you are, the calendar, the agents
         document, and what is synced from source control. The activity feed is not edited at all: it is derived from an event log that syncs, eval runs,
@@ -91,6 +93,7 @@ export function DataPage({
 
       <SectionCard title="Workspace documents" pad="0 14px 4px">
         <Row title="Agents" sub={`${count(state.agents.length, "agent")} · shown on the Agents page and in Glance attention flags`} action="Edit JSON" onClick={() => setEditing({ kind: "agents" })} />
+        <Row title="Project templates" sub={`${count(state.templates?.length ?? 0, "template")} · the documents, dependencies, and first plan a new project starts with`} action="Edit JSON" onClick={() => setEditing({ kind: "templates" })} />
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderTop: `1px solid ${C.line}` }}>
           <span style={{ flex: 1, minWidth: 0 }}>
             <span style={{ fontSize: 13, color: C.text, display: "block" }}>Activity feed</span>
@@ -156,6 +159,19 @@ export function DataPage({
           schema={AgentsInputSchema}
           onSave={async (a) => {
             await onAgents(a);
+            close();
+          }}
+          onClose={close}
+        />
+      )}
+      {editing?.kind === "templates" && (
+        <JsonDocEditor
+          title="Project templates"
+          help="One entry per template: id, name, description, stage, tier (1-3 or null), targets, documents (cat, name, detail, required), dependencies (name, detail, required; tracked as governance items under Dependencies), milestones (name, monthsOut, impact, metrics), and releases (name, monthsOut, milestone indices, criteria of type gate | document | manual). Projects already created from a template are not changed."
+          value={state.templates ?? []}
+          schema={TemplatesInputSchema}
+          onSave={async (t) => {
+            await onTemplates(t);
             close();
           }}
           onClose={close}

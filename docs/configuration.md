@@ -11,6 +11,7 @@ Exponential loads the repository-root `.env` file through Bun. Existing process 
 | `VALUEFLOW_DB` | `data/valueflow.sqlite` | SQLite database path |
 | `VALUEFLOW_SETTINGS` | `<database>.settings.json` | Server-only runtime model settings |
 | `VALUEFLOW_NOW` | Current clock | Optional ISO timestamp for controlled demos and tests |
+| `SEED_SYNTHETIC` | unset | `bun run demo:reset` only: generate a synthetic workspace from this seed instead of the demo fixtures (`SEED_PROJECTS` sets how many projects) |
 
 Runtime model settings are written atomically with file mode `0600`. They are not encrypted at rest. Keep the settings file and database together in backups.
 

@@ -28,7 +28,7 @@ const dbWithBudget = (monthlyTokens: number | null, monthlyUsd: number | null) =
 describe("LLM usage ledger", () => {
   test("records reconciled usage and reserves only the configured output soft cap", async () => {
     const db = dbWithBudget(1_000, null);
-    await expect(callLlm(db, fake({ prompt: 100, completion: 50 }), { agentId: "audie", proj: "ima", runId: "run-1" }, messages, { maxTokens: 200 }, NOW)).resolves.toMatchObject({ content: "ok" });
+    await expect(callLlm(db, fake({ prompt: 100, completion: 50 }), { agentId: "audie", proj: "clauses", runId: "run-1" }, messages, { maxTokens: 200 }, NOW)).resolves.toMatchObject({ content: "ok" });
     expect(db.query<{ state: string; prompt_tokens: number; completion_tokens: number; reserved_tokens: number }, []>("SELECT state, prompt_tokens, completion_tokens, reserved_tokens FROM llm_usage_ledger").get()).toEqual({ state: "succeeded", prompt_tokens: 100, completion_tokens: 50, reserved_tokens: 0 });
   });
 
@@ -64,44 +64,44 @@ describe("LLM usage ledger", () => {
 
   test("importing a known unpriced legacy run preserves token accounting", async () => {
     const db = dbWithBudget(1_000, null);
-    db.query("INSERT INTO agent_runs (id, agent_id, project_id, tab, state, started_at, finished_at, summary, output, model, prompt_tokens, completion_tokens) VALUES ('legacy-unpriced', 'audie', 'ima', 'overview', 'done', ?, ?, '', '', 'mystery', 10, 5)").run(NOW.toISOString(), NOW.toISOString());
-    await callLlm(db, fake({ prompt: 1, completion: 1 }, {}), { agentId: "audie", proj: "ima", runId: "legacy-unpriced" }, messages, { maxTokens: 10 }, NOW);
+    db.query("INSERT INTO agent_runs (id, agent_id, project_id, tab, state, started_at, finished_at, summary, output, model, prompt_tokens, completion_tokens) VALUES ('legacy-unpriced', 'audie', 'clauses', 'overview', 'done', ?, ?, '', '', 'mystery', 10, 5)").run(NOW.toISOString(), NOW.toISOString());
+    await callLlm(db, fake({ prompt: 1, completion: 1 }, {}), { agentId: "audie", proj: "clauses", runId: "legacy-unpriced" }, messages, { maxTokens: 10 }, NOW);
     expect(db.query<{ state: string; prompt_tokens: number; cost_usd: number | null }, [string]>("SELECT state, prompt_tokens, cost_usd FROM llm_usage_ledger WHERE run_id = ? ORDER BY id LIMIT 1").get("legacy-unpriced")).toEqual({ state: "succeeded", prompt_tokens: 10, cost_usd: null });
   });
 
   test("scoped budgets count the row's owner, not the call's requested scope", async () => {
     const db = dbWithBudget(null, null);
     db.query("DELETE FROM budgets").run();
-    db.query("INSERT INTO budgets (scope, ref, monthly_tokens, monthly_usd) VALUES ('project', 'ima', 1000, NULL)").run();
-    db.query("INSERT INTO agent_runs (id, agent_id, project_id, tab, state, started_at, finished_at, summary, output, model, prompt_tokens, completion_tokens) VALUES ('other-project-run', 'audie', 'onboarding', 'overview', 'done', ?, ?, '', '', 'fake', 5000, 5000)").run(NOW.toISOString(), NOW.toISOString());
-    await expect(callLlm(db, fake({ prompt: 1, completion: 1 }), { agentId: "audie", proj: "ima", runId: null }, messages, { maxTokens: 10 }, NOW)).resolves.toMatchObject({ content: "ok" });
+    db.query("INSERT INTO budgets (scope, ref, monthly_tokens, monthly_usd) VALUES ('project', 'clauses', 1000, NULL)").run();
+    db.query("INSERT INTO agent_runs (id, agent_id, project_id, tab, state, started_at, finished_at, summary, output, model, prompt_tokens, completion_tokens) VALUES ('other-project-run', 'audie', 'invoice', 'overview', 'done', ?, ?, '', '', 'fake', 5000, 5000)").run(NOW.toISOString(), NOW.toISOString());
+    await expect(callLlm(db, fake({ prompt: 1, completion: 1 }), { agentId: "audie", proj: "clauses", runId: null }, messages, { maxTokens: 10 }, NOW)).resolves.toMatchObject({ content: "ok" });
   });
 
   test("ignores empty working run placeholders created before the reservation", async () => {
     const db = dbWithBudget(1000, null);
-    db.query("INSERT INTO agent_runs (id, agent_id, project_id, tab, state, started_at, summary, output, model) VALUES ('working-run', 'audie', 'ima', 'overview', 'working', ?, '', '', NULL)").run(NOW.toISOString());
-    await expect(callLlm(db, fake({ prompt: 1, completion: 1 }), { agentId: "audie", proj: "ima", runId: "working-run" }, messages, { maxTokens: 10 }, NOW)).resolves.toMatchObject({ content: "ok" });
+    db.query("INSERT INTO agent_runs (id, agent_id, project_id, tab, state, started_at, summary, output, model) VALUES ('working-run', 'audie', 'clauses', 'overview', 'working', ?, '', '', NULL)").run(NOW.toISOString());
+    await expect(callLlm(db, fake({ prompt: 1, completion: 1 }), { agentId: "audie", proj: "clauses", runId: "working-run" }, messages, { maxTokens: 10 }, NOW)).resolves.toMatchObject({ content: "ok" });
   });
 
   test("imports a completed legacy run before linking a later judge call", async () => {
     const db = dbWithBudget(1000, null);
-    db.query("INSERT INTO agent_runs (id, agent_id, project_id, tab, state, started_at, finished_at, summary, output, model, prompt_tokens, completion_tokens) VALUES ('legacy-run', 'audie', 'ima', 'overview', 'done', ?, ?, '', '', 'fake', 100, 50)").run(NOW.toISOString(), NOW.toISOString());
-    await callLlm(db, fake({ prompt: 2, completion: 3 }), { agentId: "audie", proj: "ima", runId: "legacy-run" }, messages, { maxTokens: 10 }, NOW);
+    db.query("INSERT INTO agent_runs (id, agent_id, project_id, tab, state, started_at, finished_at, summary, output, model, prompt_tokens, completion_tokens) VALUES ('legacy-run', 'audie', 'clauses', 'overview', 'done', ?, ?, '', '', 'fake', 100, 50)").run(NOW.toISOString(), NOW.toISOString());
+    await callLlm(db, fake({ prompt: 2, completion: 3 }), { agentId: "audie", proj: "clauses", runId: "legacy-run" }, messages, { maxTokens: 10 }, NOW);
     expect(db.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM llm_usage_ledger WHERE run_id = ?").get("legacy-run")?.n).toBe(2);
     expect(db.query<{ state: string; prompt_tokens: number }, [string]>("SELECT state, prompt_tokens FROM llm_usage_ledger WHERE run_id = ? ORDER BY id LIMIT 1").get("legacy-run")).toEqual({ state: "succeeded", prompt_tokens: 100 });
   });
 
   test("a stale reservation fails closed until its usage is reconciled", async () => {
     const db = dbWithBudget(1000, null);
-    db.query("INSERT INTO llm_usage_ledger (run_id, agent_id, project_id, model, started_at, state, reserved_tokens, reserved_usd) VALUES (NULL, 'audie', 'ima', 'fake', ?, 'reserved', 10, 0)").run(NOW.toISOString());
-    await expect(callLlm(db, fake({ prompt: 1, completion: 1 }), { agentId: "audie", proj: "ima", runId: null }, messages, { maxTokens: 10 }, NOW)).rejects.toThrow("known token capacity");
+    db.query("INSERT INTO llm_usage_ledger (run_id, agent_id, project_id, model, started_at, state, reserved_tokens, reserved_usd) VALUES (NULL, 'audie', 'clauses', 'fake', ?, 'reserved', 10, 0)").run(NOW.toISOString());
+    await expect(callLlm(db, fake({ prompt: 1, completion: 1 }), { agentId: "audie", proj: "clauses", runId: null }, messages, { maxTokens: 10 }, NOW)).rejects.toThrow("known token capacity");
   });
 
   test("exposes ledger attempts and only unlinked legacy runs", async () => {
     const db = dbWithBudget(null, null);
-    await callLlm(db, fake({ prompt: 4, completion: 2 }), { agentId: "audie", proj: "ima", runId: "linked-run" }, messages, { maxTokens: 10 }, NOW);
-    db.query("INSERT INTO agent_runs (id, agent_id, project_id, tab, state, started_at, finished_at, summary, output, model, prompt_tokens, completion_tokens) VALUES ('linked-run', 'audie', 'ima', 'overview', 'done', ?, ?, '', '', 'fake', 4, 2)").run(NOW.toISOString(), NOW.toISOString());
-    db.query("INSERT INTO agent_runs (id, agent_id, project_id, tab, state, started_at, finished_at, summary, output, model, prompt_tokens, completion_tokens) VALUES ('unlinked-run', 'audie', 'ima', 'overview', 'done', ?, ?, '', '', 'fake', 3, 1)").run(NOW.toISOString(), NOW.toISOString());
+    await callLlm(db, fake({ prompt: 4, completion: 2 }), { agentId: "audie", proj: "clauses", runId: "linked-run" }, messages, { maxTokens: 10 }, NOW);
+    db.query("INSERT INTO agent_runs (id, agent_id, project_id, tab, state, started_at, finished_at, summary, output, model, prompt_tokens, completion_tokens) VALUES ('linked-run', 'audie', 'clauses', 'overview', 'done', ?, ?, '', '', 'fake', 4, 2)").run(NOW.toISOString(), NOW.toISOString());
+    db.query("INSERT INTO agent_runs (id, agent_id, project_id, tab, state, started_at, finished_at, summary, output, model, prompt_tokens, completion_tokens) VALUES ('unlinked-run', 'audie', 'clauses', 'overview', 'done', ?, ?, '', '', 'fake', 3, 1)").run(NOW.toISOString(), NOW.toISOString());
     const runs = loadUsageRuns(db, NOW, { fake: { input: 1, output: 2 } });
     expect(runs.map((r) => [r.id, r.source])).toEqual([["usage-1", "ledger"], ["unlinked-run", "legacy"]]);
     expect(runs.find((r) => r.id === "usage-1")?.costUsd).toBeCloseTo(0.000008);

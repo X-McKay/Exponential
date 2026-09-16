@@ -10,7 +10,7 @@ describe("Glance attention summary", () => {
     const atRisk = atRiskReleaseSignals(state, cal, blocks);
     const top = topAttentionSignals(blocks, atRisk);
 
-    expect(atRisk.map((x) => `${x.proj}/${x.release.id}`)).toEqual(["onboarding/R2", "sector/R1"]);
+    expect(atRisk.map((x) => `${x.proj}/${x.release.id}`)).toEqual(["invoice/R2", "search/R1"]);
     expect(top).toHaveLength(3);
     expect(top.slice(0, 3).filter((x) => x.kind === "release_attention")).toHaveLength(2);
   });

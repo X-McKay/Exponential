@@ -115,7 +115,7 @@ export const MIGRATIONS: readonly string[] = [
   // Workspace-level facts: the signed-in user shown in the sidebar and greeting.
   `
   CREATE TABLE workspace (id INTEGER PRIMARY KEY CHECK (id = 1), user_name TEXT NOT NULL, user_ini TEXT NOT NULL);
-  INSERT INTO workspace (id, user_name, user_ini) VALUES (1, 'Al McKay', 'AM');
+  INSERT INTO workspace (id, user_name, user_ini) VALUES (1, 'Workspace owner', 'ME');
   `,
   // Months become real: the mockup's axis index (0 = Jan 2026) turns into YYYY-MM text.
   `
@@ -504,6 +504,10 @@ export const MIGRATIONS: readonly string[] = [
     id INTEGER PRIMARY KEY CHECK (id = 1), revision INTEGER NOT NULL CHECK (revision >= 0)
   );
   INSERT INTO workspace_revision (id, revision) VALUES (1, 0);
+  `,
+  // Project templates: configurable starting points (documents, dependencies, a first plan) stored as one JSON document each.
+  `
+  CREATE TABLE project_templates (id TEXT PRIMARY KEY, sort INTEGER NOT NULL, doc TEXT NOT NULL);
   `,
 ];
 

@@ -6,8 +6,8 @@ import { HOME, parseHash, toHash } from "../src/router.ts";
 
 const state = seedState();
 const cal = calendarOf(state);
-const project = state.projects.find((p) => p.id === "ima")!;
-const release = state.releases.ima![0]!;
+const project = state.projects.find((p) => p.id === "clauses")!;
+const release = state.releases.clauses![0]!;
 
 describe("release attention and destinations", () => {
   test("prioritizes unfinished past targets without mutating release order", () => {

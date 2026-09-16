@@ -112,10 +112,10 @@ const DRAFT_REPLY = {
     { value: { name: "Refresh file drafting", status: "backlog", month: "bogus", baseFte: 20, baseTime: 20, stretchFte: 25, stretchTime: 30, metrics: [] }, rationale: "Implied.", source: "", confidence: "low" },
   ],
   governance: [
-    { value: { cat: "AI governance", name: "AI approval committee review", status: "missing", owner: "Priya Nair", detail: "Required before pilot." }, rationale: "Tier 2 needs it.", source: "", confidence: "medium" },
-    { value: { cat: "Nonsense", name: "Data privacy assessment (DPIA)", status: "approved", owner: "", detail: "" }, rationale: "Deck says DPIA approved.", source: "deck.pptx", confidence: "high" },
+    { value: { cat: "AI governance", name: "AI committee review", status: "missing", owner: "Priya Nair", detail: "Required before pilot." }, rationale: "Tier 2 needs it.", source: "", confidence: "medium" },
+    { value: { cat: "Nonsense", name: "Data privacy assessment", status: "approved", owner: "", detail: "" }, rationale: "Deck says DPIA approved.", source: "deck.pptx", confidence: "high" },
   ],
-  releases: [{ value: { name: "Pilot", month: "2027-01", milestones: ["Document collection agent"], criteria: [{ type: "gate", ref: "Document collection agent", label: "Collection base gate" }, { type: "gov", ref: "AI approval committee review", label: "Committee approval" }, { type: "manual", ref: "", label: "Ops sign-off" }] }, rationale: "Deck.", source: "deck.pptx", confidence: "medium" }],
+  releases: [{ value: { name: "Pilot", month: "2027-01", milestones: ["Document collection agent"], criteria: [{ type: "gate", ref: "Document collection agent", label: "Collection base gate" }, { type: "gov", ref: "AI committee review", label: "Committee approval" }, { type: "manual", ref: "", label: "Ops sign-off" }] }, rationale: "Deck.", source: "deck.pptx", confidence: "medium" }],
   notes: ["The deck does not say who owns monitoring."],
 };
 
@@ -197,7 +197,7 @@ describe("setup API", () => {
     expect(created.status).toBe(201);
     const draft = created.body;
     expect(draft.name).toBe("KYC refresh automation");
-    expect(draft.key).toBe("PRJ-10");
+    expect(draft.key).toBe("PRJ-12");
     expect(draft.sources.map((s) => `${s.name}:${s.kind}:${s.error ? "err" : "ok"}`)).toEqual(["snippet 1:text:ok", "charter.docx:docx:ok", "deck.pptx:pptx:ok", "scan.pdf:unsupported:err"]);
     expect(draft.draft.targets.value).toEqual({ fte: 35, time: 40 });
     expect(draft.draft.tier.value).toBe(2);
@@ -213,7 +213,7 @@ describe("setup API", () => {
     const create = await json<Project>("POST", routes.setupCreate(draft.id), {
       project: { id: "kyc-refresh-automation", key: "PRJ-10", name: "KYC refresh automation", stage: "Pilot", description: "Agentic KYC refresh.", tier: 1, committee: null, repos: [{ name: "kyc-agent", url: "github.com/org/kyc-agent" }], team: [{ ini: "PN", name: "Priya Nair", role: "Sponsor" }], targets: { fte: 35, time: 40 } },
       milestones: [{ id: "MS-1", name: "Document collection agent", status: "progress", month: "2026-12", impact: { base: { fte: 15, time: 20 }, stretch: { fte: 20, time: 25 } }, metrics: [{ id: "m1", label: "Documents auto-collected", base: 70, stretch: 90, current: 0 }] }],
-      governance: [{ id: "ai-approval-committee-review", cat: "AI governance", name: "AI approval committee review", status: "missing", owner: "PN", date: null, detail: "Required before pilot." }],
+      governance: [{ id: "ai-approval-committee-review", cat: "AI governance", name: "AI committee review", status: "missing", owner: "PN", date: null, detail: "Required before pilot." }],
       releases: [{ id: "R1", name: "Pilot", month: "2027-01", milestoneIds: ["MS-1"], criteria: [{ type: "gate", ms: "MS-1", label: "Collection base gate" }, { type: "gov", gid: "ai-approval-committee-review", label: "Committee approval" }, { type: "manual", ok: false, label: "Ops sign-off" }] }],
     });
     expect(create.status).toBe(201);

@@ -219,8 +219,8 @@ export interface DevFacts {
 
 // ---- agents -------------------------------------------------------------
 
-export type AgentKind = "deck" | "comms" | "ideation" | "audit" | "chat" | "rules" | "brief" | "tuner" | "scout" | "curator";
-export const AGENT_KINDS: readonly AgentKind[] = ["deck", "comms", "ideation", "audit", "chat", "rules", "brief", "tuner", "scout", "curator"];
+export type AgentKind = "deck" | "comms" | "ideation" | "audit" | "chat" | "rules" | "brief" | "tuner" | "scout" | "curator" | "setup";
+export const AGENT_KINDS: readonly AgentKind[] = ["deck", "comms", "ideation", "audit", "chat", "rules", "brief", "tuner", "scout", "curator", "setup"];
 /** Kinds briefed with one project at a time; the rest work over the whole workspace. */
 export const PROJECT_KINDS: readonly AgentKind[] = ["deck", "comms", "ideation", "audit", "chat", "rules"];
 /** Derived from runs: working while a run is in flight, scheduled when a schedule is set, otherwise idle. */
@@ -357,6 +357,62 @@ export interface Budget {
   monthlyUsd: number | null;
 }
 
+// ---- project templates ------------------------------------------------------
+
+/** A governance document a template expects; required ones become release criteria. */
+export interface TemplateDocument {
+  cat: string;
+  name: string;
+  detail: string;
+  required: boolean;
+}
+
+/** Something the project depends on before it can ship: data, access, people, a fallback. Tracked as a governance item under "Dependencies". */
+export interface TemplateDependency {
+  name: string;
+  detail: string;
+  required: boolean;
+}
+
+export interface TemplateMilestone {
+  name: string;
+  /** Months after the creation month the milestone targets. */
+  monthsOut: number;
+  impact: Impact;
+  metrics: ProposedMetric[];
+}
+
+export type TemplateCriterion =
+  | { type: "gate"; milestone: number; label: string }
+  | { type: "document"; name: string; label: string }
+  | { type: "manual"; label: string };
+
+export interface TemplateRelease {
+  name: string;
+  monthsOut: number;
+  /** Indices into the template's milestones. */
+  milestones: number[];
+  criteria: TemplateCriterion[];
+}
+
+/**
+ * A configurable starting point for a project: the documents it must carry,
+ * what it depends on, and a first plan. Instantiated on create; nothing about
+ * a template is stored on the project afterwards.
+ */
+export interface ProjectTemplate {
+  id: string;
+  name: string;
+  description: string;
+  stage: string;
+  tier: RiskTier | null;
+  targets: ImpactPair;
+  documents: TemplateDocument[];
+  dependencies: TemplateDependency[];
+  milestones: TemplateMilestone[];
+  releases: TemplateRelease[];
+}
+
 // ---- project setup drafts ---------------------------------------------------
 
 export type Confidence = "high" | "medium" | "low";
@@ -430,7 +486,20 @@ export interface SetupDraft {
 
 // ---- proposals ------------------------------------------------------------
 
-/** A concrete change an agent suggests; applied only when a person accepts it. */
+/** A metric definition inside a proposed milestone; readings are never proposed. */
+export interface ProposedMetric {
+  label: string;
+  base: number;
+  stretch: number;
+}
+
+/**
+ * A concrete change an agent suggests; applied only when a person accepts it.
+ * The first seven shapes are what every agent may propose from a briefing; the
+ * rest are staged by "Update project from documents" and describe edits to the
+ * project record itself (details, people, plan, releases), each applied through
+ * the same repository functions the editors use.
+ */
 export type ProposalAction =
   | { type: "governance_status"; gid: string; status: GovStatus }
   | { type: "milestone_status"; mid: string; status: MilestoneStatus }
@@ -438,7 +507,15 @@ export type ProposalAction =
   | { type: "calendar_event"; date: string; tab: ProjectTab; text: string; sub: string | null }
   | { type: "targets"; fte: number; time: number }
   | { type: "agent_prompt"; agentId: string; prompt: string | null }
-  | { type: "agent_model"; agentId: string; model: string | null };
+  | { type: "agent_model"; agentId: string; model: string | null }
+  | { type: "project_details"; description?: string; stage?: string; tier?: RiskTier | null; committee?: Committee | null }
+  | { type: "team_member"; ini: string; name: string; role: string }
+  | { type: "repo"; name: string; url: string }
+  | { type: "governance_update"; gid: string; status?: GovStatus; owner?: string; date?: string | null; detail?: string }
+  | { type: "milestone_create"; name: string; status: MilestoneStatus; month: string; impact: Impact; metrics: ProposedMetric[] }
+  | { type: "milestone_update"; mid: string; name?: string; status?: MilestoneStatus; month?: string; impact?: Impact }
+  | { type: "release_create"; name: string; month: string; milestoneIds: string[]; criteria: Criterion[] }
+  | { type: "release_update"; rid: string; name?: string; month?: string; milestoneIds?: string[]; criteria?: Criterion[] };
 
 export type ProposalState = "pending" | "accepted" | "dismissed";
 
@@ -598,4 +675,6 @@ export interface AppState {
   /** Newest first, trailing EVENT_WINDOW_DAYS. */
   events: Event[];
   calendar: CalendarEvent[];
+  /** Configurable starting points for new projects; absent in older snapshots. */
+  templates?: ProjectTemplate[];
 }

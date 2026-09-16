@@ -1,7 +1,12 @@
 import type { Database } from "bun:sqlite";
-import { AGENTS, CALENDAR, DEV, PROJECTS, RELEASES, RULES, RUNS, SEED_ASOF, WORKSPACE, addMonths, isMeasurable, monthsBetween, seedEvents, ymOf } from "@valueflow/domain";
-import { insertRule, insertRun, recordEvent, replaceDevFacts, setAgents } from "./repo.ts";
-import type { AppState, Metric } from "@valueflow/domain";
+import { AGENTS, BUILTIN_TEMPLATES, CALENDAR, DEV, PROJECTS, RELEASES, RULES, RUNS, SEED_ASOF, WORKSPACE, addMonths, isMeasurable, monthsBetween, seedEvents, ymOf } from "@valueflow/domain";
+import { insertProposal, insertRule, insertRun, loadState, recordEvent, replaceDevFacts, setAgents, setTemplates } from "./repo.ts";
+import { registerProposalGuard } from "./proposal-guard.ts";
+import { nextStoredProposalId, nextStoredRunId } from "./ids.ts";
+import type { AgentRun, AppState, Metric, Proposal, ProposalAction } from "@valueflow/domain";
+
+/** The neutral profile a fresh workspace starts with. */
+export const DEFAULT_OWNER = { name: "Workspace owner", ini: "ME" } as const;
 
 /** The instant the fixtures describe. Seeding at another time shifts every planned month and timestamp by the same offset. */
 export const SEED_NOW = new Date(SEED_ASOF);
@@ -39,7 +44,7 @@ export const trajectory = (metric: Pick<Metric, "current">, seed: number, n = RE
 const hasProjects = (db: Database): boolean =>
   (db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM projects").get()?.n ?? 0) > 0;
 
-export const fixtureState = (asOf = SEED_ASOF): AppState => ({ asOf, syncSource: null, workspace: WORKSPACE, projects: PROJECTS, releases: RELEASES, dev: DEV(asOf), agents: AGENTS, runs: RUNS(asOf), llm: null, proposals: [], scores: [], rules: RULES(asOf), promptVersions: [], brief: null, projectBriefs: {}, budgets: [], events: seedEvents(asOf), calendar: CALENDAR(asOf) });
+export const fixtureState = (asOf = SEED_ASOF): AppState => ({ asOf, syncSource: null, workspace: WORKSPACE, projects: PROJECTS, releases: RELEASES, dev: DEV(asOf), agents: AGENTS, runs: RUNS(asOf), llm: null, proposals: [], scores: [], rules: RULES(asOf), promptVersions: [], brief: null, projectBriefs: {}, budgets: [], events: seedEvents(asOf), calendar: CALENDAR(asOf), templates: BUILTIN_TEMPLATES });
 
 export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_NOW): void => {
   // Planned months are relative to the fixtures' own "today"; keep them the same distance from `now`.
@@ -117,11 +122,52 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
       if (d) replaceDevFacts(db, p.id, d, d.lastSync ?? { source: "sample", startedAt: now.toISOString(), finishedAt: now.toISOString(), ok: true, message: "seeded" });
     }
     setAgents(db, state.agents);
+    setTemplates(db, state.templates ?? BUILTIN_TEMPLATES);
     for (const r of state.rules) insertRule(db, r);
     for (const r of state.runs) insertRun(db, r);
     for (const e of state.events) recordEvent(db, e);
     for (const c of state.calendar) q.calendar.run(c.id, c.date, c.proj, c.tab, c.text, c.sub);
   })();
+};
+
+/**
+ * Stage a few pending proposals against the seeded facts so the inbox has
+ * something to decide: one status nudge, one calendar reminder, and one
+ * record edit per project that has room for it. Each is attributed to a
+ * finished setup run and guarded like a real proposal, so accepting it goes
+ * through the normal path. Demo and test data only.
+ */
+export const seedProposals = (db: Database, now = SEED_NOW): Proposal[] => {
+  const state = loadState(db, now);
+  const setup = state.agents.find((a) => a.kind === "setup");
+  if (!setup) return [];
+  const out: Proposal[] = [];
+  const at = now.toISOString();
+  for (const p of state.projects) {
+    const actions: { action: ProposalAction; rationale: string }[] = [];
+    const inReview = p.governance.find((g) => g.status === "in_review");
+    if (inReview) actions.push({ action: { type: "governance_status", gid: inReview.id, status: "approved" }, rationale: `Seeded example: the latest notes describe ${inReview.name} as signed off.` });
+    const backlog = p.milestones.find((m) => m.status === "backlog");
+    if (backlog) actions.push({ action: { type: "milestone_update", mid: backlog.id, month: addMonths(backlog.month, 1) }, rationale: `Seeded example: the revised plan moves ${backlog.name} out by a month.` });
+    if (p.team.length < 6) actions.push({ action: { type: "team_member", ini: "QA", name: "Quinn Abara", role: "Quality Analyst" }, rationale: "Seeded example: the revised charter names a quality analyst." });
+    actions.push({ action: { type: "calendar_event", date: new Date(now.getTime() + 14 * 86_400_000).toISOString().slice(0, 10), tab: "overview", text: `${p.name}: steering review`, sub: "Seeded example" }, rationale: "Seeded example: a steering review is due in two weeks." });
+    if (actions.length === 0) continue;
+    const run: AgentRun = {
+      id: nextStoredRunId(db), agentId: setup.id, proj: p.id, tab: "overview", state: "done", startedAt: at, finishedAt: at, instruction: null,
+      summary: `Staged ${actions.length} change${actions.length === 1 ? "" : "s"} from 1 document: seeded charter revision`, output: `## Seeded update\n\n${actions.map((a) => `- ${a.rationale}`).join("\n")}`,
+      model: "seed", error: null, promptVersion: null, latencyMs: 1200, promptTokens: null, completionTokens: null, benchmark: null, rating: null, ratingNote: null,
+    };
+    insertRun(db, run);
+    db.transaction(() => {
+      for (const a of actions) {
+        const proposal: Proposal = { id: nextStoredProposalId(db), runId: run.id, agentId: setup.id, proj: p.id, ruleId: null, action: a.action, rationale: a.rationale, state: "pending", createdAt: at, decidedAt: null };
+        insertProposal(db, proposal);
+        registerProposalGuard(db, proposal, state);
+        out.push(proposal);
+      }
+    })();
+  }
+  return out;
 };
 
 /** Install the default agent definitions when none exist, and add built-in kinds older databases lack; returns the ids added. */
@@ -133,12 +179,19 @@ export const ensureAgents = (db: Database): string[] => {
   const have = new Set(db.query<{ kind: string }, []>("SELECT kind FROM agents").all().map((r) => r.kind));
   const added: string[] = [];
   for (const a of AGENTS) {
-    if (a.id === "project-manager" ? !!db.query("SELECT id FROM agents WHERE id = ?").get(a.id) : have.has(a.kind) || !["chat", "rules", "brief", "tuner", "scout", "curator"].includes(a.kind)) continue;
+    if (a.id === "project-manager" ? !!db.query("SELECT id FROM agents WHERE id = ?").get(a.id) : have.has(a.kind) || !["chat", "rules", "brief", "tuner", "scout", "curator", "setup"].includes(a.kind)) continue;
     const sort = db.query<{ s: number }, []>("SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM agents").get()?.s ?? 0;
     db.query("INSERT INTO agents (id, sort, name, grad, purpose, kind, model, owner, caps, schedule, prompt) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run(a.id, sort, a.name, a.grad, a.purpose, a.kind, a.model, a.owner, JSON.stringify(a.caps), a.schedule, a.prompt);
     added.push(a.id);
   }
   return added;
+};
+
+/** Install the built-in templates when a workspace has none; returns how many were added. */
+export const ensureTemplates = (db: Database): number => {
+  if ((db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM project_templates").get()?.n ?? 0) > 0) return 0;
+  setTemplates(db, BUILTIN_TEMPLATES);
+  return BUILTIN_TEMPLATES.length;
 };
 
 /** Release initialization never creates sample projects or evidence. Safe after deleting the last project. */
@@ -148,13 +201,15 @@ export const initializeWorkspace = (db: Database): void => {
     if (!members) {
       const populated = hasProjects(db);
       const old = db.query<{ user_name: string; user_ini: string }, []>("SELECT user_name,user_ini FROM workspace WHERE id=1").get();
-      const preserveProfile = old && (populated || old.user_name !== "Al McKay" || old.user_ini !== "AM");
-      const name = preserveProfile ? old.user_name : "Workspace owner";
-      const ini = preserveProfile ? old.user_ini : "ME";
+      // A workspace with projects, or one whose profile was customised, keeps it; an untouched empty one restarts from the neutral owner.
+      const preserveProfile = old && (populated || old.user_name !== DEFAULT_OWNER.name || old.user_ini !== DEFAULT_OWNER.ini);
+      const name = preserveProfile ? old.user_name : DEFAULT_OWNER.name;
+      const ini = preserveProfile ? old.user_ini : DEFAULT_OWNER.ini;
       db.query("INSERT INTO workspace_members (id,name,ini,role) VALUES ('owner',?,?,'admin')").run(name, ini);
       db.query("UPDATE workspace SET user_name=?,user_ini=? WHERE id=1").run(name, ini);
     }
     const added = ensureAgents(db);
+    ensureTemplates(db);
     const owner = db.query<{ ini: string }, []>("SELECT ini FROM workspace_members ORDER BY rowid LIMIT 1").get();
     for (const id of added) db.query("UPDATE agents SET owner=? WHERE id=?").run(owner?.ini ?? "ME", id);
   })();

@@ -5,10 +5,20 @@
 
 import { z } from "zod";
 import { AGENT_KINDS, BUDGET_SCOPES, GOV_STATUSES, MILESTONE_STATUSES, PROJECT_TABS, YEAR_MONTH } from "@valueflow/domain";
+import type { RiskTier } from "@valueflow/domain";
 
 const pct = z.number().finite().min(0).max(100);
 const id = z.string().trim().min(1).max(64);
 const short = (max: number) => z.string().trim().min(1).max(max);
+/** Initials: one to three letters or digits, as shown on avatars and used as owner references. */
+const ini = z.string().trim().regex(/^[\p{L}\p{N}]{1,3}$/u, "expected 1-3 letters or digits");
+/** A CSS gradient or colour for an agent's mark; nothing that fetches or escapes the declaration. */
+const cssPaint = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .refine((v) => !/url\s*\(|expression\s*\(|[;{}<>]|@import|javascript:/i.test(v), "expected a CSS colour or gradient without url() or declarations");
 const isoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD")
@@ -25,6 +35,9 @@ const uniqueIds = <T extends { id: string }>(items: T[], ctx: z.RefinementCtx, l
     if (seen.has(item.id)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [i, "id"], message: `${label} ids must be unique` });
     seen.add(item.id);
   });
+};
+const atLeastOne = (value: Record<string, unknown>, keys: string[], ctx: z.RefinementCtx): void => {
+  if (!keys.some((k) => value[k] !== undefined)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: `expected at least one of ${keys.join(", ")}` });
 };
 const safeUrl = (value: string): boolean => {
   if (!value.trim()) return false;
@@ -62,6 +75,11 @@ export const MetricInputSchema = z.object({
   if (value.base > value.stretch) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["stretch"], message: "stretch must be greater than or equal to base" });
 });
 
+/** A metric definition without an id or reading: what a proposal or template may describe. */
+export const ProposedMetricSchema = z.object({ label: short(120), base: pct, stretch: pct }).superRefine((value, ctx) => {
+  if (value.base > value.stretch) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["stretch"], message: "stretch must be greater than or equal to base" });
+});
+
 export const MilestoneInputSchema = z.object({
   id,
   name: short(160),
@@ -82,7 +100,7 @@ export type TargetsInput = z.infer<typeof TargetsInputSchema>;
 // ---- projects -------------------------------------------------------------
 
 export const RepoInputSchema = z.object({ name: short(120), url: url(300) });
-export const TeamMemberInputSchema = z.object({ ini: short(3), name: short(80), role: short(80) });
+export const TeamMemberInputSchema = z.object({ ini, name: short(80), role: short(80) });
 
 /** A project's editable facts. Milestones, governance items, and releases have their own endpoints. */
 export const ProjectInputSchema = z.object({
@@ -106,7 +124,7 @@ export const GovernanceInputSchema = z.object({
   cat: short(80).optional(),
   name: short(160).optional(),
   status: enumOf(GOV_STATUSES),
-  owner: short(3),
+  owner: ini,
   date: isoDate.nullable(),
   detail: z.string().max(2000),
   link: z.string().trim().max(300).refine((s) => !s || safeUrl(s), "expected an http(s) URL").optional(),
@@ -125,17 +143,19 @@ export const CriterionInputSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("manual"), ok: z.boolean(), label: short(200) }),
 ]);
 
+const MilestoneIdsSchema = z.array(id).max(20).superRefine((items, ctx) => {
+  const seen = new Set<string>();
+  items.forEach((item, i) => {
+    if (seen.has(item)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [i], message: "milestone ids must be unique" });
+    seen.add(item);
+  });
+});
+
 export const ReleaseInputSchema = z.object({
   id,
   name: short(120),
   month,
-  milestoneIds: z.array(id).max(20).superRefine((items, ctx) => {
-    const seen = new Set<string>();
-    items.forEach((item, i) => {
-      if (seen.has(item)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [i], message: "milestone ids must be unique" });
-      seen.add(item);
-    });
-  }),
+  milestoneIds: MilestoneIdsSchema,
   criteria: z.array(CriterionInputSchema).max(20),
 });
 export type ReleaseInput = z.infer<typeof ReleaseInputSchema>;
@@ -150,7 +170,7 @@ export type ReadingInput = z.infer<typeof ReadingInputSchema>;
 
 // ---- workspace ------------------------------------------------------------
 
-export const WorkspaceInputSchema = z.object({ user: z.object({ name: short(80), ini: short(3) }) });
+export const WorkspaceInputSchema = z.object({ user: z.object({ name: short(80), ini }) });
 export type WorkspaceInput = z.infer<typeof WorkspaceInputSchema>;
 
 // ---- JSON documents mirrored from external systems ------------------------
@@ -163,11 +183,11 @@ const projectTab = enumOf(PROJECT_TABS);
 export const AgentSchema = z.object({
   id,
   name: short(40),
-  grad: short(200),
+  grad: cssPaint,
   purpose: short(300),
   kind: enumOf(AGENT_KINDS),
   model: z.string().trim().max(80).nullable(),
-  owner: short(3),
+  owner: ini,
   caps: z.array(short(60)).max(12),
   schedule: z.enum(["nightly", "weekly"]).nullable(),
   prompt: z.string().trim().max(4000).nullable().default(null),
@@ -182,12 +202,50 @@ export type AgentsInput = z.infer<typeof AgentsInputSchema>;
 export const ProposalActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("governance_status"), gid: id, status: enumOf(GOV_STATUSES) }),
   z.object({ type: z.literal("milestone_status"), mid: id, status: enumOf(MILESTONE_STATUSES) }),
-  z.object({ type: z.literal("governance_item"), cat: short(80), name: short(160), status: enumOf(GOV_STATUSES), owner: short(3), detail: z.string().max(2000).default("") }),
+  z.object({ type: z.literal("governance_item"), cat: short(80), name: short(160), status: enumOf(GOV_STATUSES), owner: ini, detail: z.string().max(2000).default("") }),
   z.object({ type: z.literal("calendar_event"), date: isoDate, tab: projectTab.default("overview"), text: short(200), sub: z.string().max(200).nullable().default(null) }),
   z.object({ type: z.literal("targets"), fte: pct, time: pct }),
   z.object({ type: z.literal("agent_prompt"), agentId: id, prompt: z.string().trim().max(4000).nullable() }),
   z.object({ type: z.literal("agent_model"), agentId: id, model: z.string().trim().min(1).max(160).nullable() }),
-]);
+  // Record edits staged by "Update project from documents". Optional fields are
+  // left untouched when accepted; a shape with nothing to change is rejected.
+  z.object({
+    type: z.literal("project_details"),
+    description: z.string().trim().max(2000).optional(),
+    stage: short(40).optional(),
+    tier: z.union([z.literal(1), z.literal(2), z.literal(3)]).nullable().optional(),
+    committee: z.object({ date: isoDate, ref: short(40) }).nullable().optional(),
+  }),
+  z.object({ type: z.literal("team_member"), ini, name: short(80), role: short(80) }),
+  z.object({ type: z.literal("repo"), name: short(120), url: url(300) }),
+  z.object({
+    type: z.literal("governance_update"),
+    gid: id,
+    status: enumOf(GOV_STATUSES).optional(),
+    owner: ini.optional(),
+    date: isoDate.nullable().optional(),
+    detail: z.string().trim().max(2000).optional(),
+  }),
+  z.object({
+    type: z.literal("milestone_create"),
+    name: short(160),
+    status: enumOf(MILESTONE_STATUSES),
+    month,
+    impact: ImpactSchema,
+    metrics: z.array(ProposedMetricSchema).max(12),
+  }),
+  z.object({ type: z.literal("milestone_update"), mid: id, name: short(160).optional(), status: enumOf(MILESTONE_STATUSES).optional(), month: month.optional(), impact: ImpactSchema.optional() }),
+  z.object({ type: z.literal("release_create"), name: short(120), month, milestoneIds: MilestoneIdsSchema, criteria: z.array(CriterionInputSchema).max(20) }),
+  z.object({ type: z.literal("release_update"), rid: id, name: short(120).optional(), month: month.optional(), milestoneIds: MilestoneIdsSchema.optional(), criteria: z.array(CriterionInputSchema).max(20).optional() }),
+]).superRefine((v, ctx) => {
+  // A partial edit that changes nothing is a malformed proposal, not a no-op.
+  switch (v.type) {
+    case "project_details": atLeastOne(v, ["description", "stage", "tier", "committee"], ctx); break;
+    case "governance_update": atLeastOne(v, ["status", "owner", "date", "detail"], ctx); break;
+    case "milestone_update": atLeastOne(v, ["name", "status", "month", "impact"], ctx); break;
+    case "release_update": atLeastOne(v, ["name", "month", "milestoneIds", "criteria"], ctx); break;
+  }
+});
 export type ProposalActionInput = z.infer<typeof ProposalActionSchema>;
 
 /** Everything the wizard composes from an accepted draft, created in one transaction. */
@@ -223,7 +281,7 @@ export const RuleInputSchema = z.object({
   proj: id.nullable().default(null),
   enabled: z.boolean().default(true),
   auto: z.boolean().default(false),
-  owner: short(3),
+  owner: ini,
 });
 export type RuleInput = z.infer<typeof RuleInputSchema>;
 
@@ -261,6 +319,69 @@ export const CalendarEventInputSchema = z.object({
   sub: z.string().trim().max(200).nullable(),
 });
 export type CalendarEventInput = z.infer<typeof CalendarEventInputSchema>;
+
+// ---- project templates ----------------------------------------------------
+
+const tier = z.union([z.literal(1), z.literal(2), z.literal(3)]).nullable().pipe(z.custom<RiskTier | null>());
+export const TemplateSchema = z
+  .object({
+    id: id.regex(/^[a-z0-9][a-z0-9-]*$/, "lowercase letters, digits and dashes"),
+    name: short(80),
+    description: z.string().trim().max(600),
+    stage: short(40),
+    tier,
+    targets: ImpactPairSchema,
+    documents: z.array(z.object({ cat: short(80), name: short(160), detail: z.string().trim().max(600), required: z.boolean() })).max(40),
+    dependencies: z.array(z.object({ name: short(160), detail: z.string().trim().max(600), required: z.boolean() })).max(20),
+    milestones: z.array(z.object({ name: short(160), monthsOut: z.number().int().min(0).max(60), impact: ImpactSchema, metrics: z.array(ProposedMetricSchema).max(12) })).max(20),
+    releases: z
+      .array(
+        z.object({
+          name: short(120),
+          monthsOut: z.number().int().min(0).max(60),
+          milestones: z.array(z.number().int().min(0)).max(20),
+          criteria: z
+            .array(
+              z.discriminatedUnion("type", [
+                z.object({ type: z.literal("gate"), milestone: z.number().int().min(0), label: short(200) }),
+                z.object({ type: z.literal("document"), name: short(160), label: short(200) }),
+                z.object({ type: z.literal("manual"), label: short(200) }),
+              ]),
+            )
+            .max(20),
+        }),
+      )
+      .max(10),
+  })
+  .superRefine((t, ctx) => {
+    const names = new Set<string>();
+    [...t.documents, ...t.dependencies].forEach((d) => {
+      const key = d.name.toLowerCase();
+      if (names.has(key)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["documents"], message: `duplicate document or dependency name: ${d.name}` });
+      names.add(key);
+    });
+    t.releases.forEach((r, ri) => {
+      r.milestones.forEach((mi, i) => {
+        if (mi >= t.milestones.length) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["releases", ri, "milestones", i], message: "milestone index out of range" });
+      });
+      r.criteria.forEach((c, ci) => {
+        if (c.type === "gate" && c.milestone >= t.milestones.length) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["releases", ri, "criteria", ci], message: "milestone index out of range" });
+        if (c.type === "document" && !names.has(c.name.toLowerCase())) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["releases", ri, "criteria", ci], message: `no document or dependency named ${c.name}` });
+      });
+    });
+  });
+export const TemplatesInputSchema = z.array(TemplateSchema).max(20).superRefine((items, ctx) => uniqueIds(items, ctx, "template"));
+export type TemplateInput = z.infer<typeof TemplateSchema>;
+export type TemplatesInput = z.infer<typeof TemplatesInputSchema>;
+
+/** Create a project from a template: the project's own facts plus who owns the template's items. */
+export const TemplateCreateInputSchema = z.object({
+  project: ProjectInputSchema,
+  owner: ini,
+  /** Leave out the template's plan (milestones and releases) and keep only its documents and dependencies. */
+  documentsOnly: z.boolean().default(false),
+});
+export type TemplateCreateInput = z.infer<typeof TemplateCreateInputSchema>;
 
 export interface ApiError {
   error: string;

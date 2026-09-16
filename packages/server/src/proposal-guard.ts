@@ -17,6 +17,16 @@ export const proposalBasis = (p: Proposal, state: AppState): string => {
     case "targets": target = project?.targets ?? null; break;
     case "governance_item": target = project ? { project: project.id, duplicates: project.governance.filter((g) => g.name.toLowerCase() === a.name.toLowerCase()) } : null; break;
     case "calendar_event": target = project ? { project: project.id, duplicates: state.calendar.filter((c) => c.proj === project.id && c.date === a.date && c.text === a.text) } : null; break;
+    // Record edits guard only the fields they would overwrite, so an unrelated
+    // reading or snapshot never makes a document-backed change stale.
+    case "project_details": target = project ? { description: project.description, stage: project.stage, tier: project.tier, committee: project.committee } : null; break;
+    case "team_member": target = project ? { member: project.team.find((t) => t.ini === a.ini) ?? null } : null; break;
+    case "repo": target = project ? { repo: project.repos.find((r) => r.name === a.name) ?? null } : null; break;
+    case "governance_update": { const g = project?.governance.find((x) => x.id === a.gid); target = g ? { status: g.status, owner: g.owner, date: g.date, detail: g.detail } : null; break; }
+    case "milestone_create": target = project ? { project: project.id, duplicates: project.milestones.filter((m) => m.name.toLowerCase() === a.name.toLowerCase()).map((m) => m.id) } : null; break;
+    case "milestone_update": { const m = project?.milestones.find((x) => x.id === a.mid); target = m ? { name: m.name, status: m.status, month: m.month, impact: m.impact } : null; break; }
+    case "release_create": target = project ? { project: project.id, duplicates: (state.releases[project.id] ?? []).filter((r) => r.name.toLowerCase() === a.name.toLowerCase()).map((r) => r.id) } : null; break;
+    case "release_update": target = project ? ((state.releases[project.id] ?? []).find((r) => r.id === a.rid) ?? null) : null; break;
   }
   const rule = p.ruleId ? state.rules.find((r) => r.id === p.ruleId) ?? null : null;
   return JSON.stringify({ target, rule });

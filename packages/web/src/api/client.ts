@@ -1,7 +1,7 @@
 import { sessionHeaders } from "./session.ts";
 // ================= typed API client =================
 
-import type { Agent, AgentRun, Budget, CalendarEvent, DevFacts, DailyBrief, GovernanceItem, RunEvent, ImpactPair, Metric, MetricReading, Milestone, Project, ProjectTab, Proposal, Release, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
+import type { Agent, AgentRun, Budget, CalendarEvent, DevFacts, DailyBrief, GovernanceItem, RunEvent, ImpactPair, Metric, MetricReading, Milestone, Project, ProjectTab, ProjectTemplate, Proposal, Release, Rule, RunScore, SetupDraft, SetupSource, SyncRun, Workspace } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import type {
   AgentsInput,
@@ -20,6 +20,8 @@ import type {
   ScoutInput,
   SetupCreateInput,
   TargetsInput,
+  TemplateCreateInput,
+  TemplatesInput,
   WorkspaceInput,
 } from "@valueflow/shared";
 
@@ -119,6 +121,11 @@ export const api = {
   setupAnalyze: (form: FormData) => request<SetupDraft>("POST", routes.setup(), form),
   setupRefine: (id: string, feedback: string) => request<SetupDraft>("POST", routes.setupRefine(id), { feedback }),
   setupCreate: (id: string, body: SetupCreateInput) => request<Project>("POST", routes.setupCreate(id), body),
+  templates: () => request<ProjectTemplate[]>("GET", routes.templates()),
+  setTemplates: (body: TemplatesInput) => request<ProjectTemplate[]>("PUT", routes.templates(), body),
+  createFromTemplate: (tid: string, body: TemplateCreateInput) => request<Project>("POST", routes.templateCreate(tid), body),
+  /** Stage changes from documents as proposals; nothing is applied until they are accepted in the inbox. */
+  projectUpdate: (pid: string, form: FormData) => request<{ run: AgentRun; proposals: Proposal[]; dropped: number; sources: SetupSource[] }>("POST", routes.projectUpdate(pid), form),
   acceptProposal: (id: string) => request<Proposal>("POST", routes.proposalAccept(id)),
   dismissProposal: (id: string) => request<Proposal>("POST", routes.proposalDismiss(id)),
   runAgent: (input: RunAgentInput) => {

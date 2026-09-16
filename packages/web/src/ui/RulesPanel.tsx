@@ -105,6 +105,7 @@ function RuleEditor({
         onChange={(e) => setText(e.target.value)}
       />
       <div
+        className="vf-fields"
         style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: 10 }}
       >
         <div>

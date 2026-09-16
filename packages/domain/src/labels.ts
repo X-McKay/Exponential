@@ -38,7 +38,7 @@ export const AGENT_STATUS_LABEL: Record<AgentStatus, string> = {
 
 export const CHECK_ICON: Record<CheckStatus, string> = { pass: "✓", fail: "✗", running: "◌" };
 
-export const AGENT_KIND_LABEL: Record<AgentKind, string> = { deck: "Decks", comms: "Communications", ideation: "Ideation", audit: "Audit", chat: "Conversation", rules: "Standing rules", brief: "Weekly brief", tuner: "Prompt tuning", scout: "Model scouting", curator: "Glance curation" };
+export const AGENT_KIND_LABEL: Record<AgentKind, string> = { deck: "Decks", comms: "Communications", ideation: "Ideation", audit: "Audit", chat: "Conversation", rules: "Standing rules", brief: "Weekly brief", tuner: "Prompt tuning", scout: "Model scouting", curator: "Glance curation", setup: "Project setup" };
 
 /** What each step reads as while it is the latest thing a run did. */
 export const STEP_LABEL: Record<RunStep, string> = {

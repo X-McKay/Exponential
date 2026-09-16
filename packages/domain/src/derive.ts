@@ -280,7 +280,7 @@ export const nextReleaseId = (releases: Pick<Release, "id">[]): string => `R${Ma
 export const nextProjectKey = (projects: Pick<Project, "key">[]): string => `PRJ-${Math.max(0, ...projects.map((p) => numberIn(p.key))) + 1}`;
 
 /**
- * URL-safe id derived from a name ("Client onboarding" → "client-onboarding"),
+ * URL-safe id derived from a name ("Invoice review" → "invoice-review"),
  * suffixed with -2, -3… until it is not in `taken`. Falls back to `fallback`
  * when the name has no usable characters.
  */

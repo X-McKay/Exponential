@@ -21,17 +21,17 @@ describe("seed", () => {
     };
     expect(stripped).toEqual(seedState());
     expect(body.usageRuns?.length).toBe(body.runs.length);
-    expect(body.projects.find((p) => p.id === "ima")?.milestones.find((m) => m.id === "MS-21")?.metrics[0]).toMatchObject({ readAt: expect.stringMatching(/^2026-/), readSource: "eval" });
+    expect(body.projects.find((p) => p.id === "clauses")?.milestones.find((m) => m.id === "MS-21")?.metrics[0]).toMatchObject({ readAt: expect.stringMatching(/^2026-/), readSource: "eval" });
   });
 
   test("seeds ~30 readings per measurable metric, ending at the mockup's current value", async () => {
     const app = testApp();
-    const { body } = await app.get<MetricReading[]>(routes.readings("onboarding", "MS-12", "acc"));
+    const { body } = await app.get<MetricReading[]>(routes.readings("invoice", "MS-12", "acc"));
     expect(body.length).toBe(READINGS_PER_METRIC);
     expect(body.at(-1)?.value).toBe(87);
     expect(body.every((r) => r.source === "eval")).toBe(true);
     for (let i = 1; i < body.length; i++) expect(body[i]!.recordedAt >= body[i - 1]!.recordedAt).toBe(true);
-    const unmeasured = await app.get<MetricReading[]>(routes.readings("onboarding", "MS-14", "rec"));
+    const unmeasured = await app.get<MetricReading[]>(routes.readings("invoice", "MS-14", "rec"));
     expect(unmeasured.body).toEqual([]);
   });
 
@@ -53,11 +53,11 @@ describe("routing", () => {
   });
   test("invalid JSON and schema failures → 400 with issues", async () => {
     const app = testApp();
-    const bad = await app.handleApi(new Request("http://valueflow.test" + routes.targets("onboarding"), { method: "PUT", body: "{" }));
+    const bad = await app.handleApi(new Request("http://valueflow.test" + routes.targets("invoice"), { method: "PUT", body: "{" }));
     expect(bad?.status).toBe(400);
-    const { status, body } = await app.send<{ error: string; issues: unknown[] }>("PUT", routes.targets("onboarding"), { fte: 500, time: -1 });
+    const { status, body } = await app.send<{ error: string; issues: unknown[] }>("PUT", routes.targets("invoice"), { fte: 500, time: -1 });
     expect(status).toBe(400);
-    expect(body.error).toBe("validation failed");
+    expect(body.error).toStartWith("validation failed: fte: ");
     expect(body.issues.length).toBe(2);
   });
 });
@@ -65,17 +65,17 @@ describe("routing", () => {
 describe("readings", () => {
   test("PUT appends a reading and the metric's current follows the latest", async () => {
     const app = testApp();
-    const { status, body } = await app.send<{ reading: MetricReading; metric: Metric }>("PUT", routes.readings("onboarding", "MS-13", "ext"), { value: 90 });
+    const { status, body } = await app.send<{ reading: MetricReading; metric: Metric }>("PUT", routes.readings("invoice", "MS-13", "ext"), { value: 90 });
     expect(status).toBe(201);
     expect(body.reading.source).toBe("manual");
     expect(body.metric.current).toBe(90);
-    const list = await app.get<MetricReading[]>(routes.readings("onboarding", "MS-13", "ext"));
+    const list = await app.get<MetricReading[]>(routes.readings("invoice", "MS-13", "ext"));
     expect(list.body.length).toBe(READINGS_PER_METRIC + 1);
   });
   test("unknown metric → 404", async () => {
     const app = testApp();
-    expect((await app.send("PUT", routes.readings("onboarding", "MS-13", "nope"), { value: 1 })).status).toBe(404);
-    expect((await app.get(routes.readings("onboarding", "MS-99", "ext"))).status).toBe(404);
+    expect((await app.send("PUT", routes.readings("invoice", "MS-13", "nope"), { value: 1 })).status).toBe(404);
+    expect((await app.get(routes.readings("invoice", "MS-99", "ext"))).status).toBe(404);
   });
 });
 
@@ -84,26 +84,26 @@ describe("milestones", () => {
 
   test("PUT updates definition without treating stale current as a new reading", async () => {
     const app = testApp();
-    const input: Milestone = { ...base, name: "Document ingestion pipeline v2", metrics: base.metrics.map((x) => ({ ...x })) };
-    const first = await app.send<Milestone>("PUT", routes.milestone("onboarding", "MS-13"), input);
+    const input: Milestone = { ...base, name: "Purchase-order matching v2", metrics: base.metrics.map((x) => ({ ...x })) };
+    const first = await app.send<Milestone>("PUT", routes.milestone("invoice", "MS-13"), input);
     expect(first.status).toBe(200);
-    expect(first.body.name).toBe("Document ingestion pipeline v2");
-    expect((await app.get<MetricReading[]>(routes.readings("onboarding", "MS-13", "ext"))).body.length).toBe(READINGS_PER_METRIC);
+    expect(first.body.name).toBe("Purchase-order matching v2");
+    expect((await app.get<MetricReading[]>(routes.readings("invoice", "MS-13", "ext"))).body.length).toBe(READINGS_PER_METRIC);
 
     input.metrics[0]!.current = 95;
-    const second = await app.send<Milestone>("PUT", routes.milestone("onboarding", "MS-13"), input);
+    const second = await app.send<Milestone>("PUT", routes.milestone("invoice", "MS-13"), input);
     expect(second.body.metrics[0]!.current).toBe(base.metrics[0]!.current);
-    const readings = (await app.get<MetricReading[]>(routes.readings("onboarding", "MS-13", "ext"))).body;
+    const readings = (await app.get<MetricReading[]>(routes.readings("invoice", "MS-13", "ext"))).body;
     expect(readings.length).toBe(READINGS_PER_METRIC);
   });
 
   test("PUT removes dropped metrics and adds new ones", async () => {
     const app = testApp();
     const input: Milestone = { ...base, metrics: [{ id: "new", label: "New criterion", base: 50, stretch: 80, current: 0 }] };
-    const { body } = await app.send<Milestone>("PUT", routes.milestone("onboarding", "MS-13"), input);
+    const { body } = await app.send<Milestone>("PUT", routes.milestone("invoice", "MS-13"), input);
     expect(body.metrics.map((x) => x.id)).toEqual(["new"]);
-    expect((await app.get<MetricReading[]>(routes.readings("onboarding", "MS-13", "ext"))).status).toBe(200);
-    expect((await app.get<MetricReading[]>(routes.readings("onboarding", "MS-13", "ext"))).body.length).toBe(READINGS_PER_METRIC);
+    expect((await app.get<MetricReading[]>(routes.readings("invoice", "MS-13", "ext"))).status).toBe(200);
+    expect((await app.get<MetricReading[]>(routes.readings("invoice", "MS-13", "ext"))).body.length).toBe(READINGS_PER_METRIC);
   });
 
   test("POST creates; duplicate id → 409; body/URL id mismatch → 400", async () => {
@@ -116,13 +116,13 @@ describe("milestones", () => {
       impact: { base: { fte: 3, time: 3 }, stretch: { fte: 5, time: 5 } },
       metrics: [],
     };
-    const created = await app.send<Milestone>("POST", routes.milestones("onboarding"), fresh);
+    const created = await app.send<Milestone>("POST", routes.milestones("invoice"), fresh);
     expect(created.status).toBe(201);
     const { snapshots: _snapshots, createdAt: _createdAt, ...createdWithoutHistory } = created.body;
     expect(createdWithoutHistory).toEqual(fresh);
-    expect((await app.send("POST", routes.milestones("onboarding"), fresh)).status).toBe(409);
-    expect((await app.send("PUT", routes.milestone("onboarding", "MS-99"), fresh)).status).toBe(400);
-    expect((await app.send("PUT", routes.milestone("onboarding", "MS-99"), { ...fresh, id: "MS-99" })).status).toBe(404);
+    expect((await app.send("POST", routes.milestones("invoice"), fresh)).status).toBe(409);
+    expect((await app.send("PUT", routes.milestone("invoice", "MS-99"), fresh)).status).toBe(400);
+    expect((await app.send("PUT", routes.milestone("invoice", "MS-99"), { ...fresh, id: "MS-99" })).status).toBe(404);
     const state = (await app.get<AppState>(routes.state())).body;
     expect(state.projects[0]!.milestones.map((m) => m.id)).toEqual(["MS-12", "MS-15", "MS-13", "MS-14", "MS-16", "MS-17"]);
   });
@@ -130,11 +130,11 @@ describe("milestones", () => {
   test("DELETE retires the milestone and preserves its readings; release criteria resolve to not-met", async () => {
     const app = testApp();
     const before = (await app.get<AppState>(routes.state())).body;
-    const beforeProject = before.projects.find((project) => project.id === "onboarding")!;
+    const beforeProject = before.projects.find((project) => project.id === "invoice")!;
     const beforeCalendar = calendarOf(before);
     const beforeSeries = burnupSeries(beforeProject.milestones, "fte", beforeCalendar, beforeProject.historicalMilestones);
-    expect((await app.send("DELETE", routes.milestone("onboarding", "MS-12"))).status).toBe(200);
-    expect((await app.send("DELETE", routes.milestone("onboarding", "MS-12"))).status).toBe(404);
+    expect((await app.send("DELETE", routes.milestone("invoice", "MS-12"))).status).toBe(200);
+    expect((await app.send("DELETE", routes.milestone("invoice", "MS-12"))).status).toBe(404);
     const state = (await app.get<AppState>(routes.state())).body;
     const p = state.projects[0]!;
     expect(p.milestones.some((m) => m.id === "MS-12")).toBe(false);
@@ -143,19 +143,19 @@ describe("milestones", () => {
     for (let i = 0; i < beforeCalendar.today; i++) expect(afterSeries.real[i]).toBe(beforeSeries.real[i]);
     expect(afterSeries.real[beforeCalendar.today]).toBe(5);
     expect(eligible(p, "fte")).toBe(5);
-    expect(state.releases.onboarding![0]!.criteria[0]).toEqual({ type: "gate", ms: "MS-12", label: "Mapping base gate (accuracy ≥80, coverage ≥80)" });
+    expect(state.releases.invoice![0]!.criteria[0]).toEqual({ type: "gate", ms: "MS-12", label: "Extraction base gate (accuracy ≥80, coverage ≥80)" });
     const glance = (await app.get<{ blocks: { kind: string; title: string }[] }>(routes.glance())).body;
     expect(glance.blocks.length).toBeGreaterThan(0);
     const rows = app.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM metric_readings WHERE milestone_id = 'MS-12'").get();
     expect(rows?.n).toBeGreaterThan(0);
-    expect(app.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM milestones WHERE project_id = 'onboarding' AND id = 'MS-12' AND retired_at IS NOT NULL").get()?.n).toBe(1);
+    expect(app.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM milestones WHERE project_id = 'invoice' AND id = 'MS-12' AND retired_at IS NOT NULL").get()?.n).toBe(1);
   });
 });
 
 describe("targets & governance", () => {
   test("PUT targets rescales the project; unknown project → 404", async () => {
     const app = testApp();
-    const { status, body } = await app.send<{ fte: number; time: number }>("PUT", routes.targets("ima"), { fte: 35, time: 55 });
+    const { status, body } = await app.send<{ fte: number; time: number }>("PUT", routes.targets("clauses"), { fte: 35, time: 55 });
     expect(status).toBe(200);
     expect(body).toEqual({ fte: 35, time: 55 });
     expect((await app.send("PUT", routes.targets("nope"), { fte: 1, time: 1 })).status).toBe(404);
@@ -163,19 +163,19 @@ describe("targets & governance", () => {
 
   test("PUT governance updates status/owner/date/detail/link and clears link when omitted", async () => {
     const app = testApp();
-    const { status, body } = await app.send<GovernanceItem>("PUT", routes.governance("ima", "sla"), {
+    const { status, body } = await app.send<GovernanceItem>("PUT", routes.governance("clauses", "sla"), {
       status: "draft",
-      owner: "JL",
+      owner: "AR",
       date: "2026-09-12",
       detail: "Drafted with compliance ops.",
       link: "confluence/ima-sla",
     });
     expect(status).toBe(200);
-    expect(body).toEqual({ cat: "Operations", id: "sla", name: "Product SLA", status: "draft", owner: "JL", date: "2026-09-12", detail: "Drafted with compliance ops.", link: "confluence/ima-sla" });
-    const cleared = await app.send<GovernanceItem>("PUT", routes.governance("ima", "sla"), { status: "approved", owner: "JL", date: null, detail: "" });
+    expect(body).toEqual({ cat: "Operations", id: "sla", name: "Service level agreement", status: "draft", owner: "AR", date: "2026-09-12", detail: "Drafted with compliance ops.", link: "confluence/ima-sla" });
+    const cleared = await app.send<GovernanceItem>("PUT", routes.governance("clauses", "sla"), { status: "approved", owner: "AR", date: null, detail: "" });
     expect(cleared.body.link).toBeUndefined();
-    expect((await app.send("PUT", routes.governance("ima", "nope"), { status: "approved", owner: "JL", date: null, detail: "" })).status).toBe(404);
-    expect((await app.send("PUT", routes.governance("ima", "sla"), { status: "approved", owner: "JL", date: "12/09/2026", detail: "" })).status).toBe(400);
+    expect((await app.send("PUT", routes.governance("clauses", "nope"), { status: "approved", owner: "AR", date: null, detail: "" })).status).toBe(404);
+    expect((await app.send("PUT", routes.governance("clauses", "sla"), { status: "approved", owner: "AR", date: "12/09/2026", detail: "" })).status).toBe(400);
   });
 });
 

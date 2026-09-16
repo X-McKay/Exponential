@@ -8,6 +8,7 @@ import { AgentsInputSchema } from "@valueflow/shared";
 import { JsonDocEditor } from "./editors/JsonDocEditor.tsx";
 import { ProjectEditor } from "./editors/ProjectEditor.tsx";
 import { SetupWizard } from "./editors/SetupWizard.tsx";
+import { UpdateWizard } from "./editors/UpdateWizard.tsx";
 import { WorkspaceEditor } from "./editors/WorkspaceEditor.tsx";
 import { CmdK } from "./palette/CmdK.tsx";
 import { ChatPanel } from "./ui/ChatPanel.tsx";
@@ -118,7 +119,7 @@ function NavItem({
       {dot && <span style={{ width: 7, height: 7, borderRadius: "50%", background: dot, flexShrink: 0, marginLeft: 3, marginRight: 1 }} />}
       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, flex: 1 }}>{label}</span>
       {badge !== undefined && badge > 0 && (
-        <span style={{ fontSize: 11, fontWeight: 550, color: "#fff", background: C.indigo, borderRadius: 9, minWidth: 18, height: 18, padding: "0 5px", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{badge}</span>
+        <span key={badge} className="vf-badge" style={{ fontSize: 11, fontWeight: 550, color: "#fff", background: C.indigo, borderRadius: 9, minWidth: 18, height: 18, padding: "0 5px", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{badge}</span>
       )}
     </button>
   );
@@ -179,7 +180,7 @@ export function App() {
     try { localStorage.setItem("valueflow.sidebarHidden", String(sidebarHidden)); } catch { /* Storage may be unavailable. */ }
   }, [sidebarHidden]);
   const [lastProject, setLastProject] = useState<string | null>(null);
-  const [editor, setEditor] = useState<{ kind: "project"; pid: string | null } | { kind: "setup" } | { kind: "agents" } | { kind: "workspace" } | null>(null);
+  const [editor, setEditor] = useState<{ kind: "project"; pid: string | null } | { kind: "setup" } | { kind: "update"; pid: string } | { kind: "agents" } | { kind: "workspace" } | null>(null);
   const [theme, setTheme] = useState<ThemeChoice>(readTheme);
   useEffect(() => {
     applyTheme(theme);
@@ -296,8 +297,10 @@ export function App() {
         <ProjectEditor
           project={editor.pid ? (projects.find((p) => p.id === editor.pid) ?? null) : null}
           projects={projects}
-          onSave={async (input, isNew) => {
-            await store.saveProject(input, isNew);
+          templates={state.templates ?? []}
+          onSave={async (input, isNew, template) => {
+            if (isNew && template) await store.createFromTemplate(template.id, { project: input, owner: user.ini, documentsOnly: template.documentsOnly });
+            else await store.saveProject(input, isNew);
             closeEditor();
             if (isNew) openProject(input.id);
           }}
@@ -309,9 +312,22 @@ export function App() {
           onClose={closeEditor}
         />
       )}
+      {editor?.kind === "update" && proj && proj.id === editor.pid && (
+        <UpdateWizard
+          project={proj}
+          state={state}
+          onStaged={store.addProposals}
+          onOpenInbox={() => {
+            closeEditor();
+            go("inbox", null);
+          }}
+          onClose={closeEditor}
+        />
+      )}
       {editor?.kind === "setup" && (
         <SetupWizard
           projects={projects}
+          templates={state.templates ?? []}
           cal={cal}
           defaultOwner={user.ini}
           onCreated={(pid) => {
@@ -404,7 +420,7 @@ export function App() {
         </aside>
       )}
 
-      <main style={{ flex: 1, minWidth: 0 }}>
+      <main className="vf-container" style={{ flex: 1, minWidth: 0 }}>
         {sessionRole() === "viewer" && <div role="status" style={{ padding: "10px 20px", color: C.mut, borderBottom: `1px solid ${C.line}` }}>Viewer mode: shared data is read-only. Select Editor or Administrator to make changes.</div>}
         {!narrow && sidebarHidden && (
           <div style={{ padding: "8px 20px", borderBottom: `1px solid ${C.line}` }}>
@@ -539,6 +555,7 @@ export function App() {
               state={state}
               onWorkspace={(w) => store.saveWorkspace(w)}
               onAgents={(a) => store.saveAgents(a)}
+              onTemplates={(t) => store.saveTemplates(t)}
               onCalendar={(ev, isNew) => store.saveCalendar(ev, isNew)}
               onDeleteCalendar={(id) => store.deleteCalendar(id)}
               onSync={store.syncProject}
@@ -552,7 +569,7 @@ export function App() {
                   Portfolio ›
                 </button>
                 <span style={{ fontSize: 12, color: C.dim }}>{proj.key}</span>
-                <h1 style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em", margin: 0, flex: 1, minWidth: 160 }}>{proj.name}</h1>
+                <h1 style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em", margin: 0, flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>{proj.name}</h1>
                 <TierBadge tier={proj.tier} />
               </div>
               {narrow ? (
@@ -584,6 +601,7 @@ export function App() {
                 state={state}
                 cal={cal}
                 onEdit={() => setEditor({ kind: "project", pid: proj.id })}
+                {...(state.llm ? { onUpdate: () => setEditor({ kind: "update", pid: proj.id }) } : {})}
                 onOpen={openProject}
                 onOpenInbox={() => go("inbox", null)}
                 onOpenAgents={() => go("agents", null)}

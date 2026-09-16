@@ -86,7 +86,7 @@ describe("tierOf", () => {
 
 describe("impactOf / eligible", () => {
   test("names gated delivery value as eligible until observed benefit exists", () => {
-    expect(eligible(project("onboarding"), "fte")).toBe(eligible(project("onboarding"), "fte"));
+    expect(eligible(project("invoice"), "fte")).toBe(eligible(project("invoice"), "fte"));
   });
   test("impact follows tier", () => {
     expect(impactOf(ms(), "fte")).toBe(10);
@@ -96,14 +96,14 @@ describe("impactOf / eligible", () => {
     expect(impactOf(ms({ status: "backlog" }), "fte")).toBe(0);
   });
   test("eligible counts only shipped milestones", () => {
-    const p = project("onboarding");
+    const p = project("invoice");
     // MS-12 shipped at base (87/82 vs 80/80) → 10, MS-15 shipped at base (71 vs 60) → 5; MS-13 is in eval, not shipped.
     expect(eligible(p, "fte")).toBe(15);
     expect(eligible(p, "time")).toBe(15);
-    expect(eligible(project("ima"), "fte")).toBe(0);
+    expect(eligible(project("clauses"), "fte")).toBe(0);
   });
   test("eligible reacts to a metric crossing a gate", () => {
-    const p = project("onboarding");
+    const p = project("invoice");
     const m12 = p.milestones.find((m) => m.id === "MS-12")!;
     m12.metrics.forEach((x) => (x.current = 95));
     expect(eligible(p, "fte")).toBe(20);
@@ -123,7 +123,7 @@ describe("attainment", () => {
 
 describe("readiness / blockers", () => {
   test("N/A items are excluded from readiness", () => {
-    const p = project("sector");
+    const p = project("search");
     // 14 items, 2 are N/A → 12 required, 0 approved.
     expect(readiness(p)).toBe(0);
     p.governance.forEach((g) => {
@@ -132,22 +132,22 @@ describe("readiness / blockers", () => {
     expect(readiness(p)).toBe(1);
   });
   test("onboarding readiness is 11/14", () => {
-    expect(readiness(project("onboarding"))).toBeCloseTo(11 / 14, 6);
+    expect(readiness(project("invoice"))).toBeCloseTo(11 / 14, 6);
   });
   test("zero required items → 0, not NaN", () => {
     expect(readiness({ governance: [] })).toBe(0);
-    expect(readiness({ governance: [{ cat: "x", id: "a", name: "A", status: "na", owner: "AM", date: null, detail: "" }] })).toBe(0);
+    expect(readiness({ governance: [{ cat: "x", id: "a", name: "A", status: "na", owner: "JA", date: null, detail: "" }] })).toBe(0);
   });
   test("blockers counts missing items only", () => {
-    expect(blockers(project("onboarding"))).toBe(0);
-    expect(blockers(project("ima"))).toBe(3);
-    expect(blockers(project("sector"))).toBe(10);
+    expect(blockers(project("invoice"))).toBe(0);
+    expect(blockers(project("clauses"))).toBe(3);
+    expect(blockers(project("search"))).toBe(10);
   });
 });
 
 describe("evalCriterion", () => {
   test("gate criterion referencing a deleted milestone resolves to not-met without throwing", () => {
-    const p = project("onboarding");
+    const p = project("invoice");
     p.milestones = p.milestones.filter((m) => m.id !== "MS-12");
     const e = evalCriterion({ type: "gate", ms: "MS-12", label: "x" }, p);
     expect(e.ok).toBe(false);
@@ -155,16 +155,16 @@ describe("evalCriterion", () => {
     expect(e.sub).toBe("milestone not found");
   });
   test("gate criterion on unmeasured milestone is pending", () => {
-    const e = evalCriterion({ type: "gate", ms: "MS-14", label: "x" }, project("onboarding"));
+    const e = evalCriterion({ type: "gate", ms: "MS-14", label: "x" }, project("invoice"));
     expect(e).toEqual({ ok: false, pending: true, sub: "no eval data yet" });
   });
   test("gate criterion on measurable milestone reports metrics", () => {
-    const e = evalCriterion({ type: "gate", ms: "MS-12", label: "x" }, project("onboarding"));
+    const e = evalCriterion({ type: "gate", ms: "MS-12", label: "x" }, project("invoice"));
     expect(e.ok).toBe(true);
-    expect(e.sub).toBe("Mapping accuracy 87% · Dataset coverage 82%");
+    expect(e.sub).toBe("Extraction accuracy 87% · Supplier coverage 82%");
   });
   test("gov criterion: approved and N/A are ok; in_review/draft pending; missing not met; untracked not met", () => {
-    const p = project("sector");
+    const p = project("search");
     expect(evalCriterion({ type: "gov", gid: "dpia", label: "x" }, p)).toMatchObject({ ok: true, pending: false, sub: "N/A" });
     expect(evalCriterion({ type: "gov", gid: "tdd", label: "x" }, p)).toMatchObject({ ok: false, pending: true, sub: "In review · 2026-08-29" });
     expect(evalCriterion({ type: "gov", gid: "evalso", label: "x" }, p)).toMatchObject({ ok: false, pending: true });
@@ -172,51 +172,51 @@ describe("evalCriterion", () => {
     expect(evalCriterion({ type: "gov", gid: "nope", label: "x" }, p)).toEqual({ ok: false, pending: false, sub: "not tracked" });
   });
   test("manual criterion reflects its flag", () => {
-    expect(evalCriterion({ type: "manual", ok: true, label: "x" }, project("ima"))).toEqual({ ok: true, pending: false, sub: "Confirmed" });
-    expect(evalCriterion({ type: "manual", ok: false, label: "x" }, project("ima"))).toEqual({ ok: false, pending: false, sub: "Not confirmed" });
+    expect(evalCriterion({ type: "manual", ok: true, label: "x" }, project("clauses"))).toEqual({ ok: true, pending: false, sub: "Confirmed" });
+    expect(evalCriterion({ type: "manual", ok: false, label: "x" }, project("clauses"))).toEqual({ ok: false, pending: false, sub: "Not confirmed" });
   });
 });
 
 describe("releaseState", () => {
   test("seed states match the mockup", () => {
-    expect(releaseState(release("onboarding", "R1"), project("onboarding"), cal)).toMatchObject({ met: 4, total: 4, label: "Ready", tone: "good" });
-    expect(releaseState(release("onboarding", "R2"), project("onboarding"), cal)).toMatchObject({ met: 1, total: 4, label: "At risk", tone: "bad" });
-    expect(releaseState(release("onboarding", "R3"), project("onboarding"), cal)).toMatchObject({ met: 0, total: 3, label: "At risk", tone: "bad" });
-    expect(releaseState(release("ima", "R1"), project("ima"), cal)).toMatchObject({ met: 1, total: 4, label: "Blocked", tone: "bad" });
-    expect(releaseState(release("sector", "R1"), project("sector"), cal)).toMatchObject({ met: 1, total: 4, label: "At risk" });
+    expect(releaseState(release("invoice", "R1"), project("invoice"), cal)).toMatchObject({ met: 4, total: 4, label: "Ready", tone: "good" });
+    expect(releaseState(release("invoice", "R2"), project("invoice"), cal)).toMatchObject({ met: 1, total: 4, label: "At risk", tone: "bad" });
+    expect(releaseState(release("invoice", "R3"), project("invoice"), cal)).toMatchObject({ met: 0, total: 3, label: "At risk", tone: "bad" });
+    expect(releaseState(release("clauses", "R1"), project("clauses"), cal)).toMatchObject({ met: 1, total: 4, label: "Blocked", tone: "bad" });
+    expect(releaseState(release("search", "R1"), project("search"), cal)).toMatchObject({ met: 1, total: 4, label: "At risk" });
   });
   test("becomes Ready when all criteria are met and month is in the future", () => {
-    const p = project("ima");
+    const p = project("clauses");
     p.milestones.find((m) => m.id === "MS-21")!.metrics.forEach((x) => (x.current = 99));
     p.governance.forEach((g) => {
       if (g.id === "sec" || g.id === "mra") g.status = "approved";
     });
-    const st = releaseState(release("ima", "R1"), p, cal);
+    const st = releaseState(release("clauses", "R1"), p, cal);
     expect(st.label).toBe("Ready");
     expect(st.met).toBe(4);
-    expect(releaseState(release("ima", "R1"), p, { todayYm: "2026-10" }).label).toBe("Ready");
+    expect(releaseState(release("clauses", "R1"), p, { todayYm: "2026-10" }).label).toBe("Ready");
   });
   test("amber when at least half met but not all; a release with zero criteria has nothing outstanding", () => {
-    const p = project("onboarding");
-    const r = release("onboarding", "R2");
+    const p = project("invoice");
+    const r = release("invoice", "R2");
     p.milestones.find((m) => m.id === "MS-13")!.metrics[0]!.current = 90;
     expect(releaseState(r, p, cal)).toMatchObject({ met: 2, tone: "warn", label: "At risk" });
     expect(releaseState({ ...r, criteria: [] }, p, cal)).toMatchObject({ met: 0, total: 0, tone: "warn", label: "Not configured" });
   });
   test("deleted milestone drops a release to not-met without crashing", () => {
-    const p = project("onboarding");
+    const p = project("invoice");
     p.milestones = p.milestones.filter((m) => m.id !== "MS-12");
-    expect(releaseState(release("onboarding", "R1"), p, cal)).toMatchObject({ met: 3, total: 4, label: "Blocked" });
+    expect(releaseState(release("invoice", "R1"), p, cal)).toMatchObject({ met: 3, total: 4, label: "Blocked" });
   });
   test("nextRelease finds the first release after today", () => {
-    expect(nextRelease(seedState().releases.onboarding!, cal)?.id).toBe("R2");
-    expect(nextRelease(seedState().releases.onboarding!, { todayYm: "2027-02" })).toBeUndefined();
+    expect(nextRelease(seedState().releases.invoice!, cal)?.id).toBe("R2");
+    expect(nextRelease(seedState().releases.invoice!, { todayYm: "2027-02" })).toBeUndefined();
   });
 });
 
 describe("burnupSeries", () => {
   test("eligible is flat after today; committed starts today; ceiling is monotone", () => {
-    const s = burnupSeries(project("onboarding").milestones, "fte", cal);
+    const s = burnupSeries(project("invoice").milestones, "fte", cal);
     expect(cal.months.length).toBe(15);
     expect(cal.today).toBe(8);
     expect(s.real.length).toBe(cal.months.length);
@@ -266,7 +266,7 @@ describe("burnupSeries", () => {
 
 describe("nextMilestoneId", () => {
   test("increments the max numeric suffix", () => {
-    expect(nextMilestoneId(project("onboarding"))).toBe("MS-17");
+    expect(nextMilestoneId(project("invoice"))).toBe("MS-17");
     expect(nextMilestoneId({ milestones: [] })).toBe("MS-1");
     expect(nextMilestoneId({ milestones: [ms({ id: "weird" })] })).toBe("MS-1");
   });

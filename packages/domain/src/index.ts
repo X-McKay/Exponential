@@ -10,4 +10,5 @@ export * from "./glance.ts";
 export * from "./explain.ts";
 export * from "./spend.ts";
 export * from "./prompts.ts";
+export * from "./templates.ts";
 export * from "./fixtures/index.ts";

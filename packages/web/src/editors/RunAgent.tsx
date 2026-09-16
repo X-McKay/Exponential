@@ -12,7 +12,7 @@ const TAB_LABEL: Record<ProjectTab, string> = { overview: "Overview", value: "Va
 const isTab = (s: string): s is ProjectTab => (PROJECT_TABS as readonly string[]).includes(s);
 
 const PLACEHOLDER: Record<Agent["kind"], string> = {
-  deck: "e.g. 10-slide AIRC pre-read focused on the recall gate and the R1 criteria",
+  deck: "e.g. 10-slide committee pre-read focused on the recall gate and the R1 criteria",
   comms: "e.g. Decision memo on the 88% vs 90% recall threshold for compliance SMEs",
   ideation: "e.g. Options to lift citation accuracy without adding reviewer load",
   audit: "e.g. Focus on audit-trail gaps for rule activations",
@@ -22,6 +22,7 @@ const PLACEHOLDER: Record<Agent["kind"], string> = {
   tuner: "",
   scout: "",
   curator: "",
+  setup: "",
 };
 
 /** Start a run: pick the project (and optionally where the result should link) and give the agent an instruction. */
@@ -109,7 +110,7 @@ export function RunAgentEditor({
         {agent.purpose}. The agent is briefed with the project's live state: targets, milestones and gates, governance, releases, synced development activity, and
         recent events.
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 160px", gap: 10 }}>
+      <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 160px", gap: 10 }}>
         <div>
           <Lbl>Project</Lbl>
           <select style={inpStyle} value={proj} onChange={(e) => setProj(e.target.value)}>

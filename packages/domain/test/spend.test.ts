@@ -8,7 +8,7 @@ import type { AgentRun, AppState } from "../src/index.ts";
 const run = (over: Partial<AgentRun>): AgentRun => ({
   id: "run-x",
   agentId: "audie",
-  proj: "ima",
+  proj: "clauses",
   tab: "overview",
   state: "done",
   startedAt: "2026-09-05T10:00:00Z",
@@ -50,7 +50,7 @@ describe("prices and cost", () => {
 });
 
 describe("budgets", () => {
-  const base = (): AppState => ({ ...seedState(), asOf: "2026-09-10T09:00:00.000Z", runs: [run({ id: "a" }), run({ id: "b", agentId: "slider", proj: "onboarding" }), run({ id: "old", startedAt: "2026-08-30T10:00:00Z" })] });
+  const base = (): AppState => ({ ...seedState(), asOf: "2026-09-10T09:00:00.000Z", runs: [run({ id: "a" }), run({ id: "b", agentId: "slider", proj: "invoice" }), run({ id: "old", startedAt: "2026-08-30T10:00:00Z" })] });
 
   test("month-to-date spend per scope ignores last month; the tighter of dollars and tokens is the ceiling", () => {
     const s: AppState = { ...base(), budgets: [{ scope: "workspace", ref: "", monthlyUsd: 2, monthlyTokens: 4_000_000 }, { scope: "agent", ref: "audie", monthlyUsd: null, monthlyTokens: 1_000_000 }] };
@@ -65,14 +65,14 @@ describe("budgets", () => {
     expect(audie.spend.runs).toBe(1);
     expect(audie.used).toBeCloseTo(1.5);
     expect(audie.state).toBe("over");
-    expect(budgetLine(s, PRICES, "project", "ima").state).toBe("none");
+    expect(budgetLine(s, PRICES, "project", "clauses").state).toBe("none");
   });
 
   test("overBudget names the scope that is out of room, and only that scope's runs are refused", () => {
-    const s: AppState = { ...base(), budgets: [{ scope: "agent", ref: "audie", monthlyUsd: 0.4, monthlyTokens: null }, { scope: "project", ref: "onboarding", monthlyUsd: null, monthlyTokens: 1_000_000 }] };
-    expect(overBudget(s, PRICES, "audie", "sector")).toMatch(/^Audie has used \$0\.50 of its \$0\.40 monthly budget/);
-    expect(overBudget(s, PRICES, "slider", "onboarding")).toMatch(/^Client onboarding efficiency has used 1\.5M tokens of its 1\.0M tokens monthly budget/);
-    expect(overBudget(s, PRICES, "slider", "ima")).toBeNull();
+    const s: AppState = { ...base(), budgets: [{ scope: "agent", ref: "audie", monthlyUsd: 0.4, monthlyTokens: null }, { scope: "project", ref: "invoice", monthlyUsd: null, monthlyTokens: 1_000_000 }] };
+    expect(overBudget(s, PRICES, "audie", "search")).toMatch(/^Audie has used \$0\.50 of its \$0\.40 monthly budget/);
+    expect(overBudget(s, PRICES, "slider", "invoice")).toMatch(/^Invoice Review Assistant has used 1\.5M tokens of its 1\.0M tokens monthly budget/);
+    expect(overBudget(s, PRICES, "slider", "clauses")).toBeNull();
     expect(overBudget(s, PRICES, "comma", null)).toBeNull();
     // Warn from 80%.
     const near: AppState = { ...s, budgets: [{ scope: "workspace", ref: "", monthlyUsd: 1.2, monthlyTokens: null }] };
@@ -84,7 +84,7 @@ describe("budgets", () => {
     const s: AppState = { ...base(), budgets: [{ scope: "workspace", ref: "", monthlyUsd: 0, monthlyTokens: null }, { scope: "agent", ref: "audie", monthlyUsd: null, monthlyTokens: 0 }] };
     expect(budgetLine(s, PRICES, "workspace", "")).toMatchObject({ state: "over", against: "usd", used: 1 });
     expect(budgetLine(s, PRICES, "agent", "audie")).toMatchObject({ state: "over", against: "tokens", used: 1 });
-    expect(overBudget(s, PRICES, "audie", "ima")).toMatch(/^the workspace has used \$1\.00 of its \$0\.00 monthly budget/);
+    expect(overBudget(s, PRICES, "audie", "clauses")).toMatch(/^the workspace has used \$1\.00 of its \$0\.00 monthly budget/);
   });
 
   test("uses ledger-backed usage runs when the server supplies them", () => {

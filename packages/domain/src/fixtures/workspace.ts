@@ -1,3 +1,5 @@
 import type { Workspace } from "../types.ts";
 
-export const WORKSPACE: Workspace = { user: { name: "Al McKay", ini: "AM" }, lastGlanceAt: null };
+// Every person in the fixtures is fictional. The workspace owner leads the
+// portfolio and sponsors the sample projects.
+export const WORKSPACE: Workspace = { user: { name: "Jordan Avery", ini: "JA" }, lastGlanceAt: null };

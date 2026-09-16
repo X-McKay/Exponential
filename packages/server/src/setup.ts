@@ -7,8 +7,8 @@ import { callLlm } from "./usage.ts";
 // Nothing is created until the person reviews the draft and confirms it.
 
 import type { Database } from "bun:sqlite";
-import { GOV_STATUSES, MILESTONE_STATUSES, YEAR_MONTH, addMonths, initialsOf, nextProjectKey, slugId, ymOf } from "@valueflow/domain";
-import type { Confidence, ProjectDraft, SetupDraft, SetupSource, Suggested } from "@valueflow/domain";
+import { DEPENDENCY_CATEGORY, GOV_STATUSES, MILESTONE_STATUSES, YEAR_MONTH, addMonths, initialsOf, missingFromTemplate, nextProjectKey, slugId, ymOf } from "@valueflow/domain";
+import type { Confidence, ProjectDraft, ProjectTemplate, SetupDraft, SetupSource, Suggested } from "@valueflow/domain";
 import type { SetupCreateInput } from "@valueflow/shared";
 import type { ExtractedSource } from "./extract.ts";
 import { extractJson } from "./llm.ts";
@@ -16,7 +16,7 @@ import type { ChatMessage, Llm } from "./llm.ts";
 import { createGovernanceItem, deleteSetupDraft, insertSetupDraft, loadSetupDraft, loadState, recordEvent, updateSetupDraft, upsertMilestone, upsertProject, upsertRelease } from "./repo.ts";
 
 const STAGES = ["Discovery", "Pilot", "Scaling", "Sustain"];
-const CATEGORIES = ["Design & architecture", "AI governance", "Operations", "Release & adoption"];
+const CATEGORIES = ["Design & architecture", "AI governance", "Operations", "Release & adoption", DEPENDENCY_CATEGORY];
 
 // ---- schema the model must satisfy -----------------------------------------
 
@@ -160,9 +160,22 @@ const SYSTEM = (todayYm: string) =>
     "Reply with a single JSON object matching the schema.",
   ].join("\n");
 
-const userMessage = (name: string, key: string, brief: string, sources: ExtractedSource[], previous: ProjectDraft | null, feedback: string[]): string => {
+/** What a template asks the draft to carry, as a block of the briefing. */
+const templateBlock = (t: ProjectTemplate): string =>
+  [
+    `### Project template: ${t.name}`,
+    t.description,
+    `Default stage ${t.stage}, default risk tier ${t.tier ?? "undetermined"}, default targets FTE ${t.targets.fte}% / time ${t.targets.time}% (use the documents' values when they give them).`,
+    "The project must carry these governance documents; report each one's status from the documents (missing when they do not mention it):",
+    ...t.documents.map((d) => `- [${d.cat}] ${d.name}${d.required ? " (required)" : ""}: ${d.detail}`),
+    `It depends on these before it can ship; list each under the category "${DEPENDENCY_CATEGORY}" with its status from the documents:`,
+    ...t.dependencies.map((d) => `- ${d.name}${d.required ? " (required)" : ""}: ${d.detail}`),
+  ].join("\n");
+
+const userMessage = (name: string, key: string, brief: string, sources: ExtractedSource[], previous: ProjectDraft | null, feedback: string[], template: ProjectTemplate | null = null): string => {
   const parts: string[] = [`Project name: ${name}`, `Key: ${key}`];
   if (brief.trim()) parts.push(`Brief from the user:\n${brief.trim()}`);
+  if (template) parts.push(templateBlock(template));
   const usable = sources.filter((s) => s.text);
   if (usable.length) parts.push(...usable.map((s) => `### Source: ${s.name} (${s.kind})\n${s.text}`));
   else parts.push("No documents were provided; draft from the name and brief alone with low confidence.");
@@ -173,10 +186,27 @@ const userMessage = (name: string, key: string, brief: string, sources: Extracte
   return parts.join("\n\n");
 };
 
-export const buildSetupMessages = (name: string, key: string, brief: string, sources: ExtractedSource[], todayYm: string, previous: ProjectDraft | null = null, feedback: string[] = []): ChatMessage[] => [
+export const buildSetupMessages = (name: string, key: string, brief: string, sources: ExtractedSource[], todayYm: string, previous: ProjectDraft | null = null, feedback: string[] = [], template: ProjectTemplate | null = null): ChatMessage[] => [
   { role: "system", content: SYSTEM(todayYm) },
-  { role: "user", content: userMessage(name, key, brief, sources, previous, feedback) },
+  { role: "user", content: userMessage(name, key, brief, sources, previous, feedback, template) },
 ];
+
+/**
+ * Guarantee the template's required documents and dependencies are in the
+ * draft: anything the model left out is added as Missing with low confidence,
+ * so the reviewer sees the full base set and decides what to keep.
+ */
+export const applyTemplate = (draft: ProjectDraft, template: ProjectTemplate | null): ProjectDraft => {
+  if (!template) return draft;
+  const missing = missingFromTemplate(template, draft.governance.map((g) => g.value));
+  const added: ProjectDraft["governance"] = [
+    ...missing.documents.map((d) => ({ value: { cat: d.cat, name: d.name, status: "missing" as const, owner: "", detail: d.detail }, rationale: `Required by the ${template.name} template; the documents do not mention it.`, source: null, confidence: "low" as const })),
+    ...missing.dependencies.map((d) => ({ value: { cat: DEPENDENCY_CATEGORY, name: d.name, status: "missing" as const, owner: "", detail: d.detail }, rationale: `The ${template.name} template depends on it; the documents do not mention it.`, source: null, confidence: "low" as const })),
+  ];
+  const governance = [...draft.governance, ...added];
+  const tier = draft.tier.value === null && template.tier !== null ? { ...draft.tier, value: template.tier, rationale: draft.tier.rationale || `Default for the ${template.name} template.`, confidence: "low" as const } : draft.tier;
+  return { ...draft, governance, tier };
+};
 
 // ---- normalising the reply ------------------------------------------------------
 
@@ -297,12 +327,13 @@ export const normalizeDraft = (raw: unknown, todayYm: string): ProjectDraft => {
 
 export const toSetupSources = (sources: ExtractedSource[]): SetupSource[] => sources.map((s) => ({ name: s.name, kind: s.kind, chars: s.chars, error: s.error }));
 
-export const analyzeSetup = async (db: Database, llm: Llm, input: { name: string; key?: string; brief: string; sources: ExtractedSource[] }, now: Date): Promise<SetupDraft> => {
+export const analyzeSetup = async (db: Database, llm: Llm, input: { name: string; key?: string; brief: string; sources: ExtractedSource[]; template?: ProjectTemplate | null }, now: Date): Promise<SetupDraft> => {
   const state = loadState(db, now);
   const key = input.key?.trim() || nextProjectKey(state.projects);
   const todayYm = ymOf(now);
-  const res = await callLlm(db, llm, { agentId: null, proj: null, runId: null }, buildSetupMessages(input.name, key, input.brief, input.sources, todayYm), { jsonSchema: DRAFT_SCHEMA, maxTokens: 6000, temperature: 0.2, timeoutMs: 240_000 }, now);
-  const draft = normalizeDraft(extractJson(res.content), todayYm);
+  const template = input.template ?? null;
+  const res = await callLlm(db, llm, { agentId: null, proj: null, runId: null }, buildSetupMessages(input.name, key, input.brief, input.sources, todayYm, null, [], template), { jsonSchema: DRAFT_SCHEMA, maxTokens: 6000, temperature: 0.2, timeoutMs: 240_000 }, now);
+  const draft = applyTemplate(normalizeDraft(extractJson(res.content), todayYm), template);
   const record: SetupDraft = {
     id: slugId(`${input.name}-${now.getTime().toString(36)}`, [], "draft"),
     createdAt: now.toISOString(),
