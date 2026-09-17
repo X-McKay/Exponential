@@ -71,7 +71,7 @@ Run `just` to see equivalent task-runner recipes. `nix develop` opens the pinned
 
 ## Browser tests and synthetic data
 
-The Playwright suite in `tests/ui` drives the built application in Chromium: portfolio and navigation, editors and their validation, project templates, update-from-documents and the inbox, the data page, and phone-width layouts (no page may scroll sideways). It lives in its own package so the application workspace, the release image, and the Nix dependency hash never include a browser test runner.
+The Playwright suite in `tests/ui` drives the built application in Chromium: portfolio and navigation, editors and their validation, project templates, update-from-documents and the inbox (diffs and evidence), template drift and backfill, agent economics, workspace export and import, an axe-core WCAG A/AA audit of every page with keyboard-flow checks, and phone-width layouts (no page may scroll sideways, with proposals present). It lives in its own package so the application workspace, the release image, and the Nix dependency hash never include a browser test runner.
 
 ```sh
 bun run test:ui                       # production server on a temp database, seeded through the API
@@ -89,6 +89,8 @@ The first run needs a Chromium build. Set `PW_CHROMIUM=/path/to/chrome` to use o
 The default database is `data/valueflow.sqlite`; runtime model settings default to `data/valueflow.sqlite.settings.json`. Both are ignored by Git. SQLite WAL and SHM files belong to the same database and must stay together during backups.
 
 Normal startup creates an empty workspace with an owner, built-in agent definitions, and the built-in project templates. It is safe to stop and restart without creating sample projects. `bun run demo:reset` deletes the configured database and writes the fictional demo fixtures; `bun run demo:reset -- --synthetic` writes a generated workspace and stages example proposals. Use either only for a disposable local environment.
+
+`bun run workspace:export > workspace.json` writes the whole workspace as one JSON document (no credentials), and `bun run workspace:import -- workspace.json` loads one into an empty database; add `--replace` to clear the current workspace first. The Data page offers the same export and import in the browser. Export before any destructive command.
 
 To use a separate database while testing manually:
 

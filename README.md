@@ -27,9 +27,13 @@ Run `bun run doctor` to diagnose a local environment. See [development setup](do
 2. Choose the acting user and role in the bottom-left sidebar.
 3. Create a project from **Portfolio → New project**, starting from a **project template** (the governance documents, dependencies, and first plan a project of that kind needs), or configure a model and choose **Set up from documents**, which drafts the record from a charter or deck and folds in the template's base set.
 4. Add milestones, evaluation gates, governance controls, releases, and measurements as work progresses.
-5. When documents change, open the project and choose **Update from documents**: every difference is staged as a proposal in the **Inbox**, where you apply or dismiss each one (or all at once). Nothing is applied until you decide.
+5. When documents change, open the project and choose **Update from documents**: every difference is staged as a proposal in the **Inbox**, where you apply or dismiss each one (or all at once). Each proposal shows the current record and the proposed values field by field, and quotes the passage it came from, marked as quoted verbatim or paraphrased. Nothing is applied until you decide.
 
 Templates are configurable under **Data → Project templates**. The built-in ones are a human-in-the-loop assistant, straight-through automation, an analysis and drafting copilot, and a minimal set. Template dependencies (data access, model quota, a golden set, staffing, a fallback) are tracked as governance items under a **Dependencies** category so release criteria can reference them.
+
+Every template save is versioned, and a project remembers the template and version it was created from (or the one linked later in its editor). **Governance → Required by template** compares the project's documents and dependencies with the template, shows what is missing or still open, and can stage the missing items for approval in the inbox; saving a template with a new required item stages it for every project that follows the template.
+
+**Agents → Economics** sets what the agents cost against the changes people accepted, by agent, project, and template, so the cost of each accepted change is visible. **Data → Transfer** exports the whole workspace as one JSON file and imports one back into an empty workspace (or replaces the current one after confirmation). Press `?` anywhere for the list of keyboard shortcuts.
 
 The fictional [sample charters](docs/samples/) exercise document-based setup without adding seed data automatically:
 
@@ -64,6 +68,8 @@ See [configuration](docs/configuration.md) for every environment variable and th
 | `bun run container:build` | Build the image with Podman or Docker |
 | `bun run container:test` | Run the acceptance suite against the built image |
 | `bun run demo:reset` | Destructively replace the configured database with demo fixtures (`-- --synthetic` generates a workspace instead) |
+| `bun run workspace:export > workspace.json` | Write the whole workspace (facts, templates, agents, rules, recent runs, the inbox; no credentials) as one JSON file |
+| `bun run workspace:import -- workspace.json` | Load an exported workspace into an empty database (`--replace` clears the current one first) |
 
 `just` mirrors the main workflows for developers who prefer a task runner. Run `just` to list recipes.
 

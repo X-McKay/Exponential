@@ -115,8 +115,8 @@ export function UpdateWizard({ project, state, onStaged, onOpenInbox, onClose }:
         Hand the setup agent a revised charter, a new deck, a decision email. It compares them with the current record and stages each difference — milestones, releases, governance,
         people, targets — as a proposal in the inbox. Nothing changes until you apply it there.
       </div>
-      <Lbl>Note for the agent (optional)</Lbl>
-      <textarea
+      <Lbl htmlFor="vf-updatewizard-note-for-the-agent-optional">Note for the agent (optional)</Lbl>
+      <textarea id="vf-updatewizard-note-for-the-agent-optional"
         style={{ ...inpStyle, height: "auto", minHeight: 56, padding: "8px 10px", resize: "vertical", lineHeight: 1.5, maxWidth: "100%" }}
         value={note}
         maxLength={4000}

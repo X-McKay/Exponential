@@ -10,7 +10,7 @@
 import { addMonths } from "./calendar.ts";
 import type { YearMonth } from "./calendar.ts";
 import { slugId } from "./derive.ts";
-import type { Criterion, GovernanceItem, Milestone, ProjectTemplate, Release, TemplateDocument } from "./types.ts";
+import type { AppState, Criterion, GovernanceItem, Milestone, Project, ProjectTemplate, Release, TemplateDocument, TemplateVersion } from "./types.ts";
 
 /** The governance category every template dependency lands in. */
 export const DEPENDENCY_CATEGORY = "Dependencies";
@@ -216,3 +216,71 @@ export const missingFromTemplate = (t: ProjectTemplate, governance: readonly Pic
     dependencies: t.dependencies.filter((d) => d.required && !have.has(d.name.toLowerCase())),
   };
 };
+
+// ---- drift --------------------------------------------------------------------
+
+/** One template item and how the project carries it right now. */
+export interface DriftItem {
+  /** "document" or "dependency", as the template lists it. */
+  kind: "document" | "dependency";
+  cat: string;
+  name: string;
+  detail: string;
+  required: boolean;
+  /** The project's matching governance item (by name, case-insensitive), or null when missing. */
+  item: GovernanceItem | null;
+}
+
+export interface TemplateDrift {
+  template: ProjectTemplate;
+  /** The version the project was created from and the version now saved; null when unknown. */
+  createdFrom: number | null;
+  current: number | null;
+  /** Every template item, required first, in template order. */
+  items: DriftItem[];
+  /** Required items the project lacks entirely: the backfill a proposal would add. */
+  missingRequired: DriftItem[];
+  /** Optional items the project lacks; informational. */
+  missingOptional: DriftItem[];
+  /** Required items present but still Missing or N/A on the project. */
+  open: DriftItem[];
+  /** Governance items the project has that the template does not list. */
+  extra: GovernanceItem[];
+  /** True when nothing required is missing. */
+  aligned: boolean;
+}
+
+/**
+ * How far a project has drifted from the template it follows. Nothing here is
+ * stored: the template can be edited, the project can gain or lose items, and
+ * the answer follows.
+ */
+export const templateDrift = (project: Pick<Project, "governance" | "template">, t: ProjectTemplate, versions: readonly TemplateVersion[] = []): TemplateDrift => {
+  const byName = new Map(project.governance.map((g) => [g.name.toLowerCase(), g] as const));
+  const listed = new Set<string>();
+  const items: DriftItem[] = [
+    ...t.documents.map((d): DriftItem => ({ kind: "document", cat: d.cat, name: d.name, detail: d.detail, required: d.required, item: byName.get(d.name.toLowerCase()) ?? null })),
+    ...t.dependencies.map((d): DriftItem => ({ kind: "dependency", cat: DEPENDENCY_CATEGORY, name: d.name, detail: d.detail, required: d.required, item: byName.get(d.name.toLowerCase()) ?? null })),
+  ].sort((a, b) => Number(b.required) - Number(a.required));
+  for (const i of items) listed.add(i.name.toLowerCase());
+  const missingRequired = items.filter((i) => i.required && i.item === null);
+  const current = versions.filter((v) => v.templateId === t.id).reduce<number | null>((max, v) => (max === null || v.version > max ? v.version : max), null);
+  return {
+    template: t,
+    createdFrom: project.template?.version ?? null,
+    current,
+    items,
+    missingRequired,
+    missingOptional: items.filter((i) => !i.required && i.item === null),
+    open: items.filter((i) => i.required && i.item !== null && (i.item.status === "missing" || i.item.status === "na")),
+    extra: project.governance.filter((g) => !listed.has(g.name.toLowerCase())),
+    aligned: missingRequired.length === 0,
+  };
+};
+
+/** Drift for every project that follows a template the workspace still has. */
+export const workspaceDrift = (state: Pick<AppState, "projects" | "templates" | "templateVersions">): { project: Project; drift: TemplateDrift }[] =>
+  state.projects.flatMap((project) => {
+    const t = project.template ? state.templates?.find((x) => x.id === project.template?.id) : undefined;
+    return t ? [{ project, drift: templateDrift(project, t, state.templateVersions ?? []) }] : [];
+  });

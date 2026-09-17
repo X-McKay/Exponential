@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { GSTATUS_LABEL, explainOpenItems, explainReadiness, govCounts, readiness } from "@valueflow/domain";
+import { GSTATUS_LABEL, explainOpenItems, explainReadiness, govCounts, readiness, templateDrift } from "@valueflow/domain";
 import { monthLabel } from "@valueflow/domain";
-import type { Calendar, GovernanceItem, Project, ProjectTab, Release } from "@valueflow/domain";
+import type { Calendar, GovernanceItem, Project, ProjectTab, ProjectTemplate, Proposal, Release, TemplateVersion } from "@valueflow/domain";
 import { GovEditor } from "../editors/GovEditor.tsx";
 import { Why } from "../ui/Explain.tsx";
-import { Avatar, Caret, Chip, SectionCard, ghostBtn, reset } from "../ui/primitives.tsx";
-import { C, GSTATUS_COLOR, TIER_COLOR, govChipTone, readinessColor } from "../theme.ts";
+import { Avatar, Caret, Chip, SectionCard, Tip, ghostBtn, reset } from "../ui/primitives.tsx";
+import { C, GSTATUS_COLOR, TIER_COLOR, govChipTone, prefersReducedMotion, readinessColor } from "../theme.ts";
 
 export function GovernancePage({
   p,
@@ -16,6 +16,11 @@ export function GovernancePage({
   focusId,
   onSaveGov,
   onDeleteGov,
+  templates = [],
+  templateVersions = [],
+  proposals = [],
+  onDrift,
+  onOpenInbox,
 }: {
   p: Project;
   defaultOwner: string;
@@ -25,6 +30,13 @@ export function GovernancePage({
   focusId?: string | null | undefined;
   onSaveGov: (pid: string, item: GovernanceItem, isNew: boolean) => void | Promise<unknown>;
   onDeleteGov: (pid: string, gid: string) => void | Promise<unknown>;
+  templates?: ProjectTemplate[];
+  templateVersions?: TemplateVersion[];
+  /** Pending proposals, so the drift view can say what is already waiting in the inbox. */
+  proposals?: Proposal[];
+  /** Stage backfill proposals for the template the project follows, linking one first when given. */
+  onDrift?: (pid: string, template?: string) => Promise<unknown>;
+  onOpenInbox?: () => void;
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const [editG, setEditG] = useState<{ item: GovernanceItem | null; category?: string } | null>(null);
@@ -54,6 +66,18 @@ export function GovernancePage({
   }, [p.governance, releases]);
   const linkedIds = useMemo(() => new Set(linked.map((x) => x.item.id)), [linked]);
 
+  const template = p.template ? templates.find((t) => t.id === p.template?.id) : undefined;
+  const drift = useMemo(() => (template ? templateDrift(p, template, templateVersions) : null), [p, template, templateVersions]);
+  const waiting = useMemo(() => new Set(proposals.filter((x) => x.state === "pending" && x.proj === p.id && x.action.type === "governance_item").map((x) => (x.action.type === "governance_item" ? x.action.name.toLowerCase() : ""))), [proposals, p.id]);
+  const [linking, setLinking] = useState<string>("");
+  const [driftBusy, setDriftBusy] = useState(false);
+  const [showAligned, setShowAligned] = useState(false);
+  const stage = async (tid?: string) => {
+    if (!onDrift || driftBusy) return;
+    setDriftBusy(true);
+    try { await onDrift(p.id, tid); } catch { /* the store reports the failure */ } finally { setDriftBusy(false); }
+  };
+
   useEffect(() => {
     if (!focusId) return;
     const item = p.governance.find((g) => g.id === focusId);
@@ -61,7 +85,7 @@ export function GovernancePage({
     setOpen(item.cat + item.id);
     const frame = requestAnimationFrame(() => {
       const row = document.getElementById(`gov-item-${item.id}`);
-      row?.scrollIntoView({ behavior: "smooth", block: "center" });
+      row?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "center" });
       (row?.querySelector("button") as HTMLButtonElement | null)?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
@@ -140,6 +164,78 @@ export function GovernancePage({
           + New item
         </button>
       </div>
+      <SectionCard
+        title="Required by template"
+        pad="0"
+        right={
+          drift ? (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, color: drift.aligned ? C.green : C.amber }}>
+                {drift.aligned ? "Every required item is present" : `${drift.missingRequired.length} required item${drift.missingRequired.length === 1 ? "" : "s"} missing`}
+                {drift.open.length ? ` · ${drift.open.length} still open` : ""}
+              </span>
+              {drift.createdFrom !== null && drift.current !== null && drift.current > drift.createdFrom && (
+                <Tip label={`The project was created from version ${drift.createdFrom}; the template has since been saved as version ${drift.current}.`}>
+                  <Chip tone="warn" dot>template changed since v{drift.createdFrom}</Chip>
+                </Tip>
+              )}
+              {onDrift && !drift.aligned && (
+                <button type="button" className="vf-ghost" disabled={driftBusy} onClick={() => void stage()} style={{ ...ghostBtn, height: 24, color: C.indigoHi, opacity: driftBusy ? 0.6 : 1 }}>
+                  {driftBusy ? "Staging…" : "Stage missing items for approval"}
+                </button>
+              )}
+            </span>
+          ) : undefined
+        }
+      >
+        {!drift ? (
+          <div style={{ padding: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, color: C.dim, flex: "1 1 240px" }}>
+              {p.template ? `This project follows the ${p.template.id} template, which no longer exists.` : "This project follows no template, so nothing is checked against a base set of documents and dependencies."}
+            </span>
+            {onDrift && templates.length > 0 && (
+              <>
+                <label style={{ fontSize: 12, color: C.mut, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  Follow template
+                  <select aria-label="Follow template" value={linking} onChange={(e) => setLinking(e.target.value)} style={{ height: 26, fontSize: 12, color: C.text, background: C.inset, border: `1px solid ${C.line2}`, borderRadius: 6, padding: "0 6px" }}>
+                    <option value="">Choose…</option>
+                    {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </label>
+                <button type="button" className="vf-ghost" disabled={!linking || driftBusy} onClick={() => void stage(linking)} style={{ ...ghostBtn, height: 26, color: C.indigoHi, opacity: !linking || driftBusy ? 0.5 : 1 }}>
+                  {driftBusy ? "Checking…" : "Link and check"}
+                </button>
+              </>
+            )}
+          </div>
+        ) : (
+          <>
+            <div style={{ padding: "8px 14px", fontSize: 12, color: C.dim, borderBottom: `1px solid ${C.line}` }}>
+              {template?.name}{drift.current !== null ? ` v${drift.current}` : ""} · {drift.items.length} item{drift.items.length === 1 ? "" : "s"}, {drift.items.filter((i) => i.required).length} required. Items are matched by name; missing ones can be staged as proposals and appear here once accepted.
+              {drift.missingOptional.length ? ` ${drift.missingOptional.length} optional item${drift.missingOptional.length === 1 ? " is" : "s are"} not tracked.` : ""}
+            </div>
+            {drift.items.filter((i) => showAligned || i.item === null || i.item.status === "missing" || i.item.status === "na").map((i) => {
+              const inInbox = i.item === null && waiting.has(i.name.toLowerCase());
+              return (
+                <div key={`${i.kind}:${i.name}`} className="vf-drift-row" style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", borderTop: `1px solid ${C.line}`, flexWrap: "wrap" }}>
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: i.item ? GSTATUS_COLOR[i.item.status] : "transparent", border: `2px solid ${i.item ? GSTATUS_COLOR[i.item.status] : C.red}` }} />
+                  <span style={{ fontSize: 13, color: C.text, flex: "1 1 200px", minWidth: 0, overflowWrap: "anywhere" }}>
+                    {i.item ? <button type="button" className="vf-link" onClick={() => setOpen(i.item!.cat + i.item!.id)} style={{ ...reset, color: C.text }}>{i.item.name}</button> : i.name}
+                    <span style={{ color: C.dim, fontSize: 11 }}> · {i.cat}{i.required ? "" : " · optional"}</span>
+                  </span>
+                  {i.item ? <Chip tone={govChipTone(i.item.status)}>{GSTATUS_LABEL[i.item.status]}</Chip> : inInbox ? <Chip tone="accent" dot>Waiting in the inbox</Chip> : <Chip tone="bad" dot>Not on the project</Chip>}
+                  {inInbox && onOpenInbox && <button type="button" className="vf-ghost" onClick={onOpenInbox} style={{ ...ghostBtn, height: 22, fontSize: 11 }}>Review ↗</button>}
+                </div>
+              );
+            })}
+            <div style={{ padding: "6px 14px", borderTop: `1px solid ${C.line}` }}>
+              <button type="button" className="vf-ghost" aria-expanded={showAligned} onClick={() => setShowAligned((v) => !v)} style={{ ...ghostBtn, height: 22, fontSize: 11, border: "none", padding: 0 }}>
+                {showAligned ? "Hide items already in place" : `Show ${drift.items.filter((i) => i.item !== null && i.item.status !== "missing" && i.item.status !== "na").length} items already in place`}
+              </button>
+            </div>
+          </>
+        )}
+      </SectionCard>
       <SectionCard
         title="Release-linked controls"
         right={<span style={{ fontSize: 12, color: C.dim }}>{linked.filter(({ item }) => item.status !== "approved" && item.status !== "na").length} open · {linked.length} required</span>}

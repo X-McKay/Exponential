@@ -119,12 +119,12 @@ export function ReleaseEditor({
       {saveError && <div role="alert" style={{ color: C.redHi, fontSize: 12, margin: "8px 0" }}>Could not save: {saveError}</div>}
       <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 140px", gap: 10 }}>
         <div>
-          <Lbl>Name</Lbl>
-          <input style={inpStyle} value={d.name} autoFocus={isNew} placeholder="e.g. Assisted review pilot" onChange={(e) => set({ name: e.target.value })} />
+          <Lbl htmlFor="vf-releaseeditor-name">Name</Lbl>
+          <input id="vf-releaseeditor-name" style={inpStyle} value={d.name} autoFocus={isNew} placeholder="e.g. Assisted review pilot" onChange={(e) => set({ name: e.target.value })} />
         </div>
         <div>
-          <Lbl>Target month</Lbl>
-          <select style={inpStyle} value={d.month} onChange={(e) => set({ month: e.target.value })}>
+          <Lbl htmlFor="vf-releaseeditor-target-month">Target month</Lbl>
+          <select id="vf-releaseeditor-target-month" style={inpStyle} value={d.month} onChange={(e) => set({ month: e.target.value })}>
             {!months.includes(d.month) && <option value={d.month}>{d.month}</option>}
             {months.map((mo) => (
               <option key={mo} value={mo}>

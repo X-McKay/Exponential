@@ -22,14 +22,17 @@ export const startTestProvider = (hostname = "127.0.0.1") => {
     const gid = /\(id: ([a-z0-9-]+)\)/.exec(briefing)?.[1] ?? null;
     const mid = /- (MS-\d+) /.exec(briefing)?.[1] ?? null;
     const month = "2027-03";
+    // Quote the first sentence of the uploaded document verbatim so one proposal is a verified citation; the rest paraphrase.
+    const doc = briefing.split("# New documents")[1] ?? "";
+    const firstLine = doc.split("\n").map((l) => l.trim()).find((l) => l.length > 20 && !l.startsWith("#")) ?? "";
     return {
       summary: "The revised charter moves the plan and confirms a review",
       notes: ["Synthetic update from the fixture provider."],
       proposals: [
-        { type: "project_details", source: "charter-v2.md", rationale: "The revised charter states the new stage.", description: null, stage: stage === "Pilot" ? "Scaling" : "Pilot", tier: null, committeeDate: null, committeeRef: null },
-        ...(gid ? [{ type: "governance_update", source: "charter-v2.md", rationale: "The charter says this item is now under review.", gid, status: "in_review", owner: null, date: null, detail: "Under review per the revised charter." }] : []),
-        ...(mid ? [{ type: "milestone_update", source: "charter-v2.md", rationale: "The plan moves this milestone.", mid, name: null, status: null, month, impact: null }] : []),
-        { type: "calendar_event", source: "charter-v2.md", rationale: "A steering review is scheduled.", date: "2026-10-15", text: "Steering review of the revised charter", sub: null, tab: "overview" },
+        { type: "project_details", source: "charter-v2.md", quote: firstLine, rationale: "The revised charter states the new stage.", description: null, stage: stage === "Pilot" ? "Scaling" : "Pilot", tier: null, committeeDate: null, committeeRef: null },
+        ...(gid ? [{ type: "governance_update", source: "charter-v2.md", quote: "This item is now under review with the governance forum.", rationale: "The charter says this item is now under review.", gid, status: "in_review", owner: null, date: null, detail: "Under review per the revised charter." }] : []),
+        ...(mid ? [{ type: "milestone_update", source: "charter-v2.md", quote: "The plan moves this milestone to March 2027.", rationale: "The plan moves this milestone.", mid, name: null, status: null, month, impact: null }] : []),
+        { type: "calendar_event", source: "charter-v2.md", quote: "", rationale: "A steering review is scheduled.", date: "2026-10-15", text: "Steering review of the revised charter", sub: null, tab: "overview" },
       ],
     };
   };

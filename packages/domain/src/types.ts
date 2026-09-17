@@ -119,6 +119,14 @@ export interface Project {
   /** Retired milestone facts kept for historical derivations only. */
   historicalMilestones?: Milestone[];
   governance: GovernanceItem[];
+  /** The template the project follows, when it was created from one or a person linked it; drift is measured against it. */
+  template?: ProjectTemplateRef | null;
+}
+
+/** Which template a project follows and the version it was created from (null when unknown). */
+export interface ProjectTemplateRef {
+  id: string;
+  version: number | null;
 }
 
 // ---- releases -----------------------------------------------------------
@@ -397,8 +405,9 @@ export interface TemplateRelease {
 
 /**
  * A configurable starting point for a project: the documents it must carry,
- * what it depends on, and a first plan. Instantiated on create; nothing about
- * a template is stored on the project afterwards.
+ * what it depends on, and a first plan. Instantiated on create; the project
+ * keeps only a reference to the template and version it came from, so a
+ * later template edit never rewrites history but drift can be measured.
  */
 export interface ProjectTemplate {
   id: string;
@@ -411,6 +420,13 @@ export interface ProjectTemplate {
   dependencies: TemplateDependency[];
   milestones: TemplateMilestone[];
   releases: TemplateRelease[];
+}
+
+/** One saved revision of a template: the version number the server assigned and when it was saved. Documents of past versions stay stored for audit. */
+export interface TemplateVersion {
+  templateId: string;
+  version: number;
+  at: string;
 }
 
 // ---- project setup drafts ---------------------------------------------------
@@ -519,6 +535,18 @@ export type ProposalAction =
 
 export type ProposalState = "pending" | "accepted" | "dismissed";
 
+/**
+ * Where a proposal's claim comes from: the document it cites and the passage
+ * quoted from it. `verified` is true only when the quote was found verbatim
+ * in that document's text when the proposal was staged, so a reader can tell
+ * a citation from a paraphrase.
+ */
+export interface ProposalEvidence {
+  source: string | null;
+  quote: string | null;
+  verified: boolean;
+}
+
 export interface Proposal {
   id: string;
   runId: string;
@@ -535,6 +563,8 @@ export interface Proposal {
   /** Actor and mode for an accepted/dismissed decision, when recorded. */
   decidedBy?: string | null;
   decisionMode?: "human" | "automatic" | null;
+  /** The cited passage behind the change, when the proposer supplied one. */
+  evidence?: ProposalEvidence | null;
 }
 
 // ---- feed & calendar ----------------------------------------------------
@@ -677,4 +707,6 @@ export interface AppState {
   calendar: CalendarEvent[];
   /** Configurable starting points for new projects; absent in older snapshots. */
   templates?: ProjectTemplate[];
+  /** Every saved revision of every template, newest first; absent in older snapshots. */
+  templateVersions?: TemplateVersion[];
 }

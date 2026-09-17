@@ -101,13 +101,13 @@ export function MilestoneEditor({
       }
     >
       {saveError && <div role="alert" style={{ color: C.redHi, fontSize: 12, margin: "8px 0" }}>Could not save: {saveError}</div>}
-      <Lbl>Name</Lbl>
-      <input style={inpStyle} value={d.name} placeholder="e.g. Entity resolution service" onChange={(e) => set({ name: e.target.value })} />
+      <Lbl htmlFor="vf-milestoneeditor-name">Name</Lbl>
+      <input id="vf-milestoneeditor-name" style={inpStyle} value={d.name} placeholder="e.g. Entity resolution service" onChange={(e) => set({ name: e.target.value })} />
 
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1 }}>
-          <Lbl>Status</Lbl>
-          <select
+          <Lbl htmlFor="vf-milestoneeditor-status">Status</Lbl>
+          <select id="vf-milestoneeditor-status"
             style={inpStyle}
             value={d.status}
             onChange={(e) => {
@@ -122,8 +122,8 @@ export function MilestoneEditor({
           </select>
         </div>
         <div style={{ flex: 1 }}>
-          <Lbl>Target / ship month</Lbl>
-          <select style={inpStyle} value={d.month} onChange={(e) => set({ month: e.target.value })}>
+          <Lbl htmlFor="vf-milestoneeditor-target-ship-month">Target / ship month</Lbl>
+          <select id="vf-milestoneeditor-target-ship-month" style={inpStyle} value={d.month} onChange={(e) => set({ month: e.target.value })}>
             {!months.includes(d.month) && <option value={d.month}>{d.month}</option>}
             {months.map((mo) => (
               <option key={mo} value={mo}>

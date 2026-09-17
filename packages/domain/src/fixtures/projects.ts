@@ -13,7 +13,7 @@ import type { Project } from "../types.ts";
 
 export const PROJECTS: Project[] = [
   {
-    id: "invoice", key: "PRJ-4", name: "Invoice Review Assistant", stage: "Scaling",
+    id: "invoice", key: "PRJ-4", template: { id: "assistant", version: 1 }, name: "Invoice Review Assistant", stage: "Scaling",
     description:
       "Extracts line items from supplier invoices, matches them to purchase orders, and routes exceptions to the accounts-payable team with a suggested resolution. Replaces the manual three-way matching spreadsheet run by the AP operations team.",
     tier: 2, committee: { date: "2026-05-14", ref: "AIC-2026-031" },
@@ -77,7 +77,7 @@ export const PROJECTS: Project[] = [
     ],
   },
   {
-    id: "clauses", key: "PRJ-7", name: "Contract Clause Review", stage: "Pilot",
+    id: "clauses", key: "PRJ-7", template: { id: "automation", version: 1 }, name: "Contract Clause Review", stage: "Pilot",
     description:
       "Extracts obligations, renewal terms, and restrictions from supplier and customer contracts into structured, reviewable clause records for the legal team. High-scrutiny workflow: every extracted clause is approved by a reviewer before it becomes part of the contract record.",
     tier: 1, committee: { date: "2026-07-28", ref: "AIC-2026-058" },
@@ -127,7 +127,7 @@ export const PROJECTS: Project[] = [
     ],
   },
   {
-    id: "search", key: "PRJ-9", name: "Internal Knowledge Search", stage: "Discovery",
+    id: "search", key: "PRJ-9", template: { id: "insight", version: 1 }, name: "Internal Knowledge Search", stage: "Discovery",
     description:
       "Drafts answers to internal policy and process questions from the staff handbook and resolved support tickets, with citations, for the knowledge team to review before publication. Currently validating answer quality against expert-written baselines.",
     tier: 3, committee: null,
@@ -167,7 +167,7 @@ export const PROJECTS: Project[] = [
     ],
   },
   {
-    id: "triage", key: "PRJ-11", name: "Support Triage Assistant", stage: "Pilot",
+    id: "triage", key: "PRJ-11", template: { id: "assistant", version: 1 }, name: "Support Triage Assistant", stage: "Pilot",
     description:
       "Proposes a category, a priority, and a first response for incoming support requests. A support specialist reviews every suggestion before anything is sent; the assistant never sends messages or changes account settings itself.",
     tier: 2, committee: { date: "2026-08-19", ref: "AIC-2026-064" },
@@ -212,7 +212,7 @@ export const PROJECTS: Project[] = [
     ],
   },
   {
-    id: "meetings", key: "PRJ-2", name: "Meeting Notes Summarizer", stage: "Sustain",
+    id: "meetings", key: "PRJ-2", template: { id: "insight", version: 1 }, name: "Meeting Notes Summarizer", stage: "Sustain",
     description:
       "Turns meeting transcripts into a summary, decisions, and action items that the meeting owner edits before sharing. In steady-state operation since spring; the team now tracks adoption and quality drift rather than new scope.",
     tier: 3, committee: { date: "2025-11-20", ref: "AIC-2025-142" },

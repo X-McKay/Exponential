@@ -35,11 +35,11 @@ test.describe("editors and validation", () => {
     await expect(dialog.getByText(/Adds \d+ documents · \d+ dependencies · \d+ milestones · \d+ releases/)).toBeVisible();
     await create.click();
     await expect(page.getByRole("heading", { name: "Browser-created project" })).toBeVisible();
-    await page.getByRole("button", { name: /^Governance( ·)?$/ }).click();
-    await expect(page.getByText("Immutable audit log")).toBeVisible();
-    await expect(page.getByText("Manual fallback process")).toBeVisible();
+    await page.getByRole("tab", { name: /^Governance( ·)?$/ }).click();
+    await expect(page.getByText("Immutable audit log").first()).toBeVisible();
+    await expect(page.getByText("Manual fallback process").first()).toBeVisible();
     await expect(page.getByText(/Dependencies · general register/)).toBeVisible();
-    await page.getByRole("button", { name: "Roadmap" }).click();
+    await page.getByRole("tab", { name: "Roadmap" }).click();
     await expect(page.locator("main")).toContainText("Shadow mode");
   });
 

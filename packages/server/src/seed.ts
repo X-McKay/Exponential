@@ -3,7 +3,7 @@ import { AGENTS, BUILTIN_TEMPLATES, CALENDAR, DEV, PROJECTS, RELEASES, RULES, RU
 import { insertProposal, insertRule, insertRun, loadState, recordEvent, replaceDevFacts, setAgents, setTemplates } from "./repo.ts";
 import { registerProposalGuard } from "./proposal-guard.ts";
 import { nextStoredProposalId, nextStoredRunId } from "./ids.ts";
-import type { AgentRun, AppState, Metric, Proposal, ProposalAction } from "@valueflow/domain";
+import type { AgentRun, AppState, Metric, Proposal, ProposalAction, ProposalEvidence } from "@valueflow/domain";
 
 /** The neutral profile a fresh workspace starts with. */
 export const DEFAULT_OWNER = { name: "Workspace owner", ini: "ME" } as const;
@@ -51,7 +51,7 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
   const shift = monthsBetween(ymOf(state.asOf), ymOf(now));
   const ym = (m: string): string => (shift === 0 ? m : addMonths(m, shift));
   const q = {
-    project: db.query("INSERT INTO projects (id, key, name, stage, description, tier, committee_date, committee_ref, target_fte, target_time, sort) VALUES (?,?,?,?,?,?,?,?,?,?,?)"),
+    project: db.query("INSERT INTO projects (id, key, name, stage, description, tier, committee_date, committee_ref, target_fte, target_time, sort, template_id, template_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"),
     repo: db.query("INSERT INTO project_repos (project_id, name, url, sort) VALUES (?,?,?,?)"),
     member: db.query("INSERT INTO team_members (project_id, ini, name, role, sort) VALUES (?,?,?,?,?)"),
     milestone: db.query("INSERT INTO milestones (project_id, id, name, status, month, base_fte, base_time, stretch_fte, stretch_time, sort, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"),
@@ -69,7 +69,7 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
   db.transaction(() => {
     q.workspace.run(state.workspace.user.name, state.workspace.user.ini);
     state.projects.forEach((p, pi) => {
-      q.project.run(p.id, p.key, p.name, p.stage, p.description, p.tier, p.committee?.date ?? null, p.committee?.ref ?? null, p.targets.fte, p.targets.time, pi);
+      q.project.run(p.id, p.key, p.name, p.stage, p.description, p.tier, p.committee?.date ?? null, p.committee?.ref ?? null, p.targets.fte, p.targets.time, pi, p.template?.id ?? null, p.template?.version ?? null);
       p.repos.forEach((r, i) => q.repo.run(p.id, r.name, r.url, i));
       p.team.forEach((t, i) => q.member.run(p.id, t.ini, t.name, t.role, i));
       p.milestones.forEach((m, mi) => {
@@ -122,7 +122,7 @@ export const seed = (db: Database, state: AppState = fixtureState(), now = SEED_
       if (d) replaceDevFacts(db, p.id, d, d.lastSync ?? { source: "sample", startedAt: now.toISOString(), finishedAt: now.toISOString(), ok: true, message: "seeded" });
     }
     setAgents(db, state.agents);
-    setTemplates(db, state.templates ?? BUILTIN_TEMPLATES);
+    setTemplates(db, state.templates ?? BUILTIN_TEMPLATES, now);
     for (const r of state.rules) insertRule(db, r);
     for (const r of state.runs) insertRun(db, r);
     for (const e of state.events) recordEvent(db, e);
@@ -144,13 +144,15 @@ export const seedProposals = (db: Database, now = SEED_NOW): Proposal[] => {
   const out: Proposal[] = [];
   const at = now.toISOString();
   for (const p of state.projects) {
-    const actions: { action: ProposalAction; rationale: string }[] = [];
+    const actions: { action: ProposalAction; rationale: string; evidence: ProposalEvidence }[] = [];
+    const charter = `${p.key.toLowerCase()}-charter-v2.md`;
+    const cite = (quote: string, verified = true): ProposalEvidence => ({ source: charter, quote, verified });
     const inReview = p.governance.find((g) => g.status === "in_review");
-    if (inReview) actions.push({ action: { type: "governance_status", gid: inReview.id, status: "approved" }, rationale: `Seeded example: the latest notes describe ${inReview.name} as signed off.` });
+    if (inReview) actions.push({ action: { type: "governance_status", gid: inReview.id, status: "approved" }, rationale: `Seeded example: the latest notes describe ${inReview.name} as signed off.`, evidence: cite(`${inReview.name} was signed off at the last steering review and no further changes are expected.`) });
     const backlog = p.milestones.find((m) => m.status === "backlog");
-    if (backlog) actions.push({ action: { type: "milestone_update", mid: backlog.id, month: addMonths(backlog.month, 1) }, rationale: `Seeded example: the revised plan moves ${backlog.name} out by a month.` });
-    if (p.team.length < 6) actions.push({ action: { type: "team_member", ini: "QA", name: "Quinn Abara", role: "Quality Analyst" }, rationale: "Seeded example: the revised charter names a quality analyst." });
-    actions.push({ action: { type: "calendar_event", date: new Date(now.getTime() + 14 * 86_400_000).toISOString().slice(0, 10), tab: "overview", text: `${p.name}: steering review`, sub: "Seeded example" }, rationale: "Seeded example: a steering review is due in two weeks." });
+    if (backlog) actions.push({ action: { type: "milestone_update", mid: backlog.id, month: addMonths(backlog.month, 1) }, rationale: `Seeded example: the revised plan moves ${backlog.name} out by a month.`, evidence: cite(`${backlog.name} now targets ${addMonths(backlog.month, 1)} to leave room for the evaluation rerun.`) });
+    if (p.team.length < 6) actions.push({ action: { type: "team_member", ini: "QA", name: "Quinn Abara", role: "Quality Analyst" }, rationale: "Seeded example: the revised charter names a quality analyst.", evidence: cite("Quinn Abara joins the team as Quality Analyst from the next sprint.") });
+    actions.push({ action: { type: "calendar_event", date: new Date(now.getTime() + 14 * 86_400_000).toISOString().slice(0, 10), tab: "overview", text: `${p.name}: steering review`, sub: "Seeded example" }, rationale: "Seeded example: a steering review is due in two weeks.", evidence: cite("The steering committee reconvenes in two weeks to review progress.", false) });
     if (actions.length === 0) continue;
     const run: AgentRun = {
       id: nextStoredRunId(db), agentId: setup.id, proj: p.id, tab: "overview", state: "done", startedAt: at, finishedAt: at, instruction: null,
@@ -160,7 +162,7 @@ export const seedProposals = (db: Database, now = SEED_NOW): Proposal[] => {
     insertRun(db, run);
     db.transaction(() => {
       for (const a of actions) {
-        const proposal: Proposal = { id: nextStoredProposalId(db), runId: run.id, agentId: setup.id, proj: p.id, ruleId: null, action: a.action, rationale: a.rationale, state: "pending", createdAt: at, decidedAt: null };
+        const proposal: Proposal = { id: nextStoredProposalId(db), runId: run.id, agentId: setup.id, proj: p.id, ruleId: null, action: a.action, rationale: a.rationale, state: "pending", createdAt: at, decidedAt: null, evidence: a.evidence };
         insertProposal(db, proposal);
         registerProposalGuard(db, proposal, state);
         out.push(proposal);
@@ -188,14 +190,14 @@ export const ensureAgents = (db: Database): string[] => {
 };
 
 /** Install the built-in templates when a workspace has none; returns how many were added. */
-export const ensureTemplates = (db: Database): number => {
+export const ensureTemplates = (db: Database, now = new Date()): number => {
   if ((db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM project_templates").get()?.n ?? 0) > 0) return 0;
-  setTemplates(db, BUILTIN_TEMPLATES);
+  setTemplates(db, BUILTIN_TEMPLATES, now);
   return BUILTIN_TEMPLATES.length;
 };
 
 /** Release initialization never creates sample projects or evidence. Safe after deleting the last project. */
-export const initializeWorkspace = (db: Database): void => {
+export const initializeWorkspace = (db: Database, now = new Date()): void => {
   db.transaction(() => {
     const members = db.query<{ n: number }, []>("SELECT COUNT(*) n FROM workspace_members").get()?.n ?? 0;
     if (!members) {
@@ -209,7 +211,7 @@ export const initializeWorkspace = (db: Database): void => {
       db.query("UPDATE workspace SET user_name=?,user_ini=? WHERE id=1").run(name, ini);
     }
     const added = ensureAgents(db);
-    ensureTemplates(db);
+    ensureTemplates(db, now);
     const owner = db.query<{ ini: string }, []>("SELECT ini FROM workspace_members ORDER BY rowid LIMIT 1").get();
     for (const id of added) db.query("UPDATE agents SET owner=? WHERE id=?").run(owner?.ini ?? "ME", id);
   })();

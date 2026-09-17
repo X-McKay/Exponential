@@ -258,6 +258,7 @@ export const syntheticState = (options: SyntheticOptions = {}): SyntheticWorkspa
       targets,
       milestones: ms,
       governance: gov,
+      template: { id: template.id, version: 1 },
     };
     projects.push(project);
     rels[id] = releases(r, ms, gov, todayYm);

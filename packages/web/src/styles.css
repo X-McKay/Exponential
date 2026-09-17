@@ -33,7 +33,7 @@
   --vf-text2: #c6cad6;
   --vf-mut: #8a8f98;
   --vf-dim: #7f8491;
-  --vf-dim2: #5c606b;
+  --vf-dim2: #7a7f8b;
   --vf-indigo: #6e7bf2;
   --vf-indigo-hi: #8b96f8;
   --vf-indigo-soft: #a5aef7;
@@ -43,7 +43,7 @@
   --vf-teal: #39c5cf;
   --vf-red: #e5534b;
   --vf-red-hi: #f08a84;
-  --vf-backlog: #5b6070;
+  --vf-backlog: #7d8291;
   --vf-accent-soft: rgba(110, 123, 242, 0.08);
   --vf-accent-soft2: rgba(110, 123, 242, 0.14);
   --vf-accent-line: rgba(110, 123, 242, 0.22);
@@ -84,18 +84,18 @@
   --vf-text: #15171c;
   --vf-text2: #363b47;
   --vf-mut: #5b6070;
-  --vf-dim: #6b7080;
-  --vf-dim2: #9a9ea9;
-  --vf-indigo: #5561e0;
+  --vf-dim: #5f6472;
+  --vf-dim2: #666b79;
+  --vf-indigo: #4d59da;
   --vf-indigo-hi: #4753d3;
   --vf-indigo-soft: #3d49c4;
-  --vf-green: #1f9d6c;
-  --vf-green-hi: #17865c;
-  --vf-amber: #b07d0c;
-  --vf-teal: #1a94a0;
-  --vf-red: #d33f37;
+  --vf-green: #177a55;
+  --vf-green-hi: #14724e;
+  --vf-amber: #7f5a07;
+  --vf-teal: #167a84;
+  --vf-red: #c2352e;
   --vf-red-hi: #b3302a;
-  --vf-backlog: #8a8f9c;
+  --vf-backlog: #666b79;
   --vf-accent-soft: rgba(85, 97, 224, 0.08);
   --vf-accent-soft2: rgba(85, 97, 224, 0.14);
   --vf-accent-line: rgba(85, 97, 224, 0.25);
@@ -411,6 +411,42 @@ kbd.vf-kbd {
 .vf-tip kbd.vf-kbd {
   color: var(--vf-text2);
   background: var(--vf-popover);
+}
+
+/* ---- skip link and diff tables ---------------------------------------- */
+
+/* The first Tab stop: invisible until it has focus, then a small pill at the top left. */
+.vf-skip {
+  position: absolute;
+  left: 12px;
+  top: -40px;
+  z-index: 200;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--vf-raised);
+  color: var(--vf-text);
+  border: 1px solid var(--vf-line2);
+  font-size: 12.5px;
+  text-decoration: none;
+  transition: top 0.1s;
+}
+.vf-skip:focus {
+  top: 12px;
+  outline: 2px solid var(--vf-focus);
+}
+/* A proposal's field table scrolls sideways in a narrow row rather than pushing the page out. */
+.vf-diff > table {
+  display: block;
+  overflow-x: auto;
+}
+.vf-diff > table > thead,
+.vf-diff > table > tbody {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+}
+.vf-diff th[scope="row"] {
+  width: 22%;
 }
 
 /* ---- toast and chord hint --------------------------------------------- */

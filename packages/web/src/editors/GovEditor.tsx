@@ -77,12 +77,12 @@ export function GovEditor({
       {saveError && <div role="alert" style={{ color: C.redHi, fontSize: 12, margin: "8px 0" }}>Could not save: {saveError}</div>}
       <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 10 }}>
         <div>
-          <Lbl>Name</Lbl>
-          <input style={inpStyle} value={d.name} autoFocus={isNew} placeholder="e.g. Vendor risk assessment" onChange={(e) => set({ name: e.target.value })} />
+          <Lbl htmlFor="vf-goveditor-name">Name</Lbl>
+          <input id="vf-goveditor-name" style={inpStyle} value={d.name} autoFocus={isNew} placeholder="e.g. Vendor risk assessment" onChange={(e) => set({ name: e.target.value })} />
         </div>
         <div>
-          <Lbl>Category</Lbl>
-          <input list="vf-gov-cats" style={inpStyle} value={d.cat} onChange={(e) => set({ cat: e.target.value })} />
+          <Lbl htmlFor="vf-goveditor-category">Category</Lbl>
+          <input id="vf-goveditor-category" list="vf-gov-cats" style={inpStyle} value={d.cat} onChange={(e) => set({ cat: e.target.value })} />
           <datalist id="vf-gov-cats">
             {cats.map((c) => (
               <option key={c} value={c} />
@@ -92,8 +92,8 @@ export function GovEditor({
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <div style={{ flex: "1.2 1 140px", minWidth: 0 }}>
-          <Lbl>Status</Lbl>
-          <select
+          <Lbl htmlFor="vf-goveditor-status">Status</Lbl>
+          <select id="vf-goveditor-status"
             style={inpStyle}
             value={d.status}
             onChange={(e) => {
@@ -108,18 +108,18 @@ export function GovEditor({
           </select>
         </div>
         <div style={{ flex: "0.6 1 80px", minWidth: 0 }}>
-          <Lbl>Owner</Lbl>
-          <input style={{ ...inpStyle, borderColor: d.owner === "" || ownerOk ? C.line2 : C.badLine2 }} value={d.owner} maxLength={3} placeholder="initials" onChange={(e) => set({ owner: e.target.value.toUpperCase() })} />
+          <Lbl htmlFor="vf-goveditor-owner">Owner</Lbl>
+          <input id="vf-goveditor-owner" style={{ ...inpStyle, borderColor: d.owner === "" || ownerOk ? C.line2 : C.badLine2 }} value={d.owner} maxLength={3} placeholder="initials" onChange={(e) => set({ owner: e.target.value.toUpperCase() })} />
         </div>
         <div style={{ flex: "1 1 120px", minWidth: 0 }}>
-          <Lbl>Date</Lbl>
-          <input style={{ ...inpStyle, borderColor: dateOk ? C.line2 : C.badLine2 }} value={d.date ?? ""} placeholder="YYYY-MM-DD" onChange={(e) => set({ date: e.target.value })} />
+          <Lbl htmlFor="vf-goveditor-date">Date</Lbl>
+          <input id="vf-goveditor-date" style={{ ...inpStyle, borderColor: dateOk ? C.line2 : C.badLine2 }} value={d.date ?? ""} placeholder="YYYY-MM-DD" onChange={(e) => set({ date: e.target.value })} />
         </div>
       </div>
-      <Lbl>Detail / notes</Lbl>
-      <textarea style={{ ...inpStyle, height: "auto", minHeight: 84, padding: "8px 10px", resize: "vertical", lineHeight: 1.5 }} value={d.detail} onChange={(e) => set({ detail: e.target.value })} />
-      <Lbl>Link</Lbl>
-      <input
+      <Lbl htmlFor="vf-goveditor-detail-notes">Detail / notes</Lbl>
+      <textarea id="vf-goveditor-detail-notes" style={{ ...inpStyle, height: "auto", minHeight: 84, padding: "8px 10px", resize: "vertical", lineHeight: 1.5 }} value={d.detail} onChange={(e) => set({ detail: e.target.value })} />
+      <Lbl htmlFor="vf-goveditor-link">Link</Lbl>
+      <input id="vf-goveditor-link"
         style={inpStyle}
         value={d.link ?? ""}
         placeholder="confluence/… or airc/…"

@@ -347,7 +347,7 @@ function GlanceCard({ b, cal, state, onOpen, onOpenAgents, onOpenInbox, onDecide
       style={{
         ...reset,
         flex: b.span === 2 ? "2 1 440px" : "1 1 290px",
-        minWidth: 280,
+        minWidth: 0,
         minHeight: 200,
         background: C.panel,
         border: `1px solid ${toneBorder(b.tone)}`,
@@ -563,7 +563,7 @@ export function GlancePage({
           <span style={{ fontSize: 11, color: C.dim }}>{actionSignals.length ? `Top ${Math.min(actionSignals.length, 3)} of ${attentionCount} action${attentionCount === 1 ? "" : "s"}` : "No open actions"}</span>
         </div>
         {actionSignals.length > 0 ? (
-          <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 10, marginTop: 12 }}>
             {actionSignals.map((b) => <ActionSignal key={b.id} b={b} cal={cal} state={state} onOpen={onOpen} onOpenAgents={onOpenAgents} onOpenInbox={onOpenInbox} onDecide={onDecide} />)}
           </div>
         ) : (

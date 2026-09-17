@@ -6,7 +6,7 @@ import { ReleaseEditor } from "../editors/ReleaseEditor.tsx";
 import { focusRelease, releaseBlockers } from "../releaseFocus.ts";
 import { Why } from "../ui/Explain.tsx";
 import { Caret, Chip, SectionCard, Tip, ghostBtn, reset } from "../ui/primitives.tsx";
-import { C, releaseToneColor } from "../theme.ts";
+import { C, releaseToneColor, prefersReducedMotion } from "../theme.ts";
 
 export function RoadmapPage({
   p,
@@ -45,7 +45,7 @@ export function RoadmapPage({
     }
     const frame = requestAnimationFrame(() => {
       const row = document.getElementById(`roadmap-release-${target.id}`);
-      row?.scrollIntoView({ behavior: "smooth", block: "start" });
+      row?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
       (row as HTMLDivElement | null)?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
@@ -54,7 +54,7 @@ export function RoadmapPage({
   const focusReleaseRow = (id: string) => {
     requestAnimationFrame(() => {
       const row = document.getElementById(`roadmap-release-${id}`);
-      row?.scrollIntoView({ behavior: "smooth", block: "start" });
+      row?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
       (row as HTMLDivElement | null)?.focus({ preventScroll: true });
     });
   };

@@ -20,7 +20,7 @@ export interface HarnessState {
 /** The parts of a synthetic AppState the specs look at; typed loosely so the suite does not import the domain package. */
 export interface SyntheticSummary {
   asOf: string;
-  projects: { id: string; key: string; name: string; stage: string; tier: number | null; description: string; committee: { date: string; ref: string } | null; repos: { name: string; url: string }[]; team: { ini: string; name: string; role: string }[]; targets: { fte: number; time: number }; milestones: { id: string; name: string; status: string; month: string; impact: unknown; metrics: { id: string; label: string; base: number; stretch: number; current: number }[] }[]; governance: { id: string; cat: string; name: string; status: string; owner: string; date: string | null; detail: string }[] }[];
+  projects: { id: string; key: string; name: string; stage: string; tier: number | null; description: string; committee: { date: string; ref: string } | null; template?: { id: string; version: number | null } | null; repos: { name: string; url: string }[]; team: { ini: string; name: string; role: string }[]; targets: { fte: number; time: number }; milestones: { id: string; name: string; status: string; month: string; impact: unknown; metrics: { id: string; label: string; base: number; stretch: number; current: number }[] }[]; governance: { id: string; cat: string; name: string; status: string; owner: string; date: string | null; detail: string }[] }[];
   releases: Record<string, { id: string; name: string; month: string; milestoneIds: string[]; criteria: unknown[] }[]>;
   calendar: { id: string; date: string; proj: string; tab: string; text: string; sub: string | null }[];
   templates: { id: string; name: string }[];

@@ -5,6 +5,11 @@ const h = readHarness();
 const p = h.seed.state.projects[1]!;
 
 test.describe("update from documents and the inbox", () => {
+  // Start each test from an empty inbox, whatever earlier specs left behind.
+  test.beforeEach(async ({ request }) => {
+    const state = await (await request.get(`${h.baseUrl}/api/state`)).json() as { proposals: { id: string; state: string }[] };
+    for (const x of state.proposals.filter((y) => y.state === "pending")) await request.post(`${h.baseUrl}/api/proposals/${x.id}/dismiss`, { headers: { "x-valueflow-role": "admin" } });
+  });
   test("uploading a revised charter stages changes; the inbox applies and dismisses them", async ({ page }) => {
     await page.goto(`/#/project/${p.id}/overview`);
     await page.getByRole("button", { name: "Update from documents…" }).click();
@@ -23,19 +28,24 @@ test.describe("update from documents and the inbox", () => {
     await expect(page).toHaveURL(/#\/inbox$/);
 
     // The project group shows what came from documents and offers batch actions.
-    const group = page.locator("section, div").filter({ has: page.getByText(new RegExp(`^${p.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} · \\d+$`)) }).first();
-    await expect(page.getByText(/from documents/)).toBeVisible();
-    // Apply one proposal by hand and see the value preview beforehand.
-    await expect(page.getByText("Proposed").first()).toBeVisible();
-    await page.getByRole("button", { name: "Apply change" }).first().click();
+    const group = page.getByRole("region", { name: new RegExp(`^${p.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} · \\d+$`) });
+    await expect(group.getByText(/from documents/)).toBeVisible();
+    // Every staged change is a field-by-field comparison with the passage it cites: the first quotes the charter verbatim, the rest paraphrase.
+    await expect(page.getByRole("columnheader", { name: "Proposed" }).first()).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Current" }).first()).toBeVisible();
+    await expect(page.getByText("Quoted verbatim").first()).toBeVisible();
+    await expect(page.getByText("Paraphrased").first()).toBeVisible();
+    await expect(page.getByText("From charter-v2.md").first()).toBeVisible();
+    await expect(page.locator("blockquote").first()).toContainText(/\w+\s+\w+\s+\w+/);
+    // Apply one proposal by hand.
+    await group.getByRole("button", { name: "Apply change" }).first().click();
     await expect(page.getByText(/^Applied:/).first()).toBeVisible();
     // Dismiss the rest at once.
-    await page.getByRole("button", { name: "Dismiss all" }).click();
+    await group.getByRole("button", { name: "Dismiss all" }).click();
     await expect(page.getByText("You’re caught up.")).toBeVisible({ timeout: 20_000 });
     await page.getByRole("button", { name: /Recently decided/ }).click();
     await expect(page.getByText("Applied", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("Dismissed", { exact: true }).first()).toBeVisible();
-    void group;
   });
 
   test("a stale record change is refused with a reason instead of overwriting", async ({ page, request }) => {
@@ -56,7 +66,7 @@ test.describe("update from documents and the inbox", () => {
     const row = page.locator(`#proposal-${pending!.id}`);
     await row.getByRole("button", { name: "Apply change" }).click();
     await expect(row.getByRole("alert")).toContainText(/stale/);
-    await page.getByRole("button", { name: "Dismiss all" }).click();
+    await page.getByRole("button", { name: "Dismiss all" }).first().click();
     await expect(page.getByText("You’re caught up.")).toBeVisible({ timeout: 20_000 });
   });
 });

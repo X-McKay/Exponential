@@ -34,6 +34,8 @@ import {
   TargetsInputSchema,
   TemplateCreateInputSchema,
   TemplatesInputSchema,
+  DriftInputSchema,
+  WorkspaceImportInputSchema,
   WorkspaceInputSchema,
   patterns,
 } from "@valueflow/shared";
@@ -69,6 +71,9 @@ import {
 } from "./repo.ts";
 import { createFromTemplate } from "./templates.ts";
 import { proposeProjectUpdates } from "./update.ts";
+import { restageAfterTemplateChange, stageTemplateDrift } from "./drift.ts";
+import { exportWorkspace, importWorkspace } from "./transfer.ts";
+import { loadTemplateHistory } from "./repo.ts";
 import { nextRuleId } from "@valueflow/domain";
 import type { Rule } from "@valueflow/domain";
 import { askWorkspace } from "./chat.ts";
@@ -602,9 +607,34 @@ export const createApp = (db: Database, options: AppOptions = {}): App => {
     return json({ run: result.run, proposals: result.proposals, dropped: result.dropped, sources: sources.map((s) => ({ name: s.name, kind: s.kind, chars: s.chars, error: s.error })) }, result.run.state === "failed" ? 502 : 201);
   });
   on("GET", patterns.templates, () => json(loadTemplates(db)));
+  // Saving templates records a version for each one that changed and re-checks the projects that follow it, staging backfill proposals.
   on("PUT", patterns.templates, async (req) => {
-    setTemplates(db, await parseBody(req, TemplatesInputSchema));
+    const changed = setTemplates(db, await parseBody(req, TemplatesInputSchema), now());
+    restageAfterTemplateChange(db, changed, now());
     return json(loadTemplates(db));
+  });
+  on("GET", patterns.templateVersions, (_req, params) => {
+    const history = loadTemplateHistory(db, p(params, "tid"));
+    if (history.length === 0 && !loadTemplates(db).some((t) => t.id === p(params, "tid"))) throw new NotFound(`template ${p(params, "tid")} not found`);
+    return json(history);
+  });
+  // Template drift: what the project is missing against the template it follows, with the backfill staged as proposals.
+  on("POST", patterns.projectDrift, async (req, params) => {
+    const body = await parseBody(req, DriftInputSchema);
+    findProject(state(), p(params, "pid"));
+    const result = stageTemplateDrift(db, p(params, "pid"), now(), body.template !== undefined ? { template: body.template } : {});
+    return json(result, result.proposals.length ? 201 : 200);
+  });
+  // The whole workspace as one document, and back. Import is an administrator's action.
+  on("GET", patterns.workspaceExport, () => {
+    const doc = exportWorkspace(db, now());
+    return new Response(JSON.stringify(doc, null, 2), { headers: { "content-type": "application/json; charset=utf-8", "content-disposition": `attachment; filename="exponential-workspace-${doc.exportedAt.slice(0, 10)}.json"`, "cache-control": "private, no-store" } });
+  });
+  on("POST", patterns.workspaceImport, async (req) => {
+    const actor = actorContext.getStore();
+    if (actor && actor.role !== "admin") throw new HttpError(403, "Switch to Administrator to import a workspace.");
+    const body = await parseBody(req, WorkspaceImportInputSchema);
+    return json(importWorkspace(db, body, now()), 201);
   });
   on("POST", patterns.templateCreate, async (req, params) => {
     const template = loadTemplates(db).find((t) => t.id === p(params, "tid"));

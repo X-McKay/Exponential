@@ -26,7 +26,7 @@ test.describe("portfolio and navigation", () => {
     await expect(page.getByRole("heading", { name: p.name })).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`#/project/${p.id}/overview$`));
     for (const tab of ["Value", "Roadmap", "Development", "Governance"]) {
-      await page.getByRole("button", { name: new RegExp(`^${tab}( ·)?$`) }).click();
+      await page.getByRole("tab", { name: new RegExp(`^${tab}( ·)?$`) }).click();
       await expect(page).toHaveURL(new RegExp(`#/project/${p.id}/${tab.toLowerCase()}$`));
     }
     await expect(page.getByText("Release-linked controls")).toBeVisible();
@@ -42,14 +42,16 @@ test.describe("portfolio and navigation", () => {
     await page.keyboard.press("p");
     await expect(page).toHaveURL(/#\/portfolio$/);
     await page.keyboard.press("Control+k");
-    const box = page.getByRole("textbox", { name: "Jump to" });
+    const box = page.getByRole("combobox", { name: "Jump to" });
     await expect(box).toBeVisible();
     await box.fill(projects[1]!.name);
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(new RegExp(`#/project/${projects[1]!.id}/`));
   });
 
-  test("glance composes a narrative and the inbox starts empty", async ({ page }) => {
+  test("glance composes a narrative and an empty inbox says so", async ({ page, request }) => {
+    const state = await (await request.get(`${h.baseUrl}/api/state`)).json() as { proposals: { id: string; state: string }[] };
+    for (const x of state.proposals.filter((y) => y.state === "pending")) await request.post(`${h.baseUrl}/api/proposals/${x.id}/dismiss`, { headers: { "x-valueflow-role": "admin" } });
     await page.goto("/#/glance");
     await expect(page.getByRole("heading", { name: "Glance" })).toBeVisible();
     await expect(page.locator("main")).toContainText(/release|gate|calendar|build/i);

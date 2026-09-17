@@ -114,6 +114,8 @@ export const ProjectInputSchema = z.object({
   repos: z.array(RepoInputSchema).max(20),
   team: z.array(TeamMemberInputSchema).max(30),
   targets: ImpactPairSchema,
+  /** The template the project follows; omitted leaves the link as it is, null clears it. */
+  template: z.object({ id: id.regex(/^[a-z0-9][a-z0-9-]*$/, "lowercase letters, digits and dashes"), version: z.number().int().min(1).nullable().default(null) }).nullable().optional(),
 });
 export type ProjectInput = z.infer<typeof ProjectInputSchema>;
 
@@ -247,6 +249,8 @@ export const ProposalActionSchema = z.discriminatedUnion("type", [
   }
 });
 export type ProposalActionInput = z.infer<typeof ProposalActionSchema>;
+
+export const ProposalEvidenceSchema = z.object({ source: z.string().trim().max(200).nullable(), quote: z.string().trim().max(600).nullable(), verified: z.boolean() });
 
 /** Everything the wizard composes from an accepted draft, created in one transaction. */
 export const SetupCreateInputSchema = z.object({
@@ -387,3 +391,93 @@ export interface ApiError {
   error: string;
   issues?: unknown;
 }
+
+// ---- workspace transfer ---------------------------------------------------
+//
+// One JSON document that carries a whole workspace: facts, the documents
+// mirrored from external systems, and what is waiting in the inbox. Nothing
+// secret (no provider credentials, no access tokens) and nothing derived.
+
+export const WORKSPACE_EXPORT_FORMAT = "exponential-workspace";
+export const WORKSPACE_EXPORT_VERSION = 1;
+
+const isoInstant = z.string().datetime({ offset: true });
+const ExportReadingSchema = z.object({ milestoneId: id, metricId: id, value: pct, recordedAt: isoInstant, source: z.enum(["eval", "manual"]) });
+const ExportRunSchema = z.object({
+  id,
+  agentId: id,
+  proj: id.nullable(),
+  tab: projectTab,
+  state: z.enum(["queued", "working", "done", "attention", "failed"]),
+  startedAt: isoInstant,
+  finishedAt: isoInstant.nullable(),
+  instruction: z.string().nullable(),
+  summary: z.string(),
+  output: z.string(),
+  model: z.string().nullable(),
+  error: z.string().nullable(),
+  promptVersion: z.string().nullable(),
+  latencyMs: z.number().int().nullable(),
+  promptTokens: z.number().int().nullable(),
+  completionTokens: z.number().int().nullable(),
+  benchmark: z.string().nullable(),
+  rating: z.union([z.literal(1), z.literal(-1)]).nullable(),
+  ratingNote: z.string().nullable(),
+});
+const ExportProposalSchema = z.object({
+  id,
+  runId: id,
+  agentId: id,
+  proj: id.nullable(),
+  ruleId: id.nullable(),
+  action: ProposalActionSchema,
+  rationale: z.string().max(2000),
+  state: z.enum(["pending", "accepted", "dismissed"]),
+  createdAt: isoInstant,
+  decidedAt: isoInstant.nullable(),
+  decidedBy: z.string().max(80).nullable().optional(),
+  decisionMode: z.enum(["human", "automatic"]).nullable().optional(),
+  evidence: ProposalEvidenceSchema.nullable().optional(),
+});
+const ExportRuleSchema = RuleInputSchema.extend({ id, createdAt: isoInstant });
+const ExportEventSchema = z.object({ ref: z.string().max(300), at: isoInstant, type: z.enum(["build", "eval", "merge", "deploy", "gov", "ship"]), proj: id, tab: projectTab, text: z.string().max(600) });
+const ExportMemberSchema = z.object({ id: z.string().min(1).max(64), name: short(80), ini, role: z.enum(["admin", "editor", "viewer"]) });
+
+export const WorkspaceExportSchema = z.object({
+  format: z.literal(WORKSPACE_EXPORT_FORMAT),
+  version: z.literal(WORKSPACE_EXPORT_VERSION),
+  exportedAt: isoInstant,
+  workspace: WorkspaceInputSchema,
+  members: z.array(ExportMemberSchema).max(200).default([]),
+  projects: z
+    .array(
+      ProjectInputSchema.extend({
+        milestones: z.array(MilestoneInputSchema).max(60).superRefine((items, ctx) => uniqueIds(items, ctx, "milestone")),
+        governance: z.array(GovernanceItemInputSchema).max(120).superRefine((items, ctx) => uniqueIds(items, ctx, "governance")),
+        releases: z.array(ReleaseInputSchema).max(30).superRefine((items, ctx) => uniqueIds(items, ctx, "release")),
+        readings: z.array(ExportReadingSchema).max(20_000).default([]),
+      }),
+    )
+    .max(200)
+    .superRefine((items, ctx) => uniqueIds(items, ctx, "project")),
+  calendar: z.array(CalendarEventInputSchema).max(2000).superRefine((items, ctx) => uniqueIds(items, ctx, "calendar event")),
+  agents: AgentsInputSchema,
+  templates: TemplatesInputSchema,
+  rules: z.array(ExportRuleSchema).max(200).superRefine((items, ctx) => uniqueIds(items, ctx, "rule")),
+  budgets: BudgetsInputSchema,
+  runs: z.array(ExportRunSchema).max(5000).superRefine((items, ctx) => uniqueIds(items, ctx, "run")),
+  proposals: z.array(ExportProposalSchema).max(5000).superRefine((items, ctx) => uniqueIds(items, ctx, "proposal")),
+  events: z.array(ExportEventSchema).max(20_000).default([]),
+});
+export type WorkspaceExport = z.infer<typeof WorkspaceExportSchema>;
+
+/** How an import lands: refused when the workspace already has projects unless `replace` is set, which clears them first. */
+export const WorkspaceImportInputSchema = z.object({ document: WorkspaceExportSchema, replace: z.boolean().default(false) });
+export type WorkspaceImportInput = z.infer<typeof WorkspaceImportInputSchema>;
+
+/** Stage backfill proposals for what a project is missing against its template. */
+export const DriftInputSchema = z.object({
+  /** Link the project to this template first (omitted keeps the current link). */
+  template: id.optional(),
+});
+export type DriftInput = z.infer<typeof DriftInputSchema>;

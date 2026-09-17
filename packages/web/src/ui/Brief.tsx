@@ -171,7 +171,7 @@ export function Item({ section, cal, state, onOpen, onOpenInbox, onOpenAgents, o
   return (
     <li style={{ display: "flex", gap: 14, padding: "12px 0 16px", listStyle: "none" }}>
       <span aria-hidden style={{ width: 7, height: 7, borderRadius: "50%", border: `1.5px solid ${C.mut}`, flexShrink: 0, marginTop: 8 }} />
-      <div style={{ flex: 1, minWidth: 0, display: "grid", gap: 8 }}>
+      <div style={{ flex: 1, minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 8 }}>
         <div style={{ fontSize: 14.5, lineHeight: 1.6, color: C.text, maxWidth: 680 }}>{section.text}</div>
         {action && (
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>

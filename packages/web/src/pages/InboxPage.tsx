@@ -109,7 +109,10 @@ export function InboxPage({ state, onDecide }: { state: AppState; onDecide: (id:
         const next = ordered[Math.max(0, Math.min(ordered.length - 1, idx + d))];
         if (next) {
           setSelected(next.id);
-          document.getElementById(`proposal-${next.id}`)?.scrollIntoView({ block: "nearest" });
+          const row = document.getElementById(`proposal-${next.id}`);
+          row?.scrollIntoView({ block: "nearest" });
+          // Hand focus to the row's title so a screen reader announces where the selection went.
+          row?.querySelector<HTMLElement>("button.vf-row")?.focus({ preventScroll: true });
         }
       };
       switch (e.key) {

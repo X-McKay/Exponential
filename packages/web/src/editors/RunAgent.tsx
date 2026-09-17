@@ -77,8 +77,8 @@ export function RunAgentEditor({
         <div style={{ fontSize: 12, color: C.mut, lineHeight: 1.55, marginTop: 8 }}>{what}</div>
         {agent.kind !== "brief" && (
           <>
-            <Lbl>{agent.kind === "tuner" ? "Agent to tune" : "Agent to scout for"}</Lbl>
-            <select style={inpStyle} value={target} onChange={(e) => setTarget(e.target.value)}>
+            <Lbl htmlFor="vf-runagent-target">{agent.kind === "tuner" ? "Agent to tune" : "Agent to scout for"}</Lbl>
+            <select id="vf-runagent-target" style={inpStyle} value={target} onChange={(e) => setTarget(e.target.value)}>
               <option value="">{agent.kind === "tuner" ? "Every agent with enough measured runs" : "Every benchmarked agent"}</option>
               {targets.map((a) => (
                 <option key={a.id} value={a.id}>
@@ -112,8 +112,8 @@ export function RunAgentEditor({
       </div>
       <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 160px", gap: 10 }}>
         <div>
-          <Lbl>Project</Lbl>
-          <select style={inpStyle} value={proj} onChange={(e) => setProj(e.target.value)}>
+          <Lbl htmlFor="vf-runagent-project">Project</Lbl>
+          <select id="vf-runagent-project" style={inpStyle} value={proj} onChange={(e) => setProj(e.target.value)}>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -122,8 +122,8 @@ export function RunAgentEditor({
           </select>
         </div>
         <div>
-          <Lbl>Result links to</Lbl>
-          <select
+          <Lbl htmlFor="vf-runagent-result-links-to">Result links to</Lbl>
+          <select id="vf-runagent-result-links-to"
             style={inpStyle}
             value={tab}
             onChange={(e) => {
@@ -140,8 +140,8 @@ export function RunAgentEditor({
           </select>
         </div>
       </div>
-      <Lbl>Instruction (optional)</Lbl>
-      <textarea
+      <Lbl htmlFor="vf-runagent-instruction-optional">Instruction (optional)</Lbl>
+      <textarea id="vf-runagent-instruction-optional"
         style={{ ...inpStyle, height: "auto", minHeight: 76, padding: "8px 10px", resize: "vertical", lineHeight: 1.5 }}
         value={instruction}
         autoFocus

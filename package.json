@@ -13,6 +13,8 @@
     "start": "bun run --cwd packages/server start",
     "demo:reset": "bun run --cwd packages/server seed",
     "sync": "bun run --cwd packages/server sync",
+    "workspace:export": "bun run --cwd packages/server transfer export",
+    "workspace:import": "bun run --cwd packages/server transfer import",
     "build": "bun run --cwd packages/web build",
     "test": "bun test",
     "typecheck": "bun node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",

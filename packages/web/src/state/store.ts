@@ -6,9 +6,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { describeAction } from "@valueflow/domain";
 import type { Agent, AgentRun, AppState, Budget, CalendarEvent, GovernanceItem, ImpactPair, MetricReading, Milestone, Project, ProjectTemplate, Proposal, Release, Rule, Workspace } from "@valueflow/domain";
-import type { ProjectInput, RuleInput, RunAgentInput, TemplateCreateInput } from "@valueflow/shared";
+import type { ProjectInput, RuleInput, RunAgentInput, TemplateCreateInput, WorkspaceExport } from "@valueflow/shared";
 import { api } from "../api/client.ts";
-import type { JobStatus } from "../api/client.ts";
+import type { DriftResult, ImportSummary, JobStatus } from "../api/client.ts";
 import { applyLive, subscribeLive } from "./live.ts";
 import type { LiveRun } from "./live.ts";
 import type { Notice } from "../ui/primitives.tsx";
@@ -35,6 +35,10 @@ export interface Store {
   /** Create a project and everything its template adds in one request. */
   createFromTemplate: (tid: string, input: TemplateCreateInput) => Promise<Project>;
   saveTemplates: (templates: ProjectTemplate[]) => Promise<unknown>;
+  /** Stage backfill proposals for what a project lacks against its template (linking one first when given). */
+  stageDrift: (pid: string, template?: string) => Promise<DriftResult>;
+  /** Replace or fill the workspace from an exported document; reloads everything afterwards. */
+  importWorkspace: (document: WorkspaceExport, replace: boolean) => Promise<ImportSummary>;
   deleteProject: (pid: string) => Promise<unknown>;
   saveGovernance: (pid: string, item: GovernanceItem, isNew: boolean) => Promise<unknown>;
   deleteGovernance: (pid: string, gid: string) => Promise<unknown>;
@@ -293,6 +297,36 @@ export const useStore = (): Store => {
         (s, result) => ({ ...s, templates: result }),
       ),
     [commit],
+  );
+
+  const stageDrift = useCallback(
+    async (pid: string, template?: string) => {
+      try {
+        const result = await api.projectDrift(pid, template === undefined ? {} : { template });
+        if (result.proposals.length) notify(`Staged ${result.proposals.length} template item${result.proposals.length === 1 ? "" : "s"} for approval in the inbox.`, "good");
+        else notify(result.alreadyStaged ? `${result.alreadyStaged} item${result.alreadyStaged === 1 ? " is" : "s are"} already waiting in the inbox.` : "Nothing missing: the project carries every required item.", "good");
+        await reload();
+        return result;
+      } catch (e) {
+        fail(e);
+        throw e;
+      }
+    },
+    [fail, notify, reload],
+  );
+  const importWorkspace = useCallback(
+    async (document: WorkspaceExport, replace: boolean) => {
+      try {
+        const summary = await api.importWorkspace({ document, replace });
+        await reload();
+        notify(`Imported ${summary.projects} project${summary.projects === 1 ? "" : "s"}, ${summary.proposals} proposal${summary.proposals === 1 ? "" : "s"}, ${summary.readings} reading${summary.readings === 1 ? "" : "s"}${summary.skipped ? ` · ${summary.skipped} dangling record${summary.skipped === 1 ? "" : "s"} skipped` : ""}.`, "good");
+        return summary;
+      } catch (e) {
+        fail(e);
+        throw e;
+      }
+    },
+    [fail, notify, reload],
   );
 
   const deleteProject = useCallback(
@@ -602,6 +636,8 @@ export const useStore = (): Store => {
       saveProject,
       createFromTemplate,
       saveTemplates,
+      stageDrift,
+      importWorkspace,
       deleteProject,
       saveGovernance,
       deleteGovernance,
@@ -644,6 +680,8 @@ export const useStore = (): Store => {
       saveProject,
       createFromTemplate,
       saveTemplates,
+      stageDrift,
+      importWorkspace,
       deleteProject,
       saveGovernance,
       deleteGovernance,

@@ -23,7 +23,7 @@ if (pinned && Number.isNaN(pinned.getTime())) throw new Error(`VALUEFLOW_NOW is 
 const now = () => pinned ?? new Date();
 
 const db = openDb();
-initializeWorkspace(db);
+initializeWorkspace(db, now());
 const interrupted = recoverInterruptedRuns(db, now());
 if (interrupted) console.log(`marked ${interrupted} interrupted run(s) failed`);
 

@@ -6,7 +6,7 @@ import { actorContext } from "./identity.ts";
 
 import type { Database } from "bun:sqlite";
 import { EVENT_WINDOW_DAYS, GSTATUS_LABEL, RUN_WINDOW_DAYS, deriveDevEvents } from "@valueflow/domain";
-import type { Agent, AgentRun, AppState, Budget, Build, CalendarEvent, Criterion, DevFacts, Event, DailyBrief, GovernanceItem, RunEvent, Metric, MetricReading, Milestone, MilestoneSnapshot, MilestoneStatus, ModelPrice, Project, ProjectTemplate, PromptVersion, Proposal, ProposalAction, PullRequest, Release, RiskTier, Rule, RunScore, SetupDraft, SyncRun, Workspace } from "@valueflow/domain";
+import type { Agent, AgentRun, AppState, Budget, Build, CalendarEvent, Criterion, DevFacts, Event, DailyBrief, GovernanceItem, RunEvent, Metric, MetricReading, Milestone, MilestoneSnapshot, MilestoneStatus, ModelPrice, Project, ProjectTemplate, PromptVersion, Proposal, ProposalAction, ProposalEvidence, PullRequest, Release, RiskTier, Rule, RunScore, SetupDraft, SyncRun, TemplateVersion, Workspace } from "@valueflow/domain";
 import type { AgentsInput, BudgetsInput, CalendarEventInput, GovernanceInput, GovernanceItemInput, MilestoneInput, ProjectInput, ReleaseInput, RuleInput, TargetsInput, TemplatesInput, WorkspaceInput } from "@valueflow/shared";
 import { loadUsageRuns } from "./usage.ts";
 
@@ -19,6 +19,8 @@ export class Conflict extends Error {
 
 interface ProjectRow {
   id: string;
+  template_id: string | null;
+  template_version: number | null;
   key: string;
   name: string;
   stage: string;
@@ -132,6 +134,7 @@ interface RuleRow {
 }
 interface ProposalRow {
   id: string;
+  evidence: string | null;
   run_id: string;
   agent_id: string;
   project_id: string | null;
@@ -341,6 +344,7 @@ export const loadState = (db: Database, now: Date = new Date(), prices: Record<s
     events: loadEvents(db, now),
     calendar: loadCalendar(db),
     templates: loadTemplates(db),
+    templateVersions: loadTemplateVersions(db),
   };
   for (const p of projects) {
     const toMilestone = (m: MilestoneRow, includeRetiredMetrics: boolean): Milestone => ({
@@ -382,6 +386,7 @@ export const loadState = (db: Database, now: Date = new Date(), prices: Record<s
       targets: { fte: p.target_fte, time: p.target_time },
       milestones: ms,
       ...(archived.length ? { historicalMilestones: archived } : {}),
+      ...(p.template_id ? { template: { id: p.template_id, version: p.template_version } } : {}),
       governance: (gov.get(p.id) ?? []).map(
         (g): GovernanceItem => ({
           cat: g.cat,
@@ -573,11 +578,12 @@ export const loadProposals = (db: Database, now: Date, windowDays = RUN_WINDOW_D
       decidedAt: r.decided_at,
       ...(r.decided_by === null ? {} : { decidedBy: r.decided_by }),
       ...(r.decision_mode === null ? {} : { decisionMode: r.decision_mode }),
+      ...(r.evidence === null ? {} : { evidence: JSON.parse(r.evidence) as ProposalEvidence }),
     }));
 };
 
 export const insertProposal = (db: Database, p: Proposal): void => {
-  db.query("INSERT INTO proposals (id, run_id, agent_id, project_id, rule_id, action, rationale, state, created_at, decided_at) VALUES (?,?,?,?,?,?,?,?,?,?)").run(
+  db.query("INSERT INTO proposals (id, run_id, agent_id, project_id, rule_id, action, rationale, state, created_at, decided_at, evidence) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run(
     p.id,
     p.runId,
     p.agentId,
@@ -588,6 +594,7 @@ export const insertProposal = (db: Database, p: Proposal): void => {
     p.state,
     p.createdAt,
     p.decidedAt,
+    p.evidence ? JSON.stringify(p.evidence) : null,
   );
 };
 
@@ -1068,6 +1075,8 @@ export const upsertProject = (db: Database, input: ProjectInput, mode: "create" 
         "INSERT INTO projects (id, key, name, stage, description, tier, committee_date, committee_ref, target_fte, target_time, sort) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
       ).run(input.id, input.key, input.name, input.stage, input.description, input.tier, input.committee?.date ?? null, input.committee?.ref ?? null, input.targets.fte, input.targets.time, sort);
     }
+    // The template link is its own fact: an editor that does not mention it leaves it alone; null clears it.
+    if (input.template !== undefined) db.query("UPDATE projects SET template_id = ?, template_version = ? WHERE id = ?").run(input.template?.id ?? null, input.template?.version ?? null, input.id);
     db.query("DELETE FROM project_repos WHERE project_id = ?").run(input.id);
     input.repos.forEach((r, i) => db.query("INSERT INTO project_repos (project_id, name, url, sort) VALUES (?,?,?,?)").run(input.id, r.name, r.url, i));
     db.query("DELETE FROM team_members WHERE project_id = ?").run(input.id);
@@ -1175,14 +1184,48 @@ export const deleteRelease = (db: Database, pid: string, rid: string): void => {
 export const loadTemplates = (db: Database): ProjectTemplate[] =>
   db.query<{ doc: string }, []>("SELECT doc FROM project_templates ORDER BY sort").all().map((r) => JSON.parse(r.doc) as ProjectTemplate);
 
-/** Replace the template list; projects already created from a template are untouched. */
-export const setTemplates = (db: Database, templates: TemplatesInput): void => {
+/**
+ * Replace the template list; projects already created from a template are
+ * untouched. A template whose document differs from the saved one (or that is
+ * new) gets the next version number, and every version's document is kept.
+ * Returns the ids whose content changed, so callers can re-check drift.
+ */
+export const setTemplates = (db: Database, templates: TemplatesInput, now = new Date()): string[] => {
+  const changed: string[] = [];
   db.transaction(() => {
+    const before = new Map(db.query<{ id: string; doc: string }, []>("SELECT id, doc FROM project_templates").all().map((r) => [r.id, r.doc]));
     db.query("DELETE FROM project_templates").run();
     const q = db.query("INSERT INTO project_templates (id, sort, doc) VALUES (?,?,?)");
-    templates.forEach((t, i) => q.run(t.id, i, JSON.stringify(t)));
+    const ver = db.query("INSERT INTO project_template_versions (template_id, version, doc, at) VALUES (?,?,?,?)");
+    templates.forEach((t, i) => {
+      const doc = JSON.stringify(t);
+      q.run(t.id, i, doc);
+      const latest = db.query<{ doc: string; version: number }, [string]>("SELECT doc, version FROM project_template_versions WHERE template_id = ? ORDER BY version DESC LIMIT 1").get(t.id);
+      if (latest?.doc === doc) return;
+      ver.run(t.id, (latest?.version ?? 0) + 1, doc, now.toISOString());
+      if (before.has(t.id) && before.get(t.id) !== doc) changed.push(t.id);
+    });
   })();
+  return changed;
 };
+
+/** The current version number of each template, newest first (a template never saved has no row). */
+export const loadTemplateVersions = (db: Database): TemplateVersion[] =>
+  db
+    .query<{ template_id: string; version: number; at: string }, []>("SELECT template_id, version, at FROM project_template_versions ORDER BY version DESC, template_id")
+    .all()
+    .map((r) => ({ templateId: r.template_id, version: r.version, at: r.at }));
+
+/** Every saved revision of one template, newest first, with its document. */
+export const loadTemplateHistory = (db: Database, templateId: string): (TemplateVersion & { doc: ProjectTemplate })[] =>
+  db
+    .query<{ template_id: string; version: number; at: string; doc: string }, [string]>("SELECT template_id, version, at, doc FROM project_template_versions WHERE template_id = ? ORDER BY version DESC")
+    .all(templateId)
+    .map((r) => ({ templateId: r.template_id, version: r.version, at: r.at, doc: JSON.parse(r.doc) as ProjectTemplate }));
+
+/** The version number a project created now would record for the template, or null before the template was ever saved. */
+export const currentTemplateVersion = (db: Database, templateId: string): number | null =>
+  db.query<{ v: number | null }, [string]>("SELECT MAX(version) AS v FROM project_template_versions WHERE template_id = ?").get(templateId)?.v ?? null;
 
 /** Replace the agent definitions; agents that disappear take their runs with them, the rest keep theirs. */
 export const setAgents = (db: Database, agents: AgentsInput): void => {

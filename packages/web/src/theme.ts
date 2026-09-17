@@ -190,3 +190,6 @@ export const applyTheme = (choice: ThemeChoice): void => {
     /* private mode */
   }
 };
+
+/** Whether the person asked the system for less motion; smooth scrolling and decorative animation follow it. */
+export const prefersReducedMotion = (): boolean => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;

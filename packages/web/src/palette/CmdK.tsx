@@ -4,7 +4,7 @@ import { CHORDS } from "../router.ts";
 import { Kbd, reset } from "../ui/primitives.tsx";
 import { C } from "../theme.ts";
 
-type Go = (page: "glance" | "inbox" | "portfolio" | "agents" | "data" | "project", projectId: string | null, tab?: ProjectTab, section?: "agents" | "rules" | "quality") => void;
+type Go = (page: "glance" | "inbox" | "portfolio" | "agents" | "data" | "project", projectId: string | null, tab?: ProjectTab, section?: "agents" | "rules" | "quality" | "economics") => void;
 
 interface Item {
   id: string;
@@ -42,14 +42,16 @@ const pushRecent = (id: string) => {
   }
 };
 
-const buildItems = (projects: Project[], go: Go): Item[] => [
+const buildItems = (projects: Project[], go: Go, help: () => void): Item[] => [
   { id: "glance", label: "Glance", hint: "g g", group: "Pages", act: () => go("glance", null) },
   { id: "inbox", label: "Inbox", hint: "g i", group: "Pages", act: () => go("inbox", null) },
   { id: "portfolio", label: "Portfolio", hint: "g p", group: "Pages", act: () => go("portfolio", null) },
   { id: "agents", label: "Agents", hint: "g a", group: "Pages", act: () => go("agents", null) },
   { id: "agents:rules", label: "Agents › Standing rules", hint: "", group: "Pages", act: () => go("agents", null, "overview", "rules") },
   { id: "agents:quality", label: "Agents › Quality", hint: "", group: "Pages", act: () => go("agents", null, "overview", "quality") },
+  { id: "agents:economics", label: "Agents › Economics", hint: "", group: "Pages", act: () => go("agents", null, "overview", "economics") },
   { id: "data", label: "Data & settings", hint: "", group: "Pages", act: () => go("data", null) },
+  { id: "shortcuts", label: "Keyboard shortcuts", hint: "?", group: "Pages", act: () => help() },
   ...projects.map((p): Item => ({ id: `p:${p.id}`, label: p.name, hint: p.key, group: "Projects", act: () => go("project", p.id, "overview") })),
   ...projects.flatMap((p): Item[] =>
     TABS.map(([t, tab]): Item => ({ id: `p:${p.id}:${tab}`, label: `${p.name} › ${t}`, hint: p.key, group: "Project views", act: () => go("project", p.id, tab) })),
@@ -68,11 +70,11 @@ const matches = (label: string, q: string): boolean => {
   return true;
 };
 
-export function CmdK({ projects, go, onClose }: { projects: Project[]; go: Go; onClose: () => void }) {
+export function CmdK({ projects, go, onClose, onHelp }: { projects: Project[]; go: Go; onClose: () => void; /** Open the shortcuts list. */ onHelp: () => void }) {
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
-  const all = useMemo(() => buildItems(projects, go), [projects, go]);
+  const all = useMemo(() => buildItems(projects, go, onHelp), [projects, go, onHelp]);
 
   const items = useMemo<Item[]>(() => {
     const s = q.trim().toLowerCase();
@@ -120,6 +122,11 @@ export function CmdK({ projects, go, onClose }: { projects: Project[]; go: Go; o
             value={q}
             placeholder="Jump to a project or page…"
             aria-label="Jump to"
+            role="combobox"
+            aria-expanded
+            aria-controls="vf-palette-list"
+            aria-autocomplete="list"
+            aria-activedescendant={items[sel] ? `vf-palette-opt-${sel}` : undefined}
             onChange={(e) => {
               setQ(e.target.value);
               setSel(0);
@@ -142,16 +149,19 @@ export function CmdK({ projects, go, onClose }: { projects: Project[]; go: Go; o
           />
           <Kbd>esc</Kbd>
         </div>
-        <div ref={listRef} style={{ maxHeight: 360, overflowY: "auto", padding: "6px 6px 8px" }}>
+        <div ref={listRef} id="vf-palette-list" role="listbox" aria-label="Destinations" style={{ maxHeight: 360, overflowY: "auto", padding: "6px 6px 8px" }}>
           {items.length === 0 && <div style={{ fontSize: 13, color: C.dim, padding: "14px 12px" }}>No matches.</div>}
           {items.map((it, i) => {
             const header = it.group !== lastGroup ? it.group : null;
             lastGroup = it.group;
             return (
-              <div key={it.id}>
-                {header && <div style={{ fontSize: 11, color: C.dim, padding: i === 0 ? "6px 10px 4px" : "12px 10px 4px", letterSpacing: "0.02em" }}>{header}</div>}
+              <div key={it.id} role="presentation">
+                {header && <div role="presentation" aria-hidden style={{ fontSize: 11, color: C.dim, padding: i === 0 ? "6px 10px 4px" : "12px 10px 4px", letterSpacing: "0.02em" }}>{header}</div>}
                 <button
                   type="button"
+                  role="option"
+                  id={`vf-palette-opt-${i}`}
+                  tabIndex={-1}
                   data-index={i}
                   onClick={() => run(it)}
                   onMouseMove={() => setSel(i)}
@@ -170,7 +180,7 @@ export function CmdK({ projects, go, onClose }: { projects: Project[]; go: Go; o
                   }}
                 >
                   <span style={{ fontSize: 13, color: i === sel ? C.text : C.text2, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.label}</span>
-                  {it.hint === "" ? null : it.group === "Pages" || (it.group === "Recent" && it.hint.startsWith("g ")) ? (
+                  {it.hint === "" ? null : it.group === "Pages" || (it.group === "Recent" && (it.hint.startsWith("g ") || it.hint === "?")) ? (
                     <span style={{ display: "inline-flex", gap: 3 }}>
                       {it.hint.split(" ").map((k, ki) => (
                         <Kbd key={ki}>{k}</Kbd>

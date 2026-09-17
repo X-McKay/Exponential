@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { AGENT_KIND_LABEL, AGENT_STATUS_LABEL, RUN_STATE_ICON, STEP_LABEL, agentStats, budgetLine, explainRuns, fmtTokens, fmtUsd, pendingProposals, relTime, runsInScope, runsOf, spendOf } from "@valueflow/domain";
-import type { Agent, AgentRun, Budget, LlmInfo, Project, ProjectTab, PromptVersion, Proposal, Rule, RunScore } from "@valueflow/domain";
+import type { Agent, AgentRun, Budget, LlmInfo, Project, ProjectTab, ProjectTemplate, PromptVersion, Proposal, Rule, RunScore } from "@valueflow/domain";
 import type { RuleInput, RunAgentInput } from "@valueflow/shared";
 import { PMWorkspace } from "../ui/PMWorkspace.tsx";
 import { RunAgentEditor, RunViewer } from "../editors/RunAgent.tsx";
@@ -10,9 +10,10 @@ import type { AgentsSection } from "../router.ts";
 import { AGENTS_SECTIONS } from "../router.ts";
 import { Why } from "../ui/Explain.tsx";
 import { QualityTable } from "../ui/QualityTable.tsx";
+import { EconomicsPanel } from "../ui/Economics.tsx";
 import { RulesPanel } from "../ui/RulesPanel.tsx";
 import { BudgetEditor, SpendBar, budgetColor } from "../ui/Spend.tsx";
-import { Avatar, Caret, Chip, Kbd, Kpi, ListRow, SectionCard, Tip, ghostBtn, reset } from "../ui/primitives.tsx";
+import { Avatar, Caret, Chip, Kbd, Kpi, ListRow, SectionCard, Tip, arrowTabs, ghostBtn, reset } from "../ui/primitives.tsx";
 import { AGENT_STATUS, C, RUN_COLOR } from "../theme.ts";
 
 function AgentAvatar({ a, size = 26 }: { a: Agent; size?: number }) {
@@ -41,7 +42,7 @@ function AgentAvatar({ a, size = 26 }: { a: Agent; size?: number }) {
 const shortProjectName = (p: Project | undefined): string => (p ? p.name.split(" ").slice(0, 2).join(" ") : "");
 /** A run still "working" after this long with no live events was started by another process, or before run logs existed. */
 const isStale = (startedAt: string): boolean => Date.now() - new Date(startedAt).getTime() > 10 * 60_000;
-const SECTION_LABEL: Record<AgentsSection, string> = { agents: "Agents", rules: "Standing rules", quality: "Quality" };
+const SECTION_LABEL: Record<AgentsSection, string> = { agents: "Agents", rules: "Standing rules", quality: "Quality", economics: "Economics" };
 
 export function AgentsPage({
   agents,
@@ -75,6 +76,7 @@ export function AgentsPage({
   onDeleteRule,
   onSaveBudgets,
   spendRuns,
+  templates = [],
 }: {
   agents: Agent[];
   runs: AgentRun[];
@@ -109,6 +111,7 @@ export function AgentsPage({
   onSaveBudgets: (budgets: Budget[]) => Promise<unknown>;
   /** Usage-ledger rows used only for spend totals; regular runs remain the activity view. */
   spendRuns?: AgentRun[];
+  templates?: ProjectTemplate[];
 }) {
   const prices = llm?.prices ?? {};
   const accountingRuns = spendRuns ?? runs;
@@ -198,14 +201,17 @@ export function AgentsPage({
         />
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 4, borderBottom: `1px solid ${C.line}`, marginBottom: 14 }}>
+      <div role="tablist" aria-label="Agents sections" style={{ display: "flex", alignItems: "center", gap: 4, borderBottom: `1px solid ${C.line}`, marginBottom: 14 }} onKeyDown={(e) => arrowTabs(e, AGENTS_SECTIONS, section, onSection)}>
         {AGENTS_SECTIONS.map((s) => (
           <button
             key={s}
             type="button"
+            role="tab"
+            data-tab={s}
+            tabIndex={section === s ? 0 : -1}
+            aria-selected={section === s}
             onClick={() => onSection(s)}
             className="vf-tab"
-            aria-current={section === s ? "page" : undefined}
             style={{ ...reset, fontSize: 13, padding: "7px 12px", color: section === s ? C.text : C.mut, borderBottom: `2px solid ${section === s ? C.indigo : "transparent"}`, transition: "color .12s, border-color .12s" }}
           >
             {SECTION_LABEL[s]}
@@ -449,6 +455,10 @@ export function AgentsPage({
             }}
           />
         </SectionCard>
+      )}
+
+      {section === "economics" && (
+        <EconomicsPanel agents={agents} projects={projects} templates={templates} runs={runs} proposals={proposals} prices={prices} asOf={asOf} onOpenProject={(id) => onOpen(id, "overview")} onOpenAgent={(id) => { setOpen(id); setDetail(id); onSection("agents"); }} />
       )}
 
       <div style={{ fontSize: 12, color: C.dim, lineHeight: 1.6, maxWidth: 720 }}>

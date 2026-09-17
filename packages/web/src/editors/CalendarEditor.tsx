@@ -68,16 +68,16 @@ export function CalendarEditor({
       }
     >
       {saveError && <div role="alert" style={{ color: C.redHi, fontSize: 12, margin: "8px 0" }}>Could not save: {saveError}</div>}
-      <Lbl>What</Lbl>
-      <input style={inpStyle} value={d.text} autoFocus={isNew} placeholder="e.g. Pen test window opens" onChange={(e) => set({ text: e.target.value })} />
+      <Lbl htmlFor="vf-calendareditor-what">What</Lbl>
+      <input id="vf-calendareditor-what" style={inpStyle} value={d.text} autoFocus={isNew} placeholder="e.g. Pen test window opens" onChange={(e) => set({ text: e.target.value })} />
       <div style={{ display: "grid", gridTemplateColumns: "130px 1fr 1fr", gap: 10 }}>
         <div>
-          <Lbl>Date</Lbl>
-          <input style={{ ...inpStyle, borderColor: dateOk ? C.line2 : C.badLine2 }} value={d.date} placeholder="YYYY-MM-DD" onChange={(e) => set({ date: e.target.value })} />
+          <Lbl htmlFor="vf-calendareditor-date">Date</Lbl>
+          <input id="vf-calendareditor-date" style={{ ...inpStyle, borderColor: dateOk ? C.line2 : C.badLine2 }} value={d.date} placeholder="YYYY-MM-DD" onChange={(e) => set({ date: e.target.value })} />
         </div>
         <div>
-          <Lbl>Project</Lbl>
-          <select style={inpStyle} value={d.proj} onChange={(e) => set({ proj: e.target.value })}>
+          <Lbl htmlFor="vf-calendareditor-project">Project</Lbl>
+          <select id="vf-calendareditor-project" style={inpStyle} value={d.proj} onChange={(e) => set({ proj: e.target.value })}>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -86,8 +86,8 @@ export function CalendarEditor({
           </select>
         </div>
         <div>
-          <Lbl>Opens</Lbl>
-          <select
+          <Lbl htmlFor="vf-calendareditor-opens">Opens</Lbl>
+          <select id="vf-calendareditor-opens"
             style={inpStyle}
             value={d.tab}
             onChange={(e) => {
@@ -102,8 +102,8 @@ export function CalendarEditor({
           </select>
         </div>
       </div>
-      <Lbl>Detail</Lbl>
-      <input style={inpStyle} value={d.sub ?? ""} placeholder="optional context shown under the item" onChange={(e) => set({ sub: e.target.value })} />
+      <Lbl htmlFor="vf-calendareditor-detail">Detail</Lbl>
+      <input id="vf-calendareditor-detail" style={inpStyle} value={d.sub ?? ""} placeholder="optional context shown under the item" onChange={(e) => set({ sub: e.target.value })} />
       <div style={{ fontSize: 12, color: C.dim, marginTop: 10 }}>Release target months appear on the calendar automatically; only add events that are not releases.</div>
     </Modal>
   );

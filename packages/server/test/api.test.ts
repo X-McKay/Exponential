@@ -11,7 +11,7 @@ describe("seed", () => {
     const { status, body } = await app.get<AppState>(routes.state());
     expect(status).toBe(200);
     // The server knows when each reading was taken; the fixtures do not carry that.
-    const { usageRuns: _usageRuns, ...withoutUsageRuns } = body;
+    const { usageRuns: _usageRuns, templateVersions: _versions, ...withoutUsageRuns } = body;
     const stripped: AppState = {
       ...withoutUsageRuns,
       projects: body.projects.map((p) => ({

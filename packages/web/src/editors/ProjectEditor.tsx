@@ -52,6 +52,7 @@ const fromProject = (p: Project): ProjectInput => ({
   repos: p.repos.map((r) => ({ ...r })),
   team: p.team.map((t) => ({ ...t })),
   targets: { ...p.targets },
+  template: p.template ? { ...p.template } : null,
 });
 
 const removeBtn = { ...ghostBtn, width: 26, height: 32, padding: 0, justifyContent: "center", border: "1px solid transparent" } as const;
@@ -207,8 +208,8 @@ export function ProjectEditor({
 
       <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <div>
-          <Lbl>Stage</Lbl>
-          <input list="vf-stages" style={inpStyle} value={d.stage} onChange={(e) => set({ stage: e.target.value })} />
+          <Lbl htmlFor="vf-projecteditor-stage">Stage</Lbl>
+          <input id="vf-projecteditor-stage" list="vf-stages" style={inpStyle} value={d.stage} onChange={(e) => set({ stage: e.target.value })} />
           <datalist id="vf-stages">
             {STAGES.map((s) => (
               <option key={s} value={s} />
@@ -216,8 +217,8 @@ export function ProjectEditor({
           </datalist>
         </div>
         <div>
-          <Lbl>AI risk tier</Lbl>
-          <select style={inpStyle} value={d.tier ?? ""} onChange={(e) => set({ tier: e.target.value === "" ? null : (Number(e.target.value) as RiskTier) })}>
+          <Lbl htmlFor="vf-projecteditor-ai-risk-tier">AI risk tier</Lbl>
+          <select id="vf-projecteditor-ai-risk-tier" style={inpStyle} value={d.tier ?? ""} onChange={(e) => set({ tier: e.target.value === "" ? null : (Number(e.target.value) as RiskTier) })}>
             <option value="">Untiered</option>
             <option value="1">Tier 1 · High risk</option>
             <option value="2">Tier 2 · Medium risk</option>
@@ -228,8 +229,8 @@ export function ProjectEditor({
 
       <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <div>
-          <Lbl>AI committee approval date</Lbl>
-          <input
+          <Lbl htmlFor="vf-projecteditor-ai-committee-approval-date">AI committee approval date</Lbl>
+          <input id="vf-projecteditor-ai-committee-approval-date"
             style={{ ...inpStyle, borderColor: committeeOk ? C.line2 : C.badLine2 }}
             value={committee.date}
             placeholder="YYYY-MM-DD (blank = pending)"
@@ -237,13 +238,13 @@ export function ProjectEditor({
           />
         </div>
         <div>
-          <Lbl>Committee reference</Lbl>
-          <input style={inpStyle} value={committee.ref} placeholder="AIC-2026-…" onChange={(e) => setCommittee((c) => ({ ...c, ref: e.target.value }))} />
+          <Lbl htmlFor="vf-projecteditor-committee-reference">Committee reference</Lbl>
+          <input id="vf-projecteditor-committee-reference" style={inpStyle} value={committee.ref} placeholder="AIC-2026-…" onChange={(e) => setCommittee((c) => ({ ...c, ref: e.target.value }))} />
         </div>
       </div>
 
-      <Lbl>Description</Lbl>
-      <textarea
+      <Lbl htmlFor="vf-projecteditor-description">Description</Lbl>
+      <textarea id="vf-projecteditor-description"
         style={{ ...inpStyle, height: "auto", minHeight: 76, padding: "8px 10px", resize: "vertical", lineHeight: 1.5 }}
         value={d.description}
         onChange={(e) => set({ description: e.target.value })}
@@ -251,12 +252,12 @@ export function ProjectEditor({
 
       <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <div>
-          <Lbl>FTE reduction target (%)</Lbl>
-          <input type="number" min={0} max={100} step={1} style={{ ...inpStyle, borderColor: pctOk(d.targets.fte) ? C.line2 : C.badLine2 }} value={d.targets.fte} onChange={(e) => set({ targets: { ...d.targets, fte: num(e.target.value) } })} />
+          <Lbl htmlFor="vf-projecteditor-fte-reduction-target">FTE reduction target (%)</Lbl>
+          <input id="vf-projecteditor-fte-reduction-target" type="number" min={0} max={100} step={1} style={{ ...inpStyle, borderColor: pctOk(d.targets.fte) ? C.line2 : C.badLine2 }} value={d.targets.fte} onChange={(e) => set({ targets: { ...d.targets, fte: num(e.target.value) } })} />
         </div>
         <div>
-          <Lbl>Time reduction target (%)</Lbl>
-          <input type="number" min={0} max={100} step={1} style={{ ...inpStyle, borderColor: pctOk(d.targets.time) ? C.line2 : C.badLine2 }} value={d.targets.time} onChange={(e) => set({ targets: { ...d.targets, time: num(e.target.value) } })} />
+          <Lbl htmlFor="vf-projecteditor-time-reduction-target">Time reduction target (%)</Lbl>
+          <input id="vf-projecteditor-time-reduction-target" type="number" min={0} max={100} step={1} style={{ ...inpStyle, borderColor: pctOk(d.targets.time) ? C.line2 : C.badLine2 }} value={d.targets.time} onChange={(e) => set({ targets: { ...d.targets, time: num(e.target.value) } })} />
         </div>
       </div>
       {!targetsOk && <div style={{ fontSize: 11.5, color: C.redHi, marginTop: 4 }}>Targets are percentages between 0 and 100.</div>}
@@ -324,6 +325,18 @@ export function ProjectEditor({
           </Tip>
         </div>
       ))}
+      {!isNew && templates.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <Lbl htmlFor="vf-follows-template">Follows template</Lbl>
+          <select id="vf-follows-template" style={inpStyle} value={d.template?.id ?? ""} onChange={(e) => set({ template: e.target.value ? { id: e.target.value, version: d.template?.id === e.target.value ? d.template.version : null } : null })}>
+            <option value="">None</option>
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+          <div style={{ fontSize: 11.5, color: C.dim, marginTop: 4 }}>The Governance page compares the project's documents and dependencies with this template and can stage what is missing for approval.</div>
+        </div>
+      )}
       {!isNew && (
         <div style={{ fontSize: 12, color: C.dim, marginTop: 14 }}>Milestones, governance items, and releases are edited on their own pages. Deleting the project removes all of them.</div>
       )}

@@ -1,12 +1,13 @@
 import { sessionHeaders } from "./session.ts";
 // ================= typed API client =================
 
-import type { Agent, AgentRun, Budget, CalendarEvent, DevFacts, DailyBrief, GovernanceItem, RunEvent, ImpactPair, Metric, MetricReading, Milestone, Project, ProjectTab, ProjectTemplate, Proposal, Release, Rule, RunScore, SetupDraft, SetupSource, SyncRun, Workspace } from "@valueflow/domain";
+import type { Agent, AgentRun, Budget, CalendarEvent, DevFacts, DailyBrief, GovernanceItem, RunEvent, ImpactPair, Metric, MetricReading, Milestone, Project, ProjectTab, ProjectTemplate, Proposal, Release, Rule, RunScore, SetupDraft, SetupSource, SyncRun, TemplateDrift, TemplateVersion, Workspace } from "@valueflow/domain";
 import { routes } from "@valueflow/shared";
 import type {
   AgentsInput,
   ApiError,
   CalendarEventInput,
+  DriftInput,
   GovernanceInput,
   GovernanceItemInput,
   MilestoneInput,
@@ -22,6 +23,8 @@ import type {
   TargetsInput,
   TemplateCreateInput,
   TemplatesInput,
+  WorkspaceExport,
+  WorkspaceImportInput,
   WorkspaceInput,
 } from "@valueflow/shared";
 
@@ -62,6 +65,31 @@ export const request = async <T>(method: string, path: string, body?: unknown): 
 };
 
 type Ok = { ok: true };
+
+export interface DriftResult {
+  drift: TemplateDrift;
+  run: AgentRun | null;
+  proposals: Proposal[];
+  alreadyStaged: number;
+}
+
+export interface ImportSummary {
+  replaced: boolean;
+  projects: number;
+  milestones: number;
+  governance: number;
+  releases: number;
+  readings: number;
+  calendar: number;
+  agents: number;
+  templates: number;
+  rules: number;
+  runs: number;
+  proposals: number;
+  events: number;
+  members: number;
+  skipped: number;
+}
 
 export interface JobStatus {
   running: boolean;
@@ -124,6 +152,12 @@ export const api = {
   templates: () => request<ProjectTemplate[]>("GET", routes.templates()),
   setTemplates: (body: TemplatesInput) => request<ProjectTemplate[]>("PUT", routes.templates(), body),
   createFromTemplate: (tid: string, body: TemplateCreateInput) => request<Project>("POST", routes.templateCreate(tid), body),
+  templateVersions: (tid: string) => request<(TemplateVersion & { doc: ProjectTemplate })[]>("GET", routes.templateVersions(tid)),
+  /** What the project lacks against its template, with the backfill staged as proposals for the inbox. */
+  projectDrift: (pid: string, body: DriftInput) => request<DriftResult>("POST", routes.projectDrift(pid), body),
+  /** The whole workspace as one JSON document (fetched with the session headers, then handed to the browser as a download). */
+  exportWorkspace: () => request<WorkspaceExport>("GET", routes.workspaceExport()),
+  importWorkspace: (body: WorkspaceImportInput) => request<ImportSummary>("POST", routes.workspaceImport(), body),
   /** Stage changes from documents as proposals; nothing is applied until they are accepted in the inbox. */
   projectUpdate: (pid: string, form: FormData) => request<{ run: AgentRun; proposals: Proposal[]; dropped: number; sources: SetupSource[] }>("POST", routes.projectUpdate(pid), form),
   acceptProposal: (id: string) => request<Proposal>("POST", routes.proposalAccept(id)),

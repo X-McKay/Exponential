@@ -89,8 +89,8 @@ function RuleEditor({
         the rule asks for into proposals. Ask it to "flag me" when a person
         should look.
       </div>
-      <Lbl>Rule</Lbl>
-      <textarea
+      <Lbl htmlFor="vf-rulespanel-rule">Rule</Lbl>
+      <textarea id="vf-rulespanel-rule"
         style={{
           ...inpStyle,
           height: "auto",
@@ -109,8 +109,8 @@ function RuleEditor({
         style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: 10 }}
       >
         <div>
-          <Lbl>Applies to</Lbl>
-          <select
+          <Lbl htmlFor="vf-rulespanel-applies-to">Applies to</Lbl>
+          <select id="vf-rulespanel-applies-to"
             style={inpStyle}
             value={proj}
             onChange={(e) => setProj(e.target.value)}
@@ -124,8 +124,8 @@ function RuleEditor({
           </select>
         </div>
         <div>
-          <Lbl>Owner</Lbl>
-          <input
+          <Lbl htmlFor="vf-rulespanel-owner">Owner</Lbl>
+          <input id="vf-rulespanel-owner"
             style={inpStyle}
             value={owner}
             maxLength={3}

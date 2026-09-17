@@ -12,6 +12,7 @@ import { UpdateWizard } from "./editors/UpdateWizard.tsx";
 import { WorkspaceEditor } from "./editors/WorkspaceEditor.tsx";
 import { CmdK } from "./palette/CmdK.tsx";
 import { ChatPanel } from "./ui/ChatPanel.tsx";
+import { ShortcutsDialog } from "./ui/Shortcuts.tsx";
 import { ExplainProvider } from "./ui/Explain.tsx";
 import { AgentsPage } from "./pages/AgentsPage.tsx";
 import { DataPage } from "./pages/DataPage.tsx";
@@ -26,7 +27,7 @@ import { ValuePage } from "./pages/ValuePage.tsx";
 import { CHORDS, useKeyboard, useNarrow, useView } from "./router.ts";
 import type { AgentsSection, Page, View } from "./router.ts";
 import { useStore } from "./state/store.ts";
-import { JobBar, Kbd, Skeleton, TierBadge, Tip, Toasts, reset } from "./ui/primitives.tsx";
+import { JobBar, Kbd, Skeleton, TierBadge, Tip, Toasts, arrowTabs, reset } from "./ui/primitives.tsx";
 import { BrandMark } from "./ui/BrandMark.tsx";
 import { C, FONT, applyTheme, readTheme } from "./theme.ts";
 import type { ThemeChoice } from "./theme.ts";
@@ -172,6 +173,7 @@ export function App() {
   const [dim, setDim] = useState<Dim>("fte");
   const [palette, setPalette] = useState(false);
   const [chat, setChat] = useState(false);
+  const [help, setHelp] = useState(false);
   const narrow = useNarrow();
   const [sidebarHidden, setSidebarHidden] = useState(() => {
     try { return localStorage.getItem("valueflow.sidebarHidden") === "true"; } catch { return false; }
@@ -215,9 +217,11 @@ export function App() {
     () => ({
       togglePalette: () => setPalette((v) => !v),
       toggleChat: () => setChat((v) => !v),
+      toggleHelp: () => setHelp((v) => !v),
       closeAll: () => {
         setPalette(false);
         setChat(false);
+        setHelp(false);
       },
       goPage: (page: "glance" | "inbox" | "portfolio" | "agents" | "data") => go(page, null),
       goTab: (tab: ProjectTab) => {
@@ -251,7 +255,9 @@ export function App() {
   return (
     <ExplainProvider state={state} onOpen={openProject}>
     <div style={{ display: "flex", minHeight: "100vh", background: C.bg, color: C.text, fontFamily: FONT, fontSize: 14 }}>
-      {palette && <CmdK projects={projects} go={go} onClose={() => setPalette(false)} />}
+      <a className="vf-skip" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById("main")?.focus(); }}>Skip to content</a>
+      {palette && <CmdK projects={projects} go={go} onClose={() => setPalette(false)} onHelp={() => { setPalette(false); setHelp(true); }} />}
+      {help && <ShortcutsDialog onClose={() => setHelp(false)} />}
       {chat && state.llm && (
         <ChatPanel
           state={state}
@@ -361,7 +367,7 @@ export function App() {
         />
       )}
       {!narrow && !sidebarHidden && (
-        <aside id="workspace-sidebar" style={{ width: 232, flexShrink: 0, borderRight: `1px solid ${C.line}`, padding: "14px 10px", display: "flex", flexDirection: "column" }}>
+        <aside id="workspace-sidebar" aria-label="Workspace" style={{ width: 232, flexShrink: 0, borderRight: `1px solid ${C.line}`, padding: "14px 10px", display: "flex", flexDirection: "column" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px 12px" }}>
             <span style={{ borderRadius: "50%", boxShadow: `0 0 14px ${C.accentLine2}` }}><BrandMark size={22} /></span>
             <span style={{ fontSize: 14, fontWeight: 550, letterSpacing: "-0.01em", flex: 1 }}>Exponential</span>
@@ -382,12 +388,20 @@ export function App() {
             <span style={{ fontSize: 12, color: C.dim, flex: 1 }}>Jump to…</span>
             <Kbd>⌘K</Kbd>
           </button>
-          <NavItem label="Glance" icon="glance" keys={["g", "g"]} active={view.page === "glance"} onClick={() => go("glance", null)} />
-          <NavItem label="Inbox" icon="inbox" keys={["g", "i"]} badge={waiting} active={view.page === "inbox"} onClick={() => go("inbox", null)} />
-          <NavItem label="Portfolio" icon="portfolio" keys={["g", "p"]} active={view.page === "portfolio"} onClick={() => go("portfolio", null)} />
-          <NavItem label="Agents" icon="agents" keys={["g", "a"]} active={view.page === "agents"} onClick={() => go("agents", null)} />
-          <NavItem label="Data" icon="data" active={view.page === "data"} onClick={() => go("data", null)} />
+          <nav aria-label="Pages">
+            <NavItem label="Glance" icon="glance" keys={["g", "g"]} active={view.page === "glance"} onClick={() => go("glance", null)} />
+            <NavItem label="Inbox" icon="inbox" keys={["g", "i"]} badge={waiting} active={view.page === "inbox"} onClick={() => go("inbox", null)} />
+            <NavItem label="Portfolio" icon="portfolio" keys={["g", "p"]} active={view.page === "portfolio"} onClick={() => go("portfolio", null)} />
+            <NavItem label="Agents" icon="agents" keys={["g", "a"]} active={view.page === "agents"} onClick={() => go("agents", null)} />
+            <NavItem label="Data" icon="data" active={view.page === "data"} onClick={() => go("data", null)} />
+          </nav>
           <div style={{ flex: 1 }} />
+          <Tip label="Keyboard shortcuts" keys={["?"]} side="right" style={{ display: "flex", width: "100%" }}>
+            <button type="button" className="vf-nav" onClick={() => setHelp(true)} style={{ ...reset, display: "flex", alignItems: "center", gap: 8, width: "100%", height: 28, padding: "0 8px", borderRadius: 6, color: C.mut, fontSize: 12 }}>
+              <span style={{ display: "inline-flex", color: C.dim, width: 14, justifyContent: "center" }}><Kbd>?</Kbd></span>
+              <span style={{ flex: 1, textAlign: "left" }}>Keyboard shortcuts</span>
+            </button>
+          </Tip>
           <Tip label={themeLabel[theme]} side="right" style={{ display: "flex", width: "100%" }}>
             <button
               type="button"
@@ -420,7 +434,7 @@ export function App() {
         </aside>
       )}
 
-      <main className="vf-container" style={{ flex: 1, minWidth: 0 }}>
+      <main id="main" tabIndex={-1} className="vf-container" style={{ flex: 1, minWidth: 0, outline: "none" }}>
         {sessionRole() === "viewer" && <div role="status" style={{ padding: "10px 20px", color: C.mut, borderBottom: `1px solid ${C.line}` }}>Viewer mode: shared data is read-only. Select Editor or Administrator to make changes.</div>}
         {!narrow && sidebarHidden && (
           <div style={{ padding: "8px 20px", borderBottom: `1px solid ${C.line}` }}>
@@ -530,6 +544,7 @@ export function App() {
               onDeleteRule={(id) => store.deleteRule(id)}
               onSaveBudgets={(b) => store.saveBudgets(b)}
               spendRuns={spendRuns}
+              templates={state.templates ?? []}
             />
           </>
         ) : view.page === "portfolio" ? (
@@ -559,6 +574,8 @@ export function App() {
               onCalendar={(ev, isNew) => store.saveCalendar(ev, isNew)}
               onDeleteCalendar={(id) => store.deleteCalendar(id)}
               onSync={store.syncProject}
+              onImport={store.importWorkspace}
+              onOpen={(id) => openProject(id, "governance")}
             />
           </>
         ) : proj ? (
@@ -579,14 +596,17 @@ export function App() {
                     {PROJECT_TABS.map((k) => <option key={k} value={k}>{TAB_LABEL[k]}</option>)}
                   </select>
                 </label>
-              ) : <div style={{ display: "flex", gap: 4, marginTop: 10 }}>
+              ) : <div role="tablist" aria-label="Project views" style={{ display: "flex", gap: 4, marginTop: 10 }} onKeyDown={(e) => arrowTabs(e, PROJECT_TABS, view.tab, (k) => openProject(proj.id, k))}>
                 {PROJECT_TABS.map((k) => (
                   <button
                     key={k}
                     type="button"
+                    role="tab"
+                    data-tab={k}
+                    tabIndex={view.tab === k ? 0 : -1}
+                    aria-selected={view.tab === k}
                     onClick={() => openProject(proj.id, k)}
                     className="vf-tab"
-                    aria-current={view.tab === k ? "page" : undefined}
                     style={{ ...reset, fontSize: 13, padding: "7px 12px", color: view.tab === k ? C.text : C.mut, borderBottom: `2px solid ${view.tab === k ? C.indigo : "transparent"}`, transition: "color .12s, border-color .12s" }}
                   >
                     {TAB_LABEL[k]}
@@ -650,6 +670,11 @@ export function App() {
                 defaultOwner={user.ini}
                 onSaveGov={(pid, item, isNew) => store.saveGovernance(pid, item, isNew)}
                 onDeleteGov={(pid, gid) => store.deleteGovernance(pid, gid)}
+                templates={state.templates ?? []}
+                templateVersions={state.templateVersions ?? []}
+                proposals={state.proposals}
+                onDrift={store.stageDrift}
+                onOpenInbox={() => go("inbox", null)}
               />
             )}
           </>

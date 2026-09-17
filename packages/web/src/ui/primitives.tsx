@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { TIER_LABEL } from "@valueflow/domain";
 import type { MilestoneStatus, RiskTier } from "@valueflow/domain";
@@ -105,19 +105,37 @@ export function Kpi({ label, value, sub, color = C.text, ring }: { label: string
   );
 }
 
+/** A card with an optional heading. The title is a real heading so assistive technology can move between sections. */
 export function SectionCard({ title, right, children, pad = "14px" }: { title?: string; right?: ReactNode; children: ReactNode; pad?: string }) {
+  const id = useId();
   return (
-    <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, marginBottom: 14 }}>
+    <section aria-labelledby={title ? id : undefined} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, marginBottom: 14 }}>
       {(title || right) && (
         <div className="vf-section-head" style={{ padding: "12px 14px", borderBottom: `1px solid ${C.line}` }}>
-          <span style={{ fontSize: 13, fontWeight: 550, letterSpacing: "-0.01em", minWidth: 0, overflowWrap: "anywhere" }}>{title}</span>
+          {title ? <h2 id={id} style={{ margin: 0, fontSize: 13, fontWeight: 550, letterSpacing: "-0.01em", minWidth: 0, overflowWrap: "anywhere" }}>{title}</h2> : <span />}
           {right}
         </div>
       )}
       <div style={{ padding: pad }}>{children}</div>
-    </div>
+    </section>
   );
 }
+
+/**
+ * Arrow-key movement along a row of tabs or segmented buttons: Left/Right (and
+ * Home/End) move to the neighbouring key and hand it focus, so a keyboard user
+ * never has to Tab through every tab to reach the last one.
+ */
+export const arrowTabs = <K extends string>(e: ReactKeyboardEvent<HTMLElement>, keys: readonly K[], current: K, go: (k: K) => void): void => {
+  const i = keys.indexOf(current);
+  if (i < 0) return;
+  const next = e.key === "ArrowRight" ? keys[(i + 1) % keys.length] : e.key === "ArrowLeft" ? keys[(i - 1 + keys.length) % keys.length] : e.key === "Home" ? keys[0] : e.key === "End" ? keys[keys.length - 1] : undefined;
+  if (next === undefined) return;
+  e.preventDefault();
+  const host = e.currentTarget;
+  go(next);
+  requestAnimationFrame(() => host.querySelector<HTMLElement>(`[data-tab="${next}"]`)?.focus());
+};
 
 export function StatusIcon({ status, size = 11 }: { status: MilestoneStatus; size?: number }) {
   const c = STATUS_COLOR[status];
@@ -293,6 +311,7 @@ export function Modal({
   width?: number;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
   const restoreRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
   useEffect(() => {
@@ -347,7 +366,7 @@ export function Modal({
         className="vf-modal"
         role="dialog"
         aria-modal
-          aria-labelledby="vf-dialog-title"
+        aria-labelledby={titleId}
         style={{
           width: "100%",
           maxWidth: width,
@@ -361,7 +380,7 @@ export function Modal({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 20px 0", position: "sticky", top: 0, background: C.raised, zIndex: 2 }}>
-          <span id="vf-dialog-title" style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em" }}>{title}</span>
+          <h2 id={titleId} style={{ margin: 0, fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em" }}>{title}</h2>
           <Tip label="Close" keys={["esc"]}>
             <button type="button" onClick={onClose} aria-label="Close" className="vf-ghost" style={{ ...ghostBtn, width: 26, padding: 0, justifyContent: "center", border: "1px solid transparent" }}>
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">

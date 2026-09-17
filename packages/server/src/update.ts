@@ -8,8 +8,8 @@
 // having moved in the meantime.
 
 import type { Database } from "bun:sqlite";
-import { GOV_STATUSES, MILESTONE_STATUSES, calendarOf, ymOf } from "@valueflow/domain";
-import type { Agent, AgentRun, AppState, Project, Proposal, ProposalAction, Release } from "@valueflow/domain";
+import { GOV_STATUSES, MILESTONE_STATUSES, calendarOf, evidenceFor, ymOf } from "@valueflow/domain";
+import type { Agent, AgentRun, AppState, Project, Proposal, ProposalAction, ProposalEvidence, Release } from "@valueflow/domain";
 import { ProposalActionSchema } from "@valueflow/shared";
 import { projectContext } from "./agents.ts";
 import { ruleScores } from "./evals.ts";
@@ -30,8 +30,14 @@ export const MAX_UPDATE_PROPOSALS = 24;
 const shape = (type: string, fields: Record<string, unknown>, required: string[]) => ({
   type: "object",
   additionalProperties: false,
-  properties: { type: { type: "string", enum: [type] }, source: { type: "string", description: "Name of the document this change comes from." }, rationale: { type: "string", description: "One sentence quoting or paraphrasing the evidence." }, ...fields },
-  required: ["type", "source", "rationale", ...required],
+  properties: {
+    type: { type: "string", enum: [type] },
+    source: { type: "string", description: "Name of the document this change comes from, exactly as given in the briefing." },
+    quote: { type: "string", description: "The passage from that document that supports the change, copied verbatim (one or two sentences, at most 300 characters). Empty when the change follows from the note alone." },
+    rationale: { type: "string", description: "One sentence saying why the passage means the record should change." },
+    ...fields,
+  },
+  required: ["type", "source", "quote", "rationale", ...required],
 });
 const impact = {
   type: "object",
@@ -106,14 +112,14 @@ export const buildUpdateMessages = (agent: Pick<Agent, "name" | "prompt">, state
         `You are ${agent.name}, the project-setup agent in Exponential, an AI-project delivery platform. New documents have arrived for an existing project. Compare them with the project's current record and stage the changes they support. A person reviews every change before it is applied.`,
         `Today is ${todayYm}. Exponential tracks value that is only eligible when milestones ship AND their eval metrics clear a gate; releases go live only when every criterion is met.`,
         "Rules:",
-        "- Propose only what a document states or plainly implies; cite the document in every proposal's source and rationale. Never invent people, dates, numbers, or approvals.",
+        "- Propose only what a document states or plainly implies; name the document in every proposal's source and copy the supporting passage into quote, verbatim. Never invent people, dates, numbers, or approvals.",
         "- Compare with the current record first. Do not propose a value the record already has, and do not repeat the same change twice.",
         "- Use the ids from the briefing (MS-n for milestones, R-n for releases, governance ids as given). Create a new milestone, release, or governance item only when nothing in the record matches it; otherwise update the existing one.",
         "- A status becomes approved or shipped only when a document says it happened. Plans, intentions, and targets are not approvals.",
         "- Committee approval needs an explicit date AND reference in a document; otherwise leave it unchanged.",
         "- Fields set to null are left as they are. Keep proposals small and specific; several small proposals are better than one that changes everything.",
         "- Put contradictions and anything that does not fit a shape in notes.",
-        "Each proposal uses exactly one of these shapes, plus a source and a one-sentence rationale:",
+        "Each proposal uses exactly one of these shapes, plus a source, a verbatim quote, and a one-sentence rationale:",
         ...SHAPE_LINES,
         'Reply with a JSON object: {"summary": string, "notes": [...], "proposals": [...]}.',
         ...(agent.prompt ? [`\nAdditional instructions from the workspace (follow these; they refine the task above):\n${agent.prompt}`] : []),
@@ -277,19 +283,19 @@ const normalizeAction = (raw: Record<string, unknown>, project: Project, release
 export interface ParsedUpdate {
   summary: string;
   notes: string[];
-  proposals: { action: ProposalAction; rationale: string }[];
+  proposals: { action: ProposalAction; rationale: string; evidence: ProposalEvidence | null }[];
   returned: number;
 }
 
-/** Keep only well-formed proposals that change something the project has; the rest are counted, not stored. */
-export const parseUpdate = (raw: unknown, project: Project, releases: Release[], defaultOwner: string): ParsedUpdate => {
+/** Keep only well-formed proposals that change something the project has; the rest are counted, not stored. Each keeps the passage it cites, verified against the documents it was read from. */
+export const parseUpdate = (raw: unknown, project: Project, releases: Release[], defaultOwner: string, sources: readonly { name: string; text: string }[] = []): ParsedUpdate => {
   const o = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
   const items = Array.isArray(o.proposals) ? o.proposals.slice(0, MAX_UPDATE_PROPOSALS) : [];
   const seen = new Set<string>();
   const proposals: ParsedUpdate["proposals"] = [];
   for (const item of items) {
     if (typeof item !== "object" || item === null) continue;
-    const { rationale, source, ...rest } = item as Record<string, unknown>;
+    const { rationale, source, quote, ...rest } = item as Record<string, unknown>;
     const shaped = normalizeAction(rest, project, releases, defaultOwner);
     if (!shaped) continue;
     const parsed = ProposalActionSchema.safeParse(shaped);
@@ -298,7 +304,7 @@ export const parseUpdate = (raw: unknown, project: Project, releases: Release[],
     if (seen.has(key)) continue;
     seen.add(key);
     const why = [typeof source === "string" && source.trim() ? `${source.trim()}: ` : "", typeof rationale === "string" ? rationale.trim() : ""].join("").slice(0, 400);
-    proposals.push({ action: parsed.data, rationale: why });
+    proposals.push({ action: parsed.data, rationale: why, evidence: evidenceFor(typeof source === "string" ? source : null, typeof quote === "string" ? quote : null, sources) });
   }
   return {
     summary: (typeof o.summary === "string" && o.summary.trim() ? o.summary.trim() : "Reviewed the documents").slice(0, 140),
@@ -358,7 +364,7 @@ export const proposeProjectUpdates = async (db: Database, llm: Llm, pid: string,
     const asked = Date.now();
     const res = await callLlm(db, llm, { agentId: agent.id, proj: project.id, runId: run.id }, messages, { jsonSchema: UPDATE_SCHEMA, maxTokens: 6000, temperature: 0.2, timeoutMs: 240_000, model: agent.model, onToken: t.token }, now);
     t.step("reply", replyDetail(res.usage, Date.now() - asked, res.truncated));
-    const parsed = parseUpdate(extractJson(res.content), project, state.releases[project.id] ?? [], state.workspace.user.ini);
+    const parsed = parseUpdate(extractJson(res.content), project, state.releases[project.id] ?? [], state.workspace.user.ini, usable);
     t.step("parsed", parsed.summary);
     const dropped = parsed.returned - parsed.proposals.length;
     t.step("proposals", parsed.returned ? `kept ${parsed.proposals.length} of ${parsed.returned} returned${dropped ? " (the rest changed nothing, repeated another, or named things the project does not have)" : ""}` : "none returned");
@@ -386,7 +392,7 @@ export const proposeProjectUpdates = async (db: Database, llm: Llm, pid: string,
     const proposals: Proposal[] = [];
     db.transaction(() => {
       for (const pr of parsed.proposals) {
-        const proposal: Proposal = { id: nextStoredProposalId(db), runId: run.id, agentId: agent.id, proj: project.id, ruleId: null, action: pr.action, rationale: pr.rationale, state: "pending", createdAt: now.toISOString(), decidedAt: null };
+        const proposal: Proposal = { id: nextStoredProposalId(db), runId: run.id, agentId: agent.id, proj: project.id, ruleId: null, action: pr.action, rationale: pr.rationale, state: "pending", createdAt: now.toISOString(), decidedAt: null, evidence: pr.evidence };
         insertProposal(db, proposal);
         registerProposalGuard(db, proposal, state);
         proposals.push(proposal);

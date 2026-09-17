@@ -30,6 +30,15 @@ const noHorizontalOverflow = async (page: Page): Promise<void> => {
 };
 
 test.describe("phone-width layouts", () => {
+  // Stage changes from a document first so Glance and the inbox carry proposals (diff tables, evidence) at phone width.
+  test.beforeAll(async ({ request }) => {
+    const staged = await request.post(`${h.baseUrl}/api/projects/${p.id}/update`, { multipart: { note: "Phone layout check", file: { name: "charter-phone.md", mimeType: "text/markdown", buffer: Buffer.from(h.seed.charters[p.id]!) } }, headers: { "x-valueflow-role": "admin" } });
+    expect(staged.ok(), await staged.text()).toBeTruthy();
+  });
+  test.afterAll(async ({ request }) => {
+    const state = await (await request.get(`${h.baseUrl}/api/state`)).json() as { proposals: { id: string; state: string }[] };
+    for (const x of state.proposals.filter((y) => y.state === "pending")) await request.post(`${h.baseUrl}/api/proposals/${x.id}/dismiss`, { headers: { "x-valueflow-role": "admin" } });
+  });
   for (const [name, hash] of [
     ["glance", "/#/glance"],
     ["portfolio", "/#/portfolio"],

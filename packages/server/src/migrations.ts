@@ -509,6 +509,21 @@ export const MIGRATIONS: readonly string[] = [
   `
   CREATE TABLE project_templates (id TEXT PRIMARY KEY, sort INTEGER NOT NULL, doc TEXT NOT NULL);
   `,
+  // A project remembers the template and version it follows so drift can be
+  // measured; every saved template revision is kept for audit; a proposal
+  // carries the passage it was staged from.
+  `
+  ALTER TABLE projects ADD COLUMN template_id TEXT;
+  ALTER TABLE projects ADD COLUMN template_version INTEGER;
+  ALTER TABLE proposals ADD COLUMN evidence TEXT;
+  CREATE TABLE project_template_versions (
+    template_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    doc TEXT NOT NULL,
+    at TEXT NOT NULL,
+    PRIMARY KEY (template_id, version)
+  );
+  `,
 ];
 
 export const migrate = (db: Database): void => {

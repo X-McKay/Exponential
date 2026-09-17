@@ -280,12 +280,12 @@ export function SetupWizard({ projects, templates = [], cal, defaultOwner, onCre
         </div>
         <div className="vf-fields" style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: 10 }}>
           <div>
-            <Lbl>Project name</Lbl>
-            <input style={inpStyle} value={name} autoFocus maxLength={160} placeholder="e.g. KYC refresh automation" onChange={(e) => setName(e.target.value)} />
+            <Lbl htmlFor="vf-setupwizard-project-name">Project name</Lbl>
+            <input id="vf-setupwizard-project-name" style={inpStyle} value={name} autoFocus maxLength={160} placeholder="e.g. KYC refresh automation" onChange={(e) => setName(e.target.value)} />
           </div>
           <div>
-            <Lbl>Key</Lbl>
-            <input style={inpStyle} value={key} maxLength={16} onChange={(e) => setKey(e.target.value)} />
+            <Lbl htmlFor="vf-setupwizard-key">Key</Lbl>
+            <input id="vf-setupwizard-key" style={inpStyle} value={key} maxLength={16} onChange={(e) => setKey(e.target.value)} />
           </div>
         </div>
         {templates.length > 0 && (
@@ -304,8 +304,8 @@ export function SetupWizard({ projects, templates = [], cal, defaultOwner, onCre
             </div>
           </div>
         )}
-        <Lbl>Brief (optional)</Lbl>
-        <textarea
+        <Lbl htmlFor="vf-setupwizard-brief-optional">Brief (optional)</Lbl>
+        <textarea id="vf-setupwizard-brief-optional"
           style={{ ...inpStyle, height: "auto", minHeight: 64, padding: "8px 10px", resize: "vertical", lineHeight: 1.5 }}
           value={brief}
           placeholder="A sentence or two on what the project does and why it matters."

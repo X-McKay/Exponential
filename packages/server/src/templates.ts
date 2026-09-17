@@ -9,7 +9,7 @@ import type { Database } from "bun:sqlite";
 import { instantiateTemplate, ymOf } from "@valueflow/domain";
 import type { ProjectTemplate } from "@valueflow/domain";
 import type { ReleaseInput, TemplateCreateInput } from "@valueflow/shared";
-import { createGovernanceItem, recordEvent, upsertMilestone, upsertProject, upsertRelease } from "./repo.ts";
+import { createGovernanceItem, currentTemplateVersion, recordEvent, upsertMilestone, upsertProject, upsertRelease } from "./repo.ts";
 
 export type { Project } from "@valueflow/domain";
 export type { ReleaseInput } from "@valueflow/shared";
@@ -20,7 +20,7 @@ export const createFromTemplate = (db: Database, template: ProjectTemplate, inpu
   const milestones = input.documentsOnly ? [] : instance.milestones;
   const releases: ReleaseInput[] = input.documentsOnly ? [] : instance.releases;
   db.transaction(() => {
-    upsertProject(db, input.project, "create");
+    upsertProject(db, { ...input.project, template: { id: template.id, version: currentTemplateVersion(db, template.id) } }, "create");
     for (const m of milestones) upsertMilestone(db, input.project.id, m, "create", now);
     for (const g of instance.governance) createGovernanceItem(db, input.project.id, g);
     for (const r of releases) upsertRelease(db, input.project.id, r, "create");

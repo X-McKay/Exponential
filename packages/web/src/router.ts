@@ -7,8 +7,8 @@ import type { ProjectTab } from "@valueflow/domain";
 export type Page = "glance" | "inbox" | "portfolio" | "agents" | "data" | "project";
 
 /** Sections of the Agents page, each with its own URL. */
-export type AgentsSection = "agents" | "rules" | "quality";
-export const AGENTS_SECTIONS: readonly AgentsSection[] = ["agents", "rules", "quality"];
+export type AgentsSection = "agents" | "rules" | "quality" | "economics";
+export const AGENTS_SECTIONS: readonly AgentsSection[] = ["agents", "rules", "quality", "economics"];
 
 export interface View {
   page: Page;
@@ -103,6 +103,8 @@ const inEditable = (t: EventTarget | null): boolean => {
 export interface KeyboardHandlers {
   togglePalette: () => void;
   toggleChat: () => void;
+  /** `?` lists every shortcut. */
+  toggleHelp: () => void;
   closeAll: () => void;
   goPage: (page: Exclude<Page, "project">) => void;
   goTab: (tab: ProjectTab) => void;
@@ -139,6 +141,12 @@ export const useKeyboard = (h: KeyboardHandlers): boolean => {
         return;
       }
       if (e.metaKey || e.ctrlKey || e.altKey || inEditable(e.target)) return;
+      if (e.key === "?") {
+        e.preventDefault();
+        disarm();
+        h.toggleHelp();
+        return;
+      }
       const k = e.key.toLowerCase();
       if (armed) {
         const chord = CHORDS.find((c) => c.key === k);
